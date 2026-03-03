@@ -1,0 +1,27 @@
+spring:
+  application:
+    name: memory-box
+
+# LLM 配置
+llm:
+  api-key: ${OPENAI_API_KEY:your-api-key-here}
+  base-url: ${OPENAI_BASE_URL:https://api.openai.com/v1}
+  model-name: ${OPENAI_MODEL:gpt-4}
+  temperature: 0.7
+
+# 记忆管理配置
+memory:
+  base-path: .memory
+  max-slots: 100
+  days-unaccessed: 30
+  top-of-mind-limit: 15
+  recent-messages-limit: 40
+  async:
+    enabled: true
+    queue-capacity: 512
+    shutdown-timeout-seconds: 5
+
+# 定时任务配置
+scheduling:
+  enabled: true
+  nightly-extraction-cron: "0 0 2 * * ?"

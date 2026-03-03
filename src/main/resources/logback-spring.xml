@@ -1,0 +1,35 @@
+<configuration scan="true" scanPeriod="60 seconds">
+
+    <!-- 日志文件目录 -->
+    <property name="LOG_PATH" value="logs"/>
+    <property name="APP_NAME" value="memory-box"/>
+
+    <!-- 只写入文件，不输出到控制台，这样 CLI 终端就不会被日志打断 -->
+    <appender name="FILE" class="ch.qos.logback.core.rolling.RollingFileAppender">
+        <file>${LOG_PATH}/${APP_NAME}.log</file>
+
+        <rollingPolicy class="ch.qos.logback.core.rolling.TimeBasedRollingPolicy">
+            <!-- 每天一个文件，保留 30 天 -->
+            <fileNamePattern>${LOG_PATH}/${APP_NAME}.%d{yyyy-MM-dd}.log</fileNamePattern>
+            <maxHistory>30</maxHistory>
+        </rollingPolicy>
+
+        <encoder>
+            <pattern>%d{yyyy-MM-dd HH:mm:ss.SSS} %-5level [%thread] %logger{36} - %msg%n</pattern>
+            <charset>UTF-8</charset>
+        </encoder>
+    </appender>
+
+    <!-- 业务包单独配置（包括 MemoryBoxApplication 和所有 com.memsys.* 日志） -->
+    <logger name="com.memsys" level="INFO" additivity="false">
+        <appender-ref ref="FILE"/>
+    </logger>
+
+    <!-- Spring / 第三方库的日志 -->
+    <root level="WARN">
+        <appender-ref ref="FILE"/>
+    </root>
+
+</configuration>
+
+
