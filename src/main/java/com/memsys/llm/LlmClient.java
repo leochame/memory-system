@@ -1,17 +1,29 @@
 package com.memsys.llm;
 
+import com.memsys.llm.dto.ConversationSummariesResult;
+import com.memsys.llm.dto.ConversationSummaryItem;
+import com.memsys.llm.dto.ExplicitMemoryResult;
+import com.memsys.llm.dto.TopicItem;
+import com.memsys.llm.dto.TopicsResult;
+import com.memsys.llm.dto.UserInsightItem;
+import com.memsys.llm.dto.UserInsightsResult;
+import com.memsys.llm.schema.Schemas;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import dev.langchain4j.model.chat.request.ChatRequest;
+import dev.langchain4j.model.chat.request.ResponseFormat;
+import dev.langchain4j.model.chat.request.ResponseFormatType;
+import dev.langchain4j.model.chat.request.json.JsonSchema;
 import dev.langchain4j.data.message.AiMessage;
 import dev.langchain4j.data.message.ChatMessage;
 import dev.langchain4j.data.message.SystemMessage;
 import dev.langchain4j.data.message.UserMessage;
-import dev.langchain4j.model.chat.ChatLanguageModel;
 import dev.langchain4j.model.openai.OpenAiChatModel;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
+import java.time.LocalDate;
 import java.util.*;
 import java.util.stream.Collectors;
 
@@ -19,8 +31,8 @@ import java.util.stream.Collectors;
 @Component
 public class LlmClient {
 
-    private final ChatLanguageModel model;
-        private final ObjectMapper objectMapper = new ObjectMapper();
+    private final OpenAiChatModel model;
+    private final ObjectMapper objectMapper = new ObjectMapper();
 
     public LlmClient(
             @Value("${llm.api-key}") String apiKey,
@@ -31,6 +43,7 @@ public class LlmClient {
             .apiKey(apiKey)
             .baseUrl(baseUrl)
             .modelName(modelName)
+            .strictJsonSchema(true)
             .build();
         log.info("LLM client initialized with model: {}", modelName);
     }
@@ -54,6 +67,34 @@ public class LlmClient {
         } catch (Exception e) {
             log.error("Failed to chat with LLM", e);
             return "抱歉，我遇到了一些问题，请稍后再试。";
+        }
+    }
+
+    private <T> T chatWithJsonSchema(String systemPrompt,
+                                     List<ChatMessage> messages,
+                                     JsonSchema jsonSchema,
+                                     Class<T> clazz) {
+        List<ChatMessage> finalMessages = new ArrayList<>();
+        if (systemPrompt != null && !systemPrompt.isEmpty()) {
+            finalMessages.add(new SystemMessage(systemPrompt));
+        }
+        if (messages != null && !messages.isEmpty()) {
+            finalMessages.addAll(messages);
+        }
+
+        ChatRequest request = ChatRequest.builder()
+                .messages(finalMessages)
+                .responseFormat(ResponseFormat.builder()
+                        .type(ResponseFormatType.JSON)
+                        .jsonSchema(jsonSchema)
+                        .build())
+                .build();
+
+        String json = model.chat(request).aiMessage().text();
+        try {
+            return objectMapper.readValue(json, clazz);
+        } catch (Exception e) {
+            throw new RuntimeException("Failed to parse structured JSON response: " + json, e);
         }
     }
 
@@ -81,6 +122,41 @@ public class LlmClient {
     }
 
     public Map<String, Object> extractExplicitMemory(String userMessage) {
+        try {
+            String instruction = """
+                分析以下用户消息，判断是否包含需要记住的显式信息（如用户偏好、个人信息等）。
+                - 如果不包含，has_memory=false，其他字段填空字符串或任意合法枚举值。
+                - 如果包含，has_memory=true，并给出 slot_name/content/memory_type/source。
+                
+                用户消息：
+                %s
+                """.formatted(userMessage);
+
+            ExplicitMemoryResult parsed = chatWithJsonSchema(
+                    null,
+                    List.of(new UserMessage(instruction)),
+                    Schemas.explicitMemoryResult(),
+                    ExplicitMemoryResult.class
+            );
+
+            if (!parsed.has_memory()) {
+                return Map.of("has_memory", false);
+            }
+
+            Map<String, Object> result = new HashMap<>();
+            result.put("has_memory", true);
+            result.put("slot_name", Optional.ofNullable(parsed.slot_name()).orElse(""));
+            result.put("content", Optional.ofNullable(parsed.content()).orElse(""));
+            result.put("memory_type", Optional.ofNullable(parsed.memory_type()).orElse(""));
+            result.put("source", Optional.ofNullable(parsed.source()).orElse("explicit"));
+            return result;
+        } catch (Exception e) {
+            log.warn("Structured explicit memory extraction failed; falling back to legacy parsing", e);
+            return extractExplicitMemoryLegacy(userMessage);
+        }
+    }
+
+    private Map<String, Object> extractExplicitMemoryLegacy(String userMessage) {
         String prompt = """
             分析以下用户消息，判断是否包含需要记住的显式信息（如用户偏好、个人信息等）。
 
@@ -130,6 +206,52 @@ public class LlmClient {
     }
 
     public List<Map<String, Object>> summarizeConversations(List<Map<String, Object>> conversationHistory) {
+        try {
+            String historyText = conversationHistory.stream()
+                    .map(entry -> String.format("[%s] %s: %s",
+                            entry.get("timestamp"),
+                            entry.get("role"),
+                            entry.get("message")))
+                    .collect(Collectors.joining("\n"));
+
+            String month = LocalDate.now().toString().substring(0, 7).replace("-", "_");
+            String instruction = """
+                请对以下对话历史进行总结，提取关键主题和重要信息。
+                - 你可以返回多条摘要，每条一个独立的 slot_name。
+                - slot_name 建议使用 conversation_summary_%s 或类似稳定命名。
+                - items 允许为空数组。
+                
+                对话历史：
+                %s
+                """.formatted(month, historyText);
+
+            ConversationSummariesResult parsed = chatWithJsonSchema(
+                    null,
+                    List.of(new UserMessage(instruction)),
+                    Schemas.conversationSummariesResult(),
+                    ConversationSummariesResult.class
+            );
+
+            List<ConversationSummaryItem> items = parsed == null ? null : parsed.items();
+            if (items == null || items.isEmpty()) {
+                return summarizeConversationsLegacy(conversationHistory);
+            }
+
+            return items.stream()
+                    .map(item -> {
+                        Map<String, Object> m = new HashMap<>();
+                        m.put("slot_name", item.slot_name());
+                        m.put("content", item.content());
+                        return m;
+                    })
+                    .toList();
+        } catch (Exception e) {
+            log.warn("Structured conversation summarization failed; falling back to legacy parsing", e);
+            return summarizeConversationsLegacy(conversationHistory);
+        }
+    }
+
+    private List<Map<String, Object>> summarizeConversationsLegacy(List<Map<String, Object>> conversationHistory) {
         String historyText = conversationHistory.stream()
             .map(entry -> String.format("[%s] %s: %s",
                 entry.get("timestamp"),
@@ -176,6 +298,50 @@ public class LlmClient {
     }
 
     public List<Map<String, Object>> extractUserInsights(List<Map<String, Object>> conversationHistory) {
+        try {
+            String historyText = conversationHistory.stream()
+                    .limit(100)
+                    .map(entry -> String.format("%s: %s", entry.get("role"), entry.get("message")))
+                    .collect(Collectors.joining("\n"));
+
+            String instruction = """
+                从以下对话中提取用户的个人信息和偏好，构建用户档案条目。
+                - 每条信息一个独立槽位 slot_name
+                - confidence 必须是 low/medium/high
+                - items 允许为空数组
+                
+                对话历史：
+                %s
+                """.formatted(historyText);
+
+            UserInsightsResult parsed = chatWithJsonSchema(
+                    null,
+                    List.of(new UserMessage(instruction)),
+                    Schemas.userInsightsResult(),
+                    UserInsightsResult.class
+            );
+
+            List<UserInsightItem> items = parsed == null ? null : parsed.items();
+            if (items == null || items.isEmpty()) {
+                return List.of();
+            }
+
+            return items.stream()
+                    .map(item -> {
+                        Map<String, Object> m = new HashMap<>();
+                        m.put("slot_name", item.slot_name());
+                        m.put("content", item.content());
+                        m.put("confidence", item.confidence());
+                        return m;
+                    })
+                    .toList();
+        } catch (Exception e) {
+            log.warn("Structured user insight extraction failed; falling back to legacy parsing", e);
+            return extractUserInsightsLegacy(conversationHistory);
+        }
+    }
+
+    private List<Map<String, Object>> extractUserInsightsLegacy(List<Map<String, Object>> conversationHistory) {
         String historyText = conversationHistory.stream()
             .limit(100)
             .map(entry -> String.format("%s: %s", entry.get("role"), entry.get("message")))
@@ -218,6 +384,48 @@ public class LlmClient {
     }
 
     public List<Map<String, Object>> analyzeTopics(List<Map<String, Object>> conversationHistory) {
+        try {
+            String historyText = conversationHistory.stream()
+                    .limit(50)
+                    .map(entry -> String.format("%s: %s", entry.get("role"), entry.get("message")))
+                    .collect(Collectors.joining("\n"));
+
+            String instruction = """
+                分析以下对话，提取用户频繁讨论的主题和话题。
+                - 每个话题一个独立槽位 slot_name
+                - items 允许为空数组
+                
+                对话历史：
+                %s
+                """.formatted(historyText);
+
+            TopicsResult parsed = chatWithJsonSchema(
+                    null,
+                    List.of(new UserMessage(instruction)),
+                    Schemas.topicsResult(),
+                    TopicsResult.class
+            );
+
+            List<TopicItem> items = parsed == null ? null : parsed.items();
+            if (items == null || items.isEmpty()) {
+                return List.of();
+            }
+
+            return items.stream()
+                    .map(item -> {
+                        Map<String, Object> m = new HashMap<>();
+                        m.put("slot_name", item.slot_name());
+                        m.put("content", item.content());
+                        return m;
+                    })
+                    .toList();
+        } catch (Exception e) {
+            log.warn("Structured topic analysis failed; falling back to legacy parsing", e);
+            return analyzeTopicsLegacy(conversationHistory);
+        }
+    }
+
+    private List<Map<String, Object>> analyzeTopicsLegacy(List<Map<String, Object>> conversationHistory) {
         String historyText = conversationHistory.stream()
             .limit(50)
             .map(entry -> String.format("%s: %s", entry.get("role"), entry.get("message")))
