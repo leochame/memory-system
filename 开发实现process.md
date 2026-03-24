@@ -291,6 +291,23 @@
   - 修改 `src/main/java/com/memsys/cli/ConversationCli.java` — buildSystemPromptWithEvidence 中读取 conversationSummaryService.getRecentSummaries(3)，格式化为 Markdown 文本传递给 SystemPromptBuilder；当有摘要时跳过 olderUserMessages 实现 prompt 压缩
 - 实际结果：当 session_summaries.jsonl 中有摘要记录时，system prompt 第 4 节改为展示压缩后的摘要文本（含时间范围和话题关键词），同时跳过 olderUserMessages（原始第 11-40 轮用户消息），prompt 长度显著下降；无摘要时行为不变，兼容向后
 
+#### 迭代记录 - 2026-03-25 00:00
+
+- 增强目标：新增 `/memory-timeline` 和 `/memory-report` 展示命令，让记忆系统的全貌和演变可在 CLI 中直观展示，满足答辩场景展示需求
+- 涉及文件：修改 `CliRunner.java`（注入 ConversationSummaryService + 新增两个命令路由和展示方法）
+- 实现方案：
+  1. CliRunner 注入 ConversationSummaryService
+  2. `/memory-timeline` — 时间线视图：展示记忆系统的事件流（最近对话、摘要生成、记忆提取、Evidence Trace）
+  3. `/memory-report` — 记忆报告视图：汇总展示当前记忆系统状态（各层状态、记忆数量、摘要数量、RAG 状态等）
+  4. 在 handleCommand switch 和 buildCommandDescriptions 中注册
+- 状态：已完成
+- 实际修改文件：
+  - 修改 `src/main/java/com/memsys/cli/CliRunner.java` — 注入 ConversationSummaryService；新增 `/memory-timeline` 命令（时间线视图：展示摘要事件流 + Evidence Trace + 会话状态）；新增 `/memory-report` 命令（综合报告：L1-L4 各层状态 + 摘要数量 + Prompt 压缩状态 + 记忆反思状态）；注册命令路由和描述
+- 实际结果：
+  - `/memory-timeline` 可展示最近 5 条会话摘要的时间线（含轮次范围、时间段、摘要内容、话题关键词）+ 最近一轮 Evidence Trace 概览 + 当前会话轮次
+  - `/memory-report` 可展示记忆系统全貌：L1 短期记忆轮次、L2 全局开关状态、L3 记忆槽位数和画像状态、L4a Skill 列表、L4b RAG 索引统计、会话摘要数和 Prompt 压缩状态、记忆反思运行状态
+  - 两个命令可直接用于答辩现场演示，展示系统能力全景
+
 ---
 
 ### Phase 9 - 记忆治理、主动服务与多用户统一身份（计划中）
@@ -365,6 +382,7 @@
 13. Phase 7 Memory Evidence Trace 已落地：`MemoryEvidenceTrace` 记录每轮证据使用，`/memory-debug` 命令可展示反思结果与证据加载详情。
 14. Phase 8 会话摘要基础已落地：`ConversationSummaryService` + LLM 结构化摘要 + `session_summaries.jsonl` 落盘 + 轮次阈值触发，支持对话达到 20 轮时自动生成摘要。
 15. Phase 8 Prompt 摘要压缩已落地：当有会话摘要时，system prompt 用摘要替代 olderUserMessages 原始消息注入，大幅降低 prompt 长度；无摘要时行为不变。
+16. Phase 8 场景化展示命令已落地：`/memory-timeline` 展示记忆事件时间线，`/memory-report` 展示记忆系统全层状态报告，可直接用于答辩场景展示。
 
 ---
 

@@ -2,6 +2,7 @@ package com.memsys.cli;
 
 import com.memsys.memory.model.Memory;
 import com.memsys.memory.model.MemoryEvidenceTrace;
+import com.memsys.memory.ConversationSummaryService;
 import com.memsys.memory.MemoryExtractor;
 import com.memsys.memory.MemoryManager;
 import com.memsys.memory.MemoryWriteService;
@@ -98,6 +99,7 @@ public class CliRunner implements CommandLineRunner {
     private final SkillService skillService;
     private final LlmExtractionService llmExtractionService;
     private final ScheduledTaskService scheduledTaskService;
+    private final ConversationSummaryService conversationSummaryService;
 
     @Value("${memory.max-slots:100}")
     private int maxSlots;
@@ -133,7 +135,8 @@ public class CliRunner implements CommandLineRunner {
             RagService ragService,
             SkillService skillService,
             LlmExtractionService llmExtractionService,
-            ScheduledTaskService scheduledTaskService
+            ScheduledTaskService scheduledTaskService,
+            ConversationSummaryService conversationSummaryService
     ) {
         this.conversationCli = conversationCli;
         this.memoryManager = memoryManager;
@@ -144,6 +147,7 @@ public class CliRunner implements CommandLineRunner {
         this.skillService = skillService;
         this.llmExtractionService = llmExtractionService;
         this.scheduledTaskService = scheduledTaskService;
+        this.conversationSummaryService = conversationSummaryService;
     }
 
     @Override
@@ -313,6 +317,8 @@ public class CliRunner implements CommandLineRunner {
             case "/examples" -> showExamples();
             case "/example-extract" -> triggerExampleExtraction();
             case "/memory-debug" -> showMemoryDebug();
+            case "/memory-timeline" -> showMemoryTimeline();
+            case "/memory-report" -> showMemoryReport();
             case "/exit", "/quit" -> {
                 printSystem("会话结束。");
                 return false;
@@ -843,6 +849,157 @@ public class CliRunner implements CommandLineRunner {
         printSystem(trace.buildDisplaySummary());
     }
 
+    // ========== 记忆系统展示命令（Phase 8） ==========
+
+    private void showMemoryTimeline() {
+        StringBuilder sb = new StringBuilder();
+        sb.append("╔══════════════════════════════════════════╗\n");
+        sb.append("║       📋 Memory System Timeline          ║\n");
+        sb.append("╚══════════════════════════════════════════╝\n\n");
+
+        // 1. 会话摘要时间线
+        List<Map<String, Object>> summaries = conversationSummaryService.getRecentSummaries(5);
+        sb.append("── 会话摘要 (Session Summaries) ──\n");
+        if (summaries.isEmpty()) {
+            sb.append("  (暂无摘要记录，对话达到 20 轮后自动生成)\n");
+        } else {
+            for (int i = 0; i < summaries.size(); i++) {
+                Map<String, Object> s = summaries.get(i);
+                String timeRange = String.valueOf(s.getOrDefault("time_range", "unknown"));
+                String summary = String.valueOf(s.getOrDefault("summary", ""));
+                Object topicsObj = s.get("key_topics");
+                String topics = formatTopics(topicsObj);
+                int fromTurn = toInt(s.get("from_turn"));
+                int toTurn = toInt(s.get("to_turn"));
+
+                sb.append(String.format("  %s [轮次 %d-%d] %s\n", timelineMarker(i, summaries.size()), fromTurn, toTurn, timeRange));
+                if (summary.length() > 120) {
+                    summary = summary.substring(0, 120) + "...";
+                }
+                sb.append("    ").append(summary).append("\n");
+                if (!topics.isEmpty()) {
+                    sb.append("    话题: ").append(topics).append("\n");
+                }
+                sb.append("\n");
+            }
+        }
+
+        // 2. 最近的 Memory Evidence Trace
+        sb.append("── 最近记忆反思 (Last Evidence Trace) ──\n");
+        MemoryEvidenceTrace trace = conversationCli.getLastEvidenceTrace();
+        if (trace == null) {
+            sb.append("  (暂无反思记录)\n");
+        } else {
+            sb.append(String.format("  需要记忆: %s | 理由: %s\n",
+                    trace.reflection().needs_memory() ? "是" : "否",
+                    trace.reflection().reason()));
+            if (trace.memoryLoaded()) {
+                sb.append(String.format("  TopOfMind: %d 条 | RAG: %d 条 | 画像: %s | Example: %s | Skill: %d 个\n",
+                        trace.topOfMindCount(), trace.ragResultCount(),
+                        trace.userInsightUsed() ? "✓" : "✗",
+                        trace.examplesUsed() ? "✓" : "✗",
+                        trace.skillsAvailable()));
+            }
+        }
+
+        // 3. 当前会话状态
+        sb.append("\n── 当前会话 ──\n");
+        sb.append(String.format("  累计轮次: %d\n", conversationSummaryService.getCurrentTurnCount()));
+
+        printSystem(sb.toString());
+    }
+
+    private void showMemoryReport() {
+        StringBuilder sb = new StringBuilder();
+        sb.append("╔══════════════════════════════════════════╗\n");
+        sb.append("║       📊 Memory System Report            ║\n");
+        sb.append("╚══════════════════════════════════════════╝\n\n");
+
+        // L1 短期记忆
+        sb.append("▸ L1 短期记忆 (Short-term)\n");
+        sb.append(String.format("  当前会话轮次: %d\n", conversationSummaryService.getCurrentTurnCount()));
+        List<Map<String, Object>> recentMsgs = storage.getRecentMessages(999);
+        sb.append(String.format("  recent_user_messages: %d 条\n\n", recentMsgs.size()));
+
+        // L2 元数据
+        sb.append("▸ L2 元数据 (Metadata)\n");
+        Map<String, Object> metadata = storage.readMetadata();
+        @SuppressWarnings("unchecked")
+        Map<String, Object> globalControls = (Map<String, Object>) metadata.get("global_controls");
+        boolean useMem = globalControls == null || (boolean) globalControls.getOrDefault("use_saved_memories", true);
+        boolean useHist = globalControls == null || (boolean) globalControls.getOrDefault("use_chat_history", true);
+        sb.append(String.format("  use_saved_memories: %s | use_chat_history: %s\n\n", useMem ? "ON" : "OFF", useHist ? "ON" : "OFF"));
+
+        // L3 用户洞察
+        sb.append("▸ L3 用户洞察 (User Insights)\n");
+        Map<String, Memory> memories = memoryManager.listAllMemories();
+        sb.append(String.format("  记忆槽位: %d 个\n", memories.size()));
+        String narrative = storage.readUserInsightsNarrative();
+        boolean hasNarrative = narrative != null && !narrative.isBlank() && !narrative.contains("还没有形成稳定");
+        sb.append(String.format("  用户画像: %s\n\n", hasNarrative ? "已形成" : "尚未形成"));
+
+        // L4a Skill
+        sb.append("▸ L4a 技能 (Skills)\n");
+        List<SkillFile> skills = skillService.listSkills();
+        sb.append(String.format("  可用 Skill: %d 个\n", skills.size()));
+        if (!skills.isEmpty()) {
+            for (SkillFile sf : skills) {
+                sb.append("    - ").append(sf.name()).append("\n");
+            }
+        }
+        sb.append("\n");
+
+        // L4b RAG / Example
+        sb.append("▸ L4b 语义检索 (RAG/Example)\n");
+        sb.append(String.format("  RAG 启用: %s\n", ragEnabled ? "是" : "否"));
+        if (ragEnabled) {
+            try {
+                Map<String, Object> stats = ragService.getStatistics();
+                sb.append(String.format("  索引文档: %s 个 | 向量维度: %s\n",
+                        stats.getOrDefault("total_documents", "?"),
+                        stats.getOrDefault("vector_dimension", "?")));
+            } catch (Exception e) {
+                sb.append("  (无法获取 RAG 统计)\n");
+            }
+        }
+        sb.append("\n");
+
+        // 会话摘要
+        sb.append("▸ 会话摘要 (Session Summaries)\n");
+        List<Map<String, Object>> summaries = conversationSummaryService.getRecentSummaries(0);
+        sb.append(String.format("  历史摘要: %d 条\n", summaries.size()));
+        sb.append(String.format("  Prompt 压缩: %s\n\n", summaries.isEmpty() ? "未激活" : "已激活（摘要替代原始消息）"));
+
+        // Memory Reflection
+        sb.append("▸ 记忆反思 (Memory Reflection)\n");
+        MemoryEvidenceTrace trace = conversationCli.getLastEvidenceTrace();
+        sb.append(String.format("  状态: %s\n", trace != null ? "已运行" : "尚未运行"));
+        if (trace != null) {
+            sb.append(String.format("  最近判断: %s\n", trace.reflection().needs_memory() ? "需要记忆" : "不需要记忆"));
+        }
+
+        printSystem(sb.toString());
+    }
+
+    private String timelineMarker(int index, int total) {
+        if (index == 0) return "┌";
+        if (index == total - 1) return "└";
+        return "├";
+    }
+
+    @SuppressWarnings("unchecked")
+    private String formatTopics(Object topicsObj) {
+        if (topicsObj instanceof List<?> list) {
+            return list.stream().map(String::valueOf).collect(java.util.stream.Collectors.joining(", "));
+        }
+        return "";
+    }
+
+    private int toInt(Object obj) {
+        if (obj instanceof Number n) return n.intValue();
+        try { return Integer.parseInt(String.valueOf(obj)); } catch (Exception e) { return 0; }
+    }
+
     // ========== RAG 相关 ==========
 
     private void searchMemories(String query) {
@@ -1255,6 +1412,8 @@ public class CliRunner implements CommandLineRunner {
         commands.put("/examples", "查看 example 文档数量");
         commands.put("/example-extract", "提取并索引 examples");
         commands.put("/memory-debug", "展示最近一轮记忆反思与证据使用");
+        commands.put("/memory-timeline", "记忆系统时间线视图");
+        commands.put("/memory-report", "记忆系统综合状态报告");
         commands.put("/exit", "退出会话");
         commands.put("/quit", "退出会话");
         return Collections.unmodifiableMap(commands);
