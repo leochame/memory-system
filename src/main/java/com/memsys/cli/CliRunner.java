@@ -319,6 +319,7 @@ public class CliRunner implements CommandLineRunner {
             case "/memory-debug" -> showMemoryDebug();
             case "/memory-timeline" -> showMemoryTimeline();
             case "/memory-report" -> showMemoryReport();
+            case "/memory-scenes" -> showMemoryScenes();
             case "/exit", "/quit" -> {
                 printSystem("会话结束。");
                 return false;
@@ -981,6 +982,103 @@ public class CliRunner implements CommandLineRunner {
         printSystem(sb.toString());
     }
 
+    private void showMemoryScenes() {
+        StringBuilder sb = new StringBuilder();
+        sb.append("╔══════════════════════════════════════════╗\n");
+        sb.append("║       🎬 Memory Scenes (场景视图)         ║\n");
+        sb.append("╚══════════════════════════════════════════╝\n\n");
+
+        // 读取所有摘要
+        List<Map<String, Object>> summaries = conversationSummaryService.getRecentSummaries(0);
+        if (summaries.isEmpty()) {
+            sb.append("  (暂无会话摘要，无法生成场景视图)\n");
+            sb.append("  提示：对话达到 20 轮或主题切换时会自动生成摘要\n");
+            printSystem(sb.toString());
+            return;
+        }
+
+        // 按话题聚类：收集所有出现过的话题 -> 关联的摘要索引
+        Map<String, List<Integer>> topicToSummaryIndices = new LinkedHashMap<>();
+        for (int i = 0; i < summaries.size(); i++) {
+            Map<String, Object> s = summaries.get(i);
+            Object topicsObj = s.get("key_topics");
+            List<String> topics = extractTopicList(topicsObj);
+
+            // 如果是主题切换触发的，也把 previous_topic / current_topic 作为话题
+            String trigger = String.valueOf(s.getOrDefault("trigger", ""));
+            if ("topic_shift".equals(trigger)) {
+                String prevTopic = String.valueOf(s.getOrDefault("previous_topic", "")).trim();
+                String currTopic = String.valueOf(s.getOrDefault("current_topic", "")).trim();
+                if (!prevTopic.isEmpty()) topics.add(prevTopic);
+                if (!currTopic.isEmpty()) topics.add(currTopic);
+            }
+
+            if (topics.isEmpty()) {
+                topics = List.of("其他");
+            }
+            for (String topic : topics) {
+                String normalizedTopic = topic.trim().toLowerCase();
+                if (normalizedTopic.isEmpty()) continue;
+                topicToSummaryIndices.computeIfAbsent(topic.trim(), k -> new ArrayList<>()).add(i);
+            }
+        }
+
+        // 按话题出现次数降序排列
+        List<Map.Entry<String, List<Integer>>> sortedTopics = new ArrayList<>(topicToSummaryIndices.entrySet());
+        sortedTopics.sort((a, b) -> b.getValue().size() - a.getValue().size());
+
+        sb.append(String.format("  共 %d 条摘要，归入 %d 个话题场景\n\n", summaries.size(), sortedTopics.size()));
+
+        int sceneNum = 1;
+        for (Map.Entry<String, List<Integer>> entry : sortedTopics) {
+            String topic = entry.getKey();
+            List<Integer> indices = entry.getValue();
+
+            sb.append(String.format("── 场景 %d: %s (%d 条摘要) ──\n", sceneNum, topic, indices.size()));
+
+            for (int idx : indices) {
+                Map<String, Object> s = summaries.get(idx);
+                String timeRange = String.valueOf(s.getOrDefault("time_range", "unknown"));
+                String summary = String.valueOf(s.getOrDefault("summary", ""));
+                String triggerType = String.valueOf(s.getOrDefault("trigger", "turn_threshold"));
+                int fromTurn = toInt(s.get("from_turn"));
+                int toTurn = toInt(s.get("to_turn"));
+
+                String triggerLabel = "topic_shift".equals(triggerType) ? "主题切换" : "轮次阈值";
+
+                sb.append(String.format("  [轮次 %d-%d] %s (触发: %s)\n", fromTurn, toTurn, timeRange, triggerLabel));
+                if (summary.length() > 150) {
+                    summary = summary.substring(0, 150) + "...";
+                }
+                sb.append("    ").append(summary).append("\n\n");
+            }
+            sceneNum++;
+        }
+
+        // 总览统计
+        long topicShiftCount = summaries.stream()
+                .filter(s -> "topic_shift".equals(String.valueOf(s.getOrDefault("trigger", ""))))
+                .count();
+        long turnThresholdCount = summaries.size() - topicShiftCount;
+        sb.append("── 统计 ──\n");
+        sb.append(String.format("  轮次阈值触发: %d 条 | 主题切换触发: %d 条\n", turnThresholdCount, topicShiftCount));
+        sb.append(String.format("  当前累计轮次: %d\n", conversationSummaryService.getCurrentTurnCount()));
+
+        printSystem(sb.toString());
+    }
+
+    @SuppressWarnings("unchecked")
+    private List<String> extractTopicList(Object topicsObj) {
+        List<String> result = new ArrayList<>();
+        if (topicsObj instanceof List<?> topicList) {
+            for (Object item : topicList) {
+                String s = String.valueOf(item).trim();
+                if (!s.isEmpty()) result.add(s);
+            }
+        }
+        return result;
+    }
+
     private String timelineMarker(int index, int total) {
         if (index == 0) return "┌";
         if (index == total - 1) return "└";
@@ -1414,6 +1512,7 @@ public class CliRunner implements CommandLineRunner {
         commands.put("/memory-debug", "展示最近一轮记忆反思与证据使用");
         commands.put("/memory-timeline", "记忆系统时间线视图");
         commands.put("/memory-report", "记忆系统综合状态报告");
+        commands.put("/memory-scenes", "按话题/场景分组展示记忆摘要");
         commands.put("/exit", "退出会话");
         commands.put("/quit", "退出会话");
         return Collections.unmodifiableMap(commands);
