@@ -308,6 +308,25 @@
   - `/memory-report` 可展示记忆系统全貌：L1 短期记忆轮次、L2 全局开关状态、L3 记忆槽位数和画像状态、L4a Skill 列表、L4b RAG 索引统计、会话摘要数和 Prompt 压缩状态、记忆反思运行状态
   - 两个命令可直接用于答辩现场演示，展示系统能力全景
 
+#### 迭代记录 - 2026-03-25 01:00
+
+- 增强目标：长对话主题切换时自动检测并生成 topic summary，补齐 Phase 8 交付项 #2
+- 涉及文件：修改 `LlmDtos.java`（新增 TopicShiftDetectionResult DTO）、修改 `Schemas.java`（新增 topicShiftDetectionResult Schema）、修改 `LlmExtractionService.java`（新增 detectTopicShift 方法）、修改 `ConversationSummaryService.java`（新增主题切换检测与触发逻辑）、修改 `ConversationCli.java`（在每轮对话后增加主题切换检测触发）
+- 实现方案：
+  1. 新增 TopicShiftDetectionResult DTO（topic_shifted, previous_topic, current_topic）
+  2. 在 Schemas 中新增对应 JSON Schema
+  3. LlmExtractionService 新增 detectTopicShift(recentContext, currentMessage) 方法
+  4. ConversationSummaryService 新增 checkAndHandleTopicShift() 方法，检测到主题切换时触发前一段话题的摘要生成
+  5. ConversationCli 在每轮对话后异步调用主题切换检测
+- 状态：已完成
+- 实际修改文件：
+  - 修改 `src/main/java/com/memsys/llm/LlmDtos.java` — 新增 TopicShiftDetectionResult DTO（topic_shifted, previous_topic, current_topic）
+  - 修改 `src/main/java/com/memsys/llm/schema/Schemas.java` — 新增 topicShiftDetectionResult() JSON Schema
+  - 修改 `src/main/java/com/memsys/llm/LlmExtractionService.java` — 新增 detectTopicShift(recentContext, currentMessage) 方法，通过 LLM 结构化判断主题是否切换
+  - 修改 `src/main/java/com/memsys/memory/ConversationSummaryService.java` — 新增 checkTopicShiftAndSummarize() 方法，检测到主题切换时自动生成前一段话题的摘要；落盘记录新增 trigger/previous_topic/current_topic 字段区分触发来源；新增最低轮次保护（TOPIC_SHIFT_MIN_TURNS=3）
+  - 修改 `src/main/java/com/memsys/cli/ConversationCli.java` — 每轮对话后异步调用主题切换检测，与轮次阈值触发互补
+- 实际结果：系统在每轮对话完成后异步检测主题切换，当检测到显著话题转变时自动生成前一段话题的摘要并落盘；摘要记录中标注触发来源（topic_shift/turn_threshold）和前后话题名称；前 3 轮不检测，避免新会话初期频繁触发；检测失败不阻断主对话链路
+
 ---
 
 ### Phase 9 - 记忆治理、主动服务与多用户统一身份（计划中）
@@ -383,6 +402,7 @@
 14. Phase 8 会话摘要基础已落地：`ConversationSummaryService` + LLM 结构化摘要 + `session_summaries.jsonl` 落盘 + 轮次阈值触发，支持对话达到 20 轮时自动生成摘要。
 15. Phase 8 Prompt 摘要压缩已落地：当有会话摘要时，system prompt 用摘要替代 olderUserMessages 原始消息注入，大幅降低 prompt 长度；无摘要时行为不变。
 16. Phase 8 场景化展示命令已落地：`/memory-timeline` 展示记忆事件时间线，`/memory-report` 展示记忆系统全层状态报告，可直接用于答辩场景展示。
+17. Phase 8 主题切换检测已落地：每轮对话后异步检测主题是否切换，切换时自动生成前一段话题摘要；摘要落盘记录包含触发来源（topic_shift/turn_threshold）和前后话题名称，与轮次阈值触发互补。
 
 ---
 

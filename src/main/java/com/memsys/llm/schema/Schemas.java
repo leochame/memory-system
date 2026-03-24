@@ -165,6 +165,24 @@ public final class Schemas {
                 .build();
     }
 
+    public static JsonSchema topicShiftDetectionResult() {
+        Map<String, JsonSchemaElement> props = new LinkedHashMap<>();
+        props.put("topic_shifted", JsonBooleanSchema.builder()
+                .description("Whether the current message indicates a significant topic shift from the recent conversation context")
+                .build());
+        props.put("previous_topic", JsonStringSchema.builder()
+                .description("A short phrase describing the previous conversation topic (empty if no shift)")
+                .build());
+        props.put("current_topic", JsonStringSchema.builder()
+                .description("A short phrase describing the new topic the user is shifting to (empty if no shift)")
+                .build());
+
+        return JsonSchema.builder()
+                .name("TopicShiftDetectionResult")
+                .rootElement(strictObject(props))
+                .build();
+    }
+
     // ========== 工具方法 ==========
 
     static JsonObjectSchema itemsWrapper(Map<String, JsonSchemaElement> itemProps, String description) {

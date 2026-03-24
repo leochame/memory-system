@@ -83,4 +83,15 @@ public final class LlmDtos {
             String time_range
     ) {
     }
+
+    /**
+     * 主题切换检测结构化输出：判断当前消息是否标志着对话主题的切换。
+     * Phase 8 #2 — 长对话主题切换时生成 topic summary。
+     */
+    public record TopicShiftDetectionResult(
+            boolean topic_shifted,
+            String previous_topic,
+            String current_topic
+    ) {
+    }
 }

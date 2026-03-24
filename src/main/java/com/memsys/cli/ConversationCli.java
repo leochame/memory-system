@@ -197,6 +197,30 @@ public class ConversationCli {
             });
         }
 
+        // Phase 8 #2: 主题切换检测 — 即使未达轮次阈值，主题切换时也生成摘要
+        if (useChatHistory) {
+            final String topicShiftContext = buildRecentContextSummary(
+                    recentTurns.stream()
+                            .map(turn -> {
+                                String role = (String) turn.get("role");
+                                String content = (String) turn.get("message");
+                                if ("assistant".equals(role)) {
+                                    return (ChatMessage) new AiMessage(content);
+                                }
+                                return (ChatMessage) new UserMessage(content);
+                            })
+                            .collect(Collectors.toCollection(ArrayList::new)));
+            final String topicShiftMessage = userMessage;
+            memoryAsync.submit("detect_topic_shift", () -> {
+                String summary = conversationSummaryService.checkTopicShiftAndSummarize(
+                        topicShiftContext, topicShiftMessage);
+                if (summary != null) {
+                    log.info("Topic-shift summary generated at turn {}",
+                            conversationSummaryService.getCurrentTurnCount());
+                }
+            });
+        }
+
         return decorateResponseWithTaskSignals(response, dueTaskNotifications);
     }
 

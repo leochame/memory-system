@@ -1,6 +1,7 @@
 package com.memsys.memory;
 
 import com.memsys.llm.LlmDtos.ConversationSummaryResult;
+import com.memsys.llm.LlmDtos.TopicShiftDetectionResult;
 import com.memsys.llm.LlmExtractionService;
 import com.memsys.memory.storage.MemoryStorage;
 import lombok.extern.slf4j.Slf4j;
@@ -17,7 +18,11 @@ import java.util.stream.Collectors;
 /**
  * Conversation Summary Service — Phase 8 核心组件。
  * <p>
- * 负责在对话达到轮次阈值时自动生成摘要，并落盘到 session_summaries.jsonl。
+ * 负责在以下两种条件下自动生成摘要并落盘到 session_summaries.jsonl：
+ * <ul>
+ *   <li>对话达到轮次阈值（如 20 轮）</li>
+ *   <li>检测到对话主题发生显著切换</li>
+ * </ul>
  * <p>
  * 设计原则：
  * <ul>
@@ -34,11 +39,17 @@ public class ConversationSummaryService {
     private final MemoryStorage storage;
     private final int summaryThreshold;
 
+    /** 主题切换检测至少需要的最低轮次（避免在前几轮频繁触发） */
+    private static final int TOPIC_SHIFT_MIN_TURNS = 3;
+
     /** 当前会话内的对话轮次计数器 */
     private final AtomicInteger turnCounter = new AtomicInteger(0);
 
     /** 上次生成摘要时的轮次 */
     private volatile int lastSummarizedAtTurn = 0;
+
+    /** 最近一次检测到的主题切换结果，供展示使用 */
+    private volatile TopicShiftDetectionResult lastTopicShiftResult = null;
 
     public ConversationSummaryService(
             LlmExtractionService extractionService,
@@ -67,6 +78,56 @@ public class ConversationSummaryService {
      */
     public int getCurrentTurnCount() {
         return turnCounter.get();
+    }
+
+    /**
+     * 获取最近一次主题切换检测结果。
+     */
+    public TopicShiftDetectionResult getLastTopicShiftResult() {
+        return lastTopicShiftResult;
+    }
+
+    /**
+     * 检测当前消息是否触发了主题切换，若切换则生成前一段话题的摘要。
+     * Phase 8 #2 — 长对话主题切换时生成 topic summary。
+     *
+     * @param recentContext 最近几轮对话的上下文文本
+     * @param currentMessage 当前用户消息
+     * @return 生成的摘要文本（如有），null 表示未检测到切换或摘要生成失败
+     */
+    public String checkTopicShiftAndSummarize(String recentContext, String currentMessage) {
+        try {
+            int currentTurn = turnCounter.get();
+            int turnsSinceLastSummary = currentTurn - lastSummarizedAtTurn;
+
+            // 最低轮次保护：前几轮不做主题切换检测
+            if (turnsSinceLastSummary < TOPIC_SHIFT_MIN_TURNS) {
+                return null;
+            }
+
+            // 上下文为空时不检测
+            if (recentContext == null || recentContext.isBlank()) {
+                return null;
+            }
+
+            TopicShiftDetectionResult detection = extractionService.detectTopicShift(recentContext, currentMessage);
+            this.lastTopicShiftResult = detection;
+
+            if (detection == null || !detection.topic_shifted()) {
+                log.debug("No topic shift detected at turn {}", currentTurn);
+                return null;
+            }
+
+            log.info("Topic shift detected at turn {}: '{}' -> '{}'",
+                    currentTurn, detection.previous_topic(), detection.current_topic());
+
+            // 生成前一段话题的摘要
+            return generateAndPersistSummary();
+
+        } catch (Exception e) {
+            log.warn("Topic shift detection and summarization failed", e);
+            return null;
+        }
     }
 
     /**
@@ -120,11 +181,22 @@ public class ConversationSummaryService {
             record.put("from_turn", lastSummarizedAtTurn + 1);
             record.put("to_turn", currentTurn);
 
+            // 如果是主题切换触发的，记录触发原因
+            TopicShiftDetectionResult shiftResult = this.lastTopicShiftResult;
+            if (shiftResult != null && shiftResult.topic_shifted()) {
+                record.put("trigger", "topic_shift");
+                record.put("previous_topic", shiftResult.previous_topic());
+                record.put("current_topic", shiftResult.current_topic());
+            } else {
+                record.put("trigger", "turn_threshold");
+            }
+
             storage.appendSessionSummary(record);
             lastSummarizedAtTurn = currentTurn;
 
-            log.info("Session summary generated: turns {}-{}, topics={}",
-                    record.get("from_turn"), record.get("to_turn"), result.key_topics());
+            log.info("Session summary generated: turns {}-{}, trigger={}, topics={}",
+                    record.get("from_turn"), record.get("to_turn"),
+                    record.get("trigger"), result.key_topics());
 
             return result.summary();
 

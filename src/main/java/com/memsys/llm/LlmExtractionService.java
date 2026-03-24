@@ -376,4 +376,49 @@ public class LlmExtractionService {
             return null;
         }
     }
+
+    // ========== 主题切换检测 ==========
+
+    /**
+     * 检测当前用户消息是否标志着对话主题的显著切换。
+     * Phase 8 #2 — 长对话主题切换时生成 topic summary。
+     *
+     * @param recentContext 最近几轮对话的上下文文本
+     * @param currentMessage 当前用户消息
+     * @return 检测结果，失败时返回 null
+     */
+    public LlmDtos.TopicShiftDetectionResult detectTopicShift(String recentContext, String currentMessage) {
+        try {
+            String instruction = """
+                你是一个对话主题切换检测器。请判断用户的当前消息是否标志着对话主题发生了显著切换。
+
+                判断标准：
+                - "显著切换"是指用户从一个话题完全转向了另一个不相关的话题
+                - 同一话题下的深入追问、细节补充、修正不算切换
+                - 用户打招呼、闲聊、表达感谢后转向新话题算切换
+                - 如果最近上下文为空（新对话开始），不算切换
+
+                最近对话上下文：
+                %s
+
+                当前用户消息：
+                %s
+
+                返回结果：
+                - topic_shifted: 是否发生了显著主题切换
+                - previous_topic: 如果切换了，简短描述之前的话题（1-10个字）；没有切换填空字符串
+                - current_topic: 如果切换了，简短描述当前新话题（1-10个字）；没有切换填空字符串
+                """.formatted(recentContext, currentMessage);
+
+            return llmClient.chatWithJsonSchema(
+                    null,
+                    List.of(new UserMessage(instruction)),
+                    Schemas.topicShiftDetectionResult(),
+                    LlmDtos.TopicShiftDetectionResult.class
+            );
+        } catch (Exception e) {
+            log.warn("Topic shift detection failed", e);
+            return null;
+        }
+    }
 }
