@@ -202,6 +202,30 @@ public class MemoryStorage {
         }
     }
 
+    /**
+     * 读取所有待处理的显式记忆（包括冲突记忆）。
+     * Phase 9 治理功能 — 支持 /memory-governance 命令展示。
+     */
+    public List<Map<String, Object>> readPendingExplicitMemories() {
+        List<Map<String, Object>> results = new ArrayList<>();
+        try {
+            Path filePath = basePath.resolve("pending_explicit_memories.jsonl");
+            if (!Files.exists(filePath)) {
+                return results;
+            }
+            List<String> lines = Files.readAllLines(filePath);
+            for (String line : lines) {
+                if (line.isBlank()) continue;
+                @SuppressWarnings("unchecked")
+                Map<String, Object> record = objectMapper.readValue(line, Map.class);
+                results.add(record);
+            }
+        } catch (IOException e) {
+            log.error("Failed to read pending explicit memories", e);
+        }
+        return results;
+    }
+
     // ========== scheduled_tasks.json 操作 ==========
 
     public List<ScheduledTask> readScheduledTasks() {

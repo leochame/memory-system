@@ -320,6 +320,7 @@ public class CliRunner implements CommandLineRunner {
             case "/memory-timeline" -> showMemoryTimeline();
             case "/memory-report" -> showMemoryReport();
             case "/memory-scenes" -> showMemoryScenes();
+            case "/memory-governance" -> showMemoryGovernance();
             case "/exit", "/quit" -> {
                 printSystem("会话结束。");
                 return false;
@@ -937,7 +938,14 @@ public class CliRunner implements CommandLineRunner {
         sb.append(String.format("  记忆槽位: %d 个\n", memories.size()));
         String narrative = storage.readUserInsightsNarrative();
         boolean hasNarrative = narrative != null && !narrative.isBlank() && !narrative.contains("还没有形成稳定");
-        sb.append(String.format("  用户画像: %s\n\n", hasNarrative ? "已形成" : "尚未形成"));
+        sb.append(String.format("  用户画像: %s\n", hasNarrative ? "已形成" : "尚未形成"));
+        // 治理摘要
+        List<Map<String, Object>> pendingMems = storage.readPendingExplicitMemories();
+        long conflictMems = pendingMems.stream()
+                .filter(r -> "CONFLICT".equals(r.get("status")))
+                .count();
+        sb.append(String.format("  治理: 待处理 %d 条 (冲突 %d 条) — /memory-governance 查看详情\n\n",
+                pendingMems.size(), conflictMems));
 
         // L4a Skill
         sb.append("▸ L4a 技能 (Skills)\n");
@@ -980,6 +988,101 @@ public class CliRunner implements CommandLineRunner {
         }
 
         printSystem(sb.toString());
+    }
+
+    /**
+     * /memory-governance — 记忆治理状态展示。
+     * Phase 9 #1：展示记忆的治理元数据（状态分布、冲突待处理、验证信息）。
+     */
+    private void showMemoryGovernance() {
+        StringBuilder sb = new StringBuilder();
+        sb.append("╔══════════════════════════════════════════╗\n");
+        sb.append("║       🛡️ Memory Governance (记忆治理)     ║\n");
+        sb.append("╚══════════════════════════════════════════╝\n\n");
+
+        // 统计各状态的记忆数量
+        Map<String, Memory> allMemories = memoryManager.listAllMemories();
+        int totalSlots = allMemories.size();
+        int activeCount = 0, pendingCount = 0, conflictCount = 0, archivedCount = 0, noStatusCount = 0;
+        int verifiedCount = 0;
+
+        for (Map.Entry<String, Memory> entry : allMemories.entrySet()) {
+            Memory m = entry.getValue();
+            if (m.getStatus() == null) {
+                noStatusCount++;
+            } else {
+                switch (m.getStatus()) {
+                    case ACTIVE -> activeCount++;
+                    case PENDING -> pendingCount++;
+                    case CONFLICT -> conflictCount++;
+                    case ARCHIVED -> archivedCount++;
+                }
+            }
+            if (m.getVerifiedAt() != null) {
+                verifiedCount++;
+            }
+        }
+
+        sb.append("▸ 记忆状态分布\n");
+        sb.append(String.format("  总槽位: %d\n", totalSlots));
+        sb.append(String.format("  ✅ ACTIVE: %d | ⏳ PENDING: %d | ⚠️ CONFLICT: %d | 📦 ARCHIVED: %d\n",
+                activeCount, pendingCount, conflictCount, archivedCount));
+        if (noStatusCount > 0) {
+            sb.append(String.format("  (无状态/旧数据: %d — 视为 ACTIVE)\n", noStatusCount));
+        }
+        sb.append(String.format("  已验证: %d / %d\n\n", verifiedCount, totalSlots));
+
+        // 展示待处理的冲突记忆
+        List<Map<String, Object>> pendingMemories = storage.readPendingExplicitMemories();
+        sb.append("▸ 待处理队列 (pending_explicit_memories.jsonl)\n");
+        if (pendingMemories.isEmpty()) {
+            sb.append("  (无待处理记忆)\n\n");
+        } else {
+            sb.append(String.format("  共 %d 条待处理\n", pendingMemories.size()));
+            int shown = 0;
+            for (Map<String, Object> record : pendingMemories) {
+                if (shown >= 5) {
+                    sb.append(String.format("  ... 还有 %d 条\n", pendingMemories.size() - shown));
+                    break;
+                }
+                String slot = String.valueOf(record.getOrDefault("slot_name", "?"));
+                String status = String.valueOf(record.getOrDefault("status", "?"));
+                String newContent = truncateForDisplay(
+                        String.valueOf(record.getOrDefault("new_content", "")), 60);
+                String detectedAt = String.valueOf(record.getOrDefault("detected_at", "?"));
+                sb.append(String.format("  [%s] %s → \"%s\" (at %s)\n",
+                        status, slot, newContent, detectedAt));
+                shown++;
+            }
+            sb.append("\n");
+        }
+
+        // 展示有验证信息的记忆样本
+        sb.append("▸ 最近验证记录\n");
+        List<Map.Entry<String, Memory>> verified = allMemories.entrySet().stream()
+                .filter(e -> e.getValue().getVerifiedAt() != null)
+                .sorted((a, b) -> b.getValue().getVerifiedAt().compareTo(a.getValue().getVerifiedAt()))
+                .limit(5)
+                .toList();
+        if (verified.isEmpty()) {
+            sb.append("  (暂无验证记录 — 旧记忆无此字段)\n");
+        } else {
+            for (Map.Entry<String, Memory> entry : verified) {
+                Memory m = entry.getValue();
+                sb.append(String.format("  %s — %s [%s] at %s\n",
+                        entry.getKey(),
+                        m.getVerifiedSource() != null ? m.getVerifiedSource() : "?",
+                        m.getSource() != null ? m.getSource() : "?",
+                        m.getVerifiedAt()));
+            }
+        }
+
+        printSystem(sb.toString());
+    }
+
+    private String truncateForDisplay(String text, int maxLen) {
+        if (text == null) return "";
+        return text.length() > maxLen ? text.substring(0, maxLen) + "..." : text;
     }
 
     private void showMemoryScenes() {
@@ -1513,6 +1616,7 @@ public class CliRunner implements CommandLineRunner {
         commands.put("/memory-timeline", "记忆系统时间线视图");
         commands.put("/memory-report", "记忆系统综合状态报告");
         commands.put("/memory-scenes", "按话题/场景分组展示记忆摘要");
+        commands.put("/memory-governance", "记忆治理状态（冲突、待审核、归档）");
         commands.put("/exit", "退出会话");
         commands.put("/quit", "退出会话");
         return Collections.unmodifiableMap(commands);

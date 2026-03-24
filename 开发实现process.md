@@ -347,7 +347,7 @@
 
 ---
 
-### Phase 9 - 记忆治理、主动服务与多用户统一身份（计划中）
+### Phase 9 - 记忆治理、主动服务与多用户统一身份（进行中）
 
 交付目标：
 
@@ -364,6 +364,25 @@
 3. 用户能通过自然语言稳定创建定时任务
 4. 定时任务与回顾消息能正确路由到对应来源
 5. 主动服务逻辑不会污染其他用户的记忆空间
+
+#### 迭代记录 - 2026-03-24 02:00
+
+- 增强目标：为 Memory 模型补齐记忆治理字段（status / verification），并更新 MemoryWriteService 支持治理元数据写入，实现 Phase 9 交付项 #1 基础
+- 涉及文件：修改 `Memory.java`（新增 MemoryStatus 枚举 + status / verifiedAt / verifiedSource 字段）、修改 `MemoryWriteService.java`（新增带治理参数的 saveMemoryWithGovernance 方法 + 冲突检测）、修改 `MemoryStorage.java`（新增 readPendingExplicitMemories 方法）、修改 `NightlyMemoryExtractionJob.java`（隐式提取启用冲突检测）、修改 `CliRunner.java`（新增 `/memory-governance` 命令 + `/memory-report` 治理摘要）
+- 实现方案：
+  1. Memory 模型新增 MemoryStatus 枚举（ACTIVE, PENDING, CONFLICT, ARCHIVED）和 status / verifiedAt / verifiedSource 字段
+  2. MemoryWriteService 新增 saveMemoryWithGovernance() 方法，支持冲突检测：当 slotName 已存在且内容不同时，标记为 CONFLICT 写入 pending 队列
+  3. NightlyMemoryExtractionJob 的隐式提取改用 saveMemoryWithGovernance(detectConflict=true)
+  4. MemoryStorage 新增 readPendingExplicitMemories() 方法读取待处理队列
+  5. CliRunner 新增 /memory-governance 命令展示治理全貌 + /memory-report 增加治理摘要行
+- 状态：已完成
+- 实际修改文件：
+  - 修改 `src/main/java/com/memsys/memory/model/Memory.java` — 新增 MemoryStatus 枚举（ACTIVE/PENDING/CONFLICT/ARCHIVED）、status 字段、verifiedAt 字段、verifiedSource 字段
+  - 修改 `src/main/java/com/memsys/memory/MemoryWriteService.java` — 新增 saveMemoryWithGovernance() 方法（带冲突检测：已有同 slot 且内容不同时写入 pending 队列而非覆盖；显式来源自动标记 user_confirmed 验证；仅 ACTIVE 状态参与 RAG 索引）
+  - 修改 `src/main/java/com/memsys/memory/storage/MemoryStorage.java` — 新增 readPendingExplicitMemories() 方法，读取 pending_explicit_memories.jsonl 全部记录
+  - 修改 `src/main/java/com/memsys/memory/NightlyMemoryExtractionJob.java` — 隐式提取改用 saveMemoryWithGovernance(detectConflict=true)，不再直接覆盖已有记忆
+  - 修改 `src/main/java/com/memsys/cli/CliRunner.java` — 新增 /memory-governance 命令（展示状态分布、待处理队列、验证记录）；/memory-report 增加治理摘要行
+- 实际结果：Memory 模型具备完整治理元数据（status/verifiedAt/verifiedSource）；隐式记忆提取不再直接覆盖已有记忆，冲突写入 pending 队列；/memory-governance 可展示记忆治理全貌；现有调用方向后兼容（默认 ACTIVE、不检测冲突）
 
 ---
 
@@ -422,6 +441,7 @@
 16. Phase 8 场景化展示命令已落地：`/memory-timeline` 展示记忆事件时间线，`/memory-report` 展示记忆系统全层状态报告，可直接用于答辩场景展示。
 17. Phase 8 主题切换检测已落地：每轮对话后异步检测主题是否切换，切换时自动生成前一段话题摘要；摘要落盘记录包含触发来源（topic_shift/turn_threshold）和前后话题名称，与轮次阈值触发互补。
 18. Phase 8 场景化展示 `/memory-scenes` 已落地：按话题聚类展示会话摘要，支持答辩场景 #5 演示。
+19. Phase 9 记忆治理基础已落地：Memory 模型新增 MemoryStatus（ACTIVE/PENDING/CONFLICT/ARCHIVED）+ verifiedAt + verifiedSource 字段；MemoryWriteService 新增冲突检测（saveMemoryWithGovernance）；隐式提取启用冲突检测不再直接覆盖；`/memory-governance` 命令可展示治理全貌。
 
 ---
 

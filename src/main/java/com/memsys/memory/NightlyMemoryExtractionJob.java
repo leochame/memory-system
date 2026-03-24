@@ -60,15 +60,17 @@ public class NightlyMemoryExtractionJob {
                     return;
                 }
 
-                // 提取用户档案卡
+                // 提取用户档案卡（Phase 9 增强：启用冲突检测，隐式提取不直接覆盖已有记忆）
                 List<Map<String, Object>> userInsights = memoryExtractor.extractUserInsights(recentHistory, "scheduled");
                 for (Map<String, Object> insight : userInsights) {
-                    memoryWriteService.saveMemory(
+                    memoryWriteService.saveMemoryWithGovernance(
                         (String) insight.get("slot_name"),
                         (String) insight.get("content"),
                         Memory.MemoryType.USER_INSIGHT,
                         Memory.SourceType.IMPLICIT,
-                        (String) insight.getOrDefault("confidence", "medium")
+                        (String) insight.getOrDefault("confidence", "medium"),
+                        Memory.MemoryStatus.ACTIVE,
+                        true  // 启用冲突检测：已有同 slot 且内容不同时，写入 pending 队列
                     );
                 }
 
