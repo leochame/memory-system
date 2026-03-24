@@ -192,7 +192,7 @@
 
 ---
 
-### Phase 7 - Memory Reflection 与证据视图（下一阶段最高优先级）
+### Phase 7 - Memory Reflection 与证据视图（已完成）
 
 交付目标：
 
@@ -239,7 +239,7 @@
 
 ---
 
-### Phase 8 - 会话摘要与场景化展示（计划中）
+### Phase 8 - 会话摘要与场景化展示（进行中）
 
 交付目标：
 
@@ -254,6 +254,27 @@
 2. 摘要后仍能保持对关键上下文的连续理解
 3. 摘要文件可独立查看和复用
 4. CLI 输出可直接用于答辩场景展示
+
+#### 迭代记录 - 2026-03-24 22:30
+
+- 增强目标：创建 ConversationSummaryService 骨架，实现会话摘要通过 LLM 自动生成并落盘到 `.memory/session_summaries.jsonl`
+- 涉及文件：新增 `LlmDtos.ConversationSummaryResult` DTO、新增 `Schemas.conversationSummaryResult()` Schema、修改 `LlmExtractionService`（新增 summarizeConversation 方法）、新增 `ConversationSummaryService.java`、修改 `MemoryStorage`（新增 session_summaries.jsonl 读写）、修改 `ConversationCli.java`（轮次阈值触发摘要）
+- 实现方案：
+  1. 新增 DTO `ConversationSummaryResult(summary, key_topics, turn_count, timestamp_range)` 用于 LLM 结构化摘要输出
+  2. 在 Schemas 中新增对应 JSON Schema
+  3. LlmExtractionService 新增 `summarizeConversation(historyText)` 方法调用 LLM 生成摘要
+  4. 新增 ConversationSummaryService，封装"何时生成摘要"和"摘要落盘"的逻辑
+  5. MemoryStorage 新增 `appendSessionSummary()` 和 `readSessionSummaries()` 方法
+  6. ConversationCli 在每轮对话后检查轮次，达到阈值（如 20 轮）时异步触发摘要生成
+- 状态：已完成
+- 实际修改文件：
+  - 修改 `src/main/java/com/memsys/llm/LlmDtos.java` — 新增 ConversationSummaryResult DTO（summary, key_topics, turn_count, time_range）
+  - 修改 `src/main/java/com/memsys/llm/schema/Schemas.java` — 新增 conversationSummaryResult() JSON Schema，含 JsonIntegerSchema 支持
+  - 修改 `src/main/java/com/memsys/llm/LlmExtractionService.java` — 新增 summarizeConversation() 方法，通过 LLM 生成结构化会话摘要
+  - 新增 `src/main/java/com/memsys/memory/ConversationSummaryService.java` — 会话摘要服务骨架，含轮次计数、阈值触发、LLM 摘要生成、jsonl 落盘
+  - 修改 `src/main/java/com/memsys/memory/storage/MemoryStorage.java` — 新增 session_summaries.jsonl 初始化、appendSessionSummary()、readSessionSummaries() 方法
+  - 修改 `src/main/java/com/memsys/cli/ConversationCli.java` — 注入 ConversationSummaryService，每轮对话完成后计数并在达到阈值时异步触发摘要生成
+- 实际结果：系统在对话达到 20 轮阈值时自动通过 LLM 生成会话摘要（含摘要文本、关键话题、轮次数、时间范围），落盘到 `.memory/session_summaries.jsonl`；摘要生成失败不阻断主对话链路；MemoryStorage 提供摘要读写能力供后续 prompt 压缩和展示使用
 
 ---
 
@@ -327,6 +348,7 @@
 11. 项目毕设升级方向已明确收敛为：Memory Reflection、证据视图、会话摘要、场景化展示、多用户身份映射、自然语言任务、主动服务、案例蒸馏与评测。
 12. Phase 7 Memory Reflection 骨架已落地：`MemoryReflectionService` + `ReflectionResult` + LLM 结构化判断 + `ConversationCli` 主链路接入，支持根据反思结果决定是否加载长期记忆。
 13. Phase 7 Memory Evidence Trace 已落地：`MemoryEvidenceTrace` 记录每轮证据使用，`/memory-debug` 命令可展示反思结果与证据加载详情。
+14. Phase 8 会话摘要基础已落地：`ConversationSummaryService` + LLM 结构化摘要 + `session_summaries.jsonl` 落盘 + 轮次阈值触发，支持对话达到 20 轮时自动生成摘要。
 
 ---
 

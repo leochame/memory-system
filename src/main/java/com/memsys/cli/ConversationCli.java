@@ -1,6 +1,7 @@
 package com.memsys.cli;
 
 import com.memsys.llm.LlmClient;
+import com.memsys.memory.ConversationSummaryService;
 import com.memsys.memory.model.Memory;
 import com.memsys.memory.MemoryExtractor;
 import com.memsys.memory.MemoryManager;
@@ -44,6 +45,7 @@ public class ConversationCli {
     private final MemoryManager memoryManager;
     private final MemoryExtractor memoryExtractor;
     private final MemoryReflectionService memoryReflectionService;
+    private final ConversationSummaryService conversationSummaryService;
     private final MemoryWriteService memoryWriteService;
     private final AgentGuideService agentGuideService;
     private final SystemPromptBuilder promptBuilder;
@@ -69,6 +71,7 @@ public class ConversationCli {
             MemoryManager memoryManager,
             MemoryExtractor memoryExtractor,
             MemoryReflectionService memoryReflectionService,
+            ConversationSummaryService conversationSummaryService,
             MemoryWriteService memoryWriteService,
             AgentGuideService agentGuideService,
             SystemPromptBuilder promptBuilder,
@@ -88,6 +91,7 @@ public class ConversationCli {
         this.memoryManager = memoryManager;
         this.memoryExtractor = memoryExtractor;
         this.memoryReflectionService = memoryReflectionService;
+        this.conversationSummaryService = conversationSummaryService;
         this.memoryWriteService = memoryWriteService;
         this.agentGuideService = agentGuideService;
         this.promptBuilder = promptBuilder;
@@ -181,6 +185,16 @@ public class ConversationCli {
                 }
             });
             memoryAsync.submit("update_relevant_memory_access", () -> updateMemoryAccess(userMessage));
+        }
+
+        // Phase 8: 会话摘要 — 每轮对话完成后计数，达到阈值时异步生成摘要
+        if (useChatHistory && conversationSummaryService.onTurnCompleted()) {
+            memoryAsync.submit("generate_session_summary", () -> {
+                String summary = conversationSummaryService.generateAndPersistSummary();
+                if (summary != null) {
+                    log.info("Session summary generated ({} turns)", conversationSummaryService.getCurrentTurnCount());
+                }
+            });
         }
 
         return decorateResponseWithTaskSignals(response, dueTaskNotifications);

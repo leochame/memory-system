@@ -3,6 +3,7 @@ package com.memsys.llm.schema;
 import dev.langchain4j.model.chat.request.json.JsonArraySchema;
 import dev.langchain4j.model.chat.request.json.JsonBooleanSchema;
 import dev.langchain4j.model.chat.request.json.JsonEnumSchema;
+import dev.langchain4j.model.chat.request.json.JsonIntegerSchema;
 import dev.langchain4j.model.chat.request.json.JsonObjectSchema;
 import dev.langchain4j.model.chat.request.json.JsonSchema;
 import dev.langchain4j.model.chat.request.json.JsonSchemaElement;
@@ -138,6 +139,28 @@ public final class Schemas {
 
         return JsonSchema.builder()
                 .name("MemoryReflectionResult")
+                .rootElement(strictObject(props))
+                .build();
+    }
+
+    public static JsonSchema conversationSummaryResult() {
+        Map<String, JsonSchemaElement> props = new LinkedHashMap<>();
+        props.put("summary", JsonStringSchema.builder()
+                .description("A concise summary of the conversation, covering main topics, decisions, and outcomes")
+                .build());
+        props.put("key_topics", JsonArraySchema.builder()
+                .description("List of key topics discussed in this conversation segment")
+                .items(JsonStringSchema.builder().description("topic keyword or phrase").build())
+                .build());
+        props.put("turn_count", JsonIntegerSchema.builder()
+                .description("Number of conversation turns summarized")
+                .build());
+        props.put("time_range", JsonStringSchema.builder()
+                .description("Time range of the conversation, e.g. '2026-03-24 20:00 ~ 21:30'")
+                .build());
+
+        return JsonSchema.builder()
+                .name("ConversationSummaryResult")
                 .rootElement(strictObject(props))
                 .build();
     }

@@ -339,4 +339,41 @@ public class LlmExtractionService {
                 MemoryReflectionResult.class
         );
     }
+
+    // ========== 会话摘要 ==========
+
+    /**
+     * 通过 LLM 对一段对话历史生成结构化摘要。
+     * Phase 8 核心提取方法。
+     *
+     * @param conversationText 格式化的对话历史文本
+     * @param turnCount 对话轮数
+     * @return 结构化摘要结果，失败时返回 null
+     */
+    public LlmDtos.ConversationSummaryResult summarizeConversation(String conversationText, int turnCount) {
+        try {
+            String instruction = """
+                你是一个对话摘要生成器。请对以下对话历史生成一份简洁的结构化摘要。
+
+                要求：
+                - summary：用 2-5 句话概括对话的核心内容、关键决策和结论，使用中文
+                - key_topics：提取 3-8 个关键话题词或短语
+                - turn_count：对话轮次数（已知为 %d）
+                - time_range：对话的时间范围（从对话中提取，格式如 '2026-03-24 20:00 ~ 21:30'；如无法确定填 'unknown'）
+
+                对话历史：
+                %s
+                """.formatted(turnCount, conversationText);
+
+            return llmClient.chatWithJsonSchema(
+                    null,
+                    List.of(new UserMessage(instruction)),
+                    Schemas.conversationSummaryResult(),
+                    LlmDtos.ConversationSummaryResult.class
+            );
+        } catch (Exception e) {
+            log.warn("Conversation summary extraction failed", e);
+            return null;
+        }
+    }
 }

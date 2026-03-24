@@ -71,4 +71,16 @@ public final class LlmDtos {
             java.util.List<String> evidence_purposes
     ) {
     }
+
+    /**
+     * 会话摘要结构化输出：由 LLM 对一段对话历史生成结构化摘要。
+     * Phase 8 核心 DTO。
+     */
+    public record ConversationSummaryResult(
+            String summary,
+            List<String> key_topics,
+            int turn_count,
+            String time_range
+    ) {
+    }
 }

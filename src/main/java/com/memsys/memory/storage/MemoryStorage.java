@@ -61,6 +61,7 @@ public class MemoryStorage {
             createFileIfNotExists("pending_explicit_memories.jsonl", "");
             createFileIfNotExists("scheduled_tasks.json", "[]");
             createFileIfNotExists("pending_task_notifications.jsonl", "");
+            createFileIfNotExists("session_summaries.jsonl", "");
 
             log.info("Memory storage initialized at: {}", basePath.toAbsolutePath());
         } catch (IOException e) {
@@ -400,6 +401,55 @@ public class MemoryStorage {
             return userMessages;
         } catch (IOException e) {
             log.error("Failed to read older user messages", e);
+            return new ArrayList<>();
+        }
+    }
+
+    // ========== session_summaries.jsonl 操作 ==========
+
+    /**
+     * 追加一条会话摘要记录到 session_summaries.jsonl。
+     * Phase 8 核心落盘方法。
+     */
+    public void appendSessionSummary(Map<String, Object> summaryRecord) {
+        try {
+            Path filePath = basePath.resolve("session_summaries.jsonl");
+            String line = objectMapper.writeValueAsString(summaryRecord) + "\n";
+            Files.writeString(filePath, line, StandardOpenOption.CREATE, StandardOpenOption.APPEND);
+            log.info("Session summary appended to session_summaries.jsonl");
+        } catch (IOException e) {
+            log.error("Failed to append session summary", e);
+        }
+    }
+
+    /**
+     * 读取所有会话摘要记录。
+     *
+     * @param limit 最多返回的记录数（0 表示不限）
+     * @return 按时间顺序排列的摘要列表
+     */
+    public List<Map<String, Object>> readSessionSummaries(int limit) {
+        try {
+            Path filePath = basePath.resolve("session_summaries.jsonl");
+            if (!Files.exists(filePath)) {
+                return new ArrayList<>();
+            }
+            List<String> lines = Files.readAllLines(filePath);
+            List<Map<String, Object>> summaries = new ArrayList<>();
+            for (String line : lines) {
+                if (line == null || line.isBlank()) continue;
+                try {
+                    summaries.add(objectMapper.readValue(line, new TypeReference<Map<String, Object>>() {}));
+                } catch (IOException parseErr) {
+                    log.warn("Skipped malformed session summary line: {}", line);
+                }
+            }
+            if (limit > 0 && summaries.size() > limit) {
+                return summaries.subList(summaries.size() - limit, summaries.size());
+            }
+            return summaries;
+        } catch (IOException e) {
+            log.error("Failed to read session summaries", e);
             return new ArrayList<>();
         }
     }
