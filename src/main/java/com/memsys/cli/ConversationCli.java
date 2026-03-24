@@ -221,6 +221,25 @@ public class ConversationCli {
             });
         }
 
+        // Phase 9 #4: 自然语言定时任务提取 — 每轮对话异步检测是否包含任务创建意图
+        if (scheduledTaskService != null) {
+            final String taskMessage = userMessage;
+            final String taskPlatform = sourcePlatform;
+            final String taskConversationId = sourceConversationId;
+            final String taskSenderId = sourceSenderId;
+            memoryAsync.submit("extract_scheduled_task", () -> {
+                try {
+                    var taskOpt = scheduledTaskService.tryCreateTaskFromMessage(
+                            taskMessage, taskPlatform, taskConversationId, taskSenderId);
+                    taskOpt.ifPresent(task ->
+                            log.info("Auto-created scheduled task from conversation: '{}' due at {}",
+                                    task.getTitle(), task.getDueAt()));
+                } catch (Exception e) {
+                    log.debug("Scheduled task extraction skipped: {}", e.getMessage());
+                }
+            });
+        }
+
         return decorateResponseWithTaskSignals(response, dueTaskNotifications);
     }
 

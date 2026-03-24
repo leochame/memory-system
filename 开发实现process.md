@@ -384,6 +384,20 @@
   - 修改 `src/main/java/com/memsys/cli/CliRunner.java` — 新增 /memory-governance 命令（展示状态分布、待处理队列、验证记录）；/memory-report 增加治理摘要行
 - 实际结果：Memory 模型具备完整治理元数据（status/verifiedAt/verifiedSource）；隐式记忆提取不再直接覆盖已有记忆，冲突写入 pending 队列；/memory-governance 可展示记忆治理全貌；现有调用方向后兼容（默认 ACTIVE、不检测冲突）
 
+#### 迭代记录 - 2026-03-24 02:30
+
+- 增强目标：将自然语言定时任务提取接入对话主链路，用户在普通对话中提及"提醒/定时/任务"时异步提取并创建任务，覆盖 Phase 9 #4 和答辩场景 #6
+- 涉及文件：修改 `ConversationCli.java`（在异步记忆操作区域新增任务提取调用）
+- 实现方案：
+  1. 在 ConversationCli.processUserMessage 的异步记忆操作区域，新增 memoryAsync.submit 调用 scheduledTaskService.tryCreateTaskFromMessage
+  2. 传递 sourcePlatform/sourceConversationId/sourceSenderId 实现来源追踪
+  3. 任务创建成功时 log.info 记录
+  4. 提取失败不阻断主链路（异步且 try-catch）
+- 状态：已完成
+- 实际修改文件：
+  - 修改 `src/main/java/com/memsys/cli/ConversationCli.java` — 在异步记忆操作区域（Phase 8 主题切换检测之后）新增 `extract_scheduled_task` 异步任务，调用 scheduledTaskService.tryCreateTaskFromMessage(userMessage, sourcePlatform, sourceConversationId, sourceSenderId)；成功创建时记录 log.info；失败时 log.debug 不阻断主链路
+- 实际结果：用户在正常对话中说"提醒我明天上午 9 点开会"等自然语言时，系统会异步通过 LLM 提取任务意图并自动创建 ScheduledTask，存储到 scheduled_tasks.json；任务到期后由 ScheduledTaskReminderJob 自动推送通知到 IM 或 CLI；整个流程不影响主对话响应速度
+
 ---
 
 ### Phase 10 - 评测、实验与论文支撑（计划中）
@@ -442,6 +456,7 @@
 17. Phase 8 主题切换检测已落地：每轮对话后异步检测主题是否切换，切换时自动生成前一段话题摘要；摘要落盘记录包含触发来源（topic_shift/turn_threshold）和前后话题名称，与轮次阈值触发互补。
 18. Phase 8 场景化展示 `/memory-scenes` 已落地：按话题聚类展示会话摘要，支持答辩场景 #5 演示。
 19. Phase 9 记忆治理基础已落地：Memory 模型新增 MemoryStatus（ACTIVE/PENDING/CONFLICT/ARCHIVED）+ verifiedAt + verifiedSource 字段；MemoryWriteService 新增冲突检测（saveMemoryWithGovernance）；隐式提取启用冲突检测不再直接覆盖；`/memory-governance` 命令可展示治理全貌。
+20. Phase 9 自然语言任务提取已接入主链路：ConversationCli 在每轮对话后异步调用 scheduledTaskService.tryCreateTaskFromMessage，用户自然语言中的任务意图可自动提取并创建 ScheduledTask；ScheduledTaskReminderJob 定时检查到期任务并推送通知。
 
 ---
 
@@ -513,9 +528,9 @@
 | 1 | 记忆提取与存储：正常对话中自动提取事实并持久化 | 对话 → `/what-you-know` 查看画像 | P3/P5 | ✅ |
 | 2 | 记忆召回与应用：后续对话自动引用已有记忆 | 多轮对话观察上下文注入 | P5/P6 | ✅ |
 | 3 | 记忆反思过程：展示系统"要不要用记忆"的决策链路 | `/memory-debug` | P7 | ✅ |
-| 4 | 会话摘要与压缩：长对话自动生成摘要 | `/memory-report` | P8 | ⬜ |
-| 5 | 场景化时间线：记忆按时间/主题可视展示 | `/memory-timeline`、`/memory-scenes` | P8 | ⬜ |
-| 6 | 任务管理：通过自然语言创建、查看、管理任务 | `/tasks` | P9 | ⬜ |
+| 4 | 会话摘要与压缩：长对话自动生成摘要 | `/memory-report` | P8 | ✅ |
+| 5 | 场景化时间线：记忆按时间/主题可视展示 | `/memory-timeline`、`/memory-scenes` | P8 | ✅ |
+| 6 | 任务管理：通过自然语言创建、查看、管理任务 | `/tasks` | P9 | ✅ |
 | 7 | 主动提醒：系统基于记忆主动推送提醒与建议 | 定时触发 + CLI/IM 推送 | P9 | ⬜ |
 | 8 | 多平台身份统一：CLI 与飞书共享同一用户画像 | 飞书发消息 → CLI `/what-you-know` 可见 | P9 | ⬜ |
 | 9 | 评测对比：有记忆 vs 无记忆的效果量化对比 | `/eval-run` | P10 | ⬜ |
