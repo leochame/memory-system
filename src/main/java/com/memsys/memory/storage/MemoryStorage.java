@@ -478,6 +478,55 @@ public class MemoryStorage {
         }
     }
 
+    // ========== proactive_reminders.jsonl 操作 ==========
+
+    /**
+     * 追加一条主动提醒记录到 proactive_reminders.jsonl。
+     * Phase 9 #5 — 基于记忆生成主动提醒。
+     */
+    public void appendProactiveReminder(Map<String, Object> reminderRecord) {
+        try {
+            Path filePath = basePath.resolve("proactive_reminders.jsonl");
+            String line = objectMapper.writeValueAsString(reminderRecord) + "\n";
+            Files.writeString(filePath, line, StandardOpenOption.CREATE, StandardOpenOption.APPEND);
+            log.info("Proactive reminder appended to proactive_reminders.jsonl");
+        } catch (IOException e) {
+            log.error("Failed to append proactive reminder", e);
+        }
+    }
+
+    /**
+     * 读取主动提醒记录。
+     *
+     * @param limit 最多返回的记录数（0 表示不限）
+     * @return 提醒记录列表（按时间顺序）
+     */
+    public List<Map<String, Object>> readProactiveReminders(int limit) {
+        try {
+            Path filePath = basePath.resolve("proactive_reminders.jsonl");
+            if (!Files.exists(filePath)) {
+                return new ArrayList<>();
+            }
+            List<String> lines = Files.readAllLines(filePath);
+            List<Map<String, Object>> reminders = new ArrayList<>();
+            for (String line : lines) {
+                if (line == null || line.isBlank()) continue;
+                try {
+                    reminders.add(objectMapper.readValue(line, new TypeReference<Map<String, Object>>() {}));
+                } catch (IOException parseErr) {
+                    log.warn("Skipped malformed proactive reminder line: {}", line);
+                }
+            }
+            if (limit > 0 && reminders.size() > limit) {
+                return reminders.subList(reminders.size() - limit, reminders.size());
+            }
+            return reminders;
+        } catch (IOException e) {
+            log.error("Failed to read proactive reminders", e);
+            return new ArrayList<>();
+        }
+    }
+
     // ========== memory_queues.json 操作 ==========
 
     public void saveQueues(List<String> youngQueue, List<String> matureQueue) {

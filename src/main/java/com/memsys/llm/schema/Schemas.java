@@ -183,6 +183,32 @@ public final class Schemas {
                 .build();
     }
 
+    public static JsonSchema proactiveReminderResult() {
+        Map<String, JsonSchemaElement> props = new LinkedHashMap<>();
+        props.put("should_remind", JsonBooleanSchema.builder()
+                .description("Whether there is something meaningful to proactively remind the user about based on their profile and recent history")
+                .build());
+        props.put("reminder_text", JsonStringSchema.builder()
+                .description("The reminder message text in Chinese, friendly and concise (2-4 sentences). Empty if should_remind=false")
+                .build());
+        props.put("reminder_type", JsonEnumSchema.builder()
+                .description("Type of reminder")
+                .enumValues(List.of("review", "suggestion", "follow_up", "insight", "none"))
+                .build());
+        props.put("based_on_memories", JsonArraySchema.builder()
+                .description("List of memory slot names or topics this reminder is based on")
+                .items(JsonStringSchema.builder().description("memory reference").build())
+                .build());
+        props.put("suggested_action", JsonStringSchema.builder()
+                .description("A suggested next action for the user (empty if not applicable)")
+                .build());
+
+        return JsonSchema.builder()
+                .name("ProactiveReminderResult")
+                .rootElement(strictObject(props))
+                .build();
+    }
+
     // ========== 工具方法 ==========
 
     static JsonObjectSchema itemsWrapper(Map<String, JsonSchemaElement> itemProps, String description) {

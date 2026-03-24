@@ -6,6 +6,7 @@ import com.memsys.memory.ConversationSummaryService;
 import com.memsys.memory.MemoryExtractor;
 import com.memsys.memory.MemoryManager;
 import com.memsys.memory.MemoryWriteService;
+import com.memsys.memory.ProactiveReminderService;
 import com.memsys.memory.storage.MemoryStorage;
 import com.memsys.llm.LlmExtractionService;
 import com.memsys.llm.LlmDtos.ExampleItem;
@@ -100,6 +101,7 @@ public class CliRunner implements CommandLineRunner {
     private final LlmExtractionService llmExtractionService;
     private final ScheduledTaskService scheduledTaskService;
     private final ConversationSummaryService conversationSummaryService;
+    private final ProactiveReminderService proactiveReminderService;
 
     @Value("${memory.max-slots:100}")
     private int maxSlots;
@@ -136,7 +138,8 @@ public class CliRunner implements CommandLineRunner {
             SkillService skillService,
             LlmExtractionService llmExtractionService,
             ScheduledTaskService scheduledTaskService,
-            ConversationSummaryService conversationSummaryService
+            ConversationSummaryService conversationSummaryService,
+            ProactiveReminderService proactiveReminderService
     ) {
         this.conversationCli = conversationCli;
         this.memoryManager = memoryManager;
@@ -148,6 +151,7 @@ public class CliRunner implements CommandLineRunner {
         this.llmExtractionService = llmExtractionService;
         this.scheduledTaskService = scheduledTaskService;
         this.conversationSummaryService = conversationSummaryService;
+        this.proactiveReminderService = proactiveReminderService;
     }
 
     @Override
@@ -321,6 +325,7 @@ public class CliRunner implements CommandLineRunner {
             case "/memory-report" -> showMemoryReport();
             case "/memory-scenes" -> showMemoryScenes();
             case "/memory-governance" -> showMemoryGovernance();
+            case "/proactive-reminders" -> showProactiveReminders();
             case "/exit", "/quit" -> {
                 printSystem("会话结束。");
                 return false;
@@ -944,8 +949,17 @@ public class CliRunner implements CommandLineRunner {
         long conflictMems = pendingMems.stream()
                 .filter(r -> "CONFLICT".equals(r.get("status")))
                 .count();
-        sb.append(String.format("  治理: 待处理 %d 条 (冲突 %d 条) — /memory-governance 查看详情\n\n",
+        sb.append(String.format("  治理: 待处理 %d 条 (冲突 %d 条) — /memory-governance 查看详情\n",
                 pendingMems.size(), conflictMems));
+
+        // 主动提醒摘要
+        List<Map<String, Object>> proactiveReminders = proactiveReminderService.getRecentReminders(0);
+        LocalDateTime lastProactiveTime = proactiveReminderService.getLastReminderTime();
+        sb.append(String.format("  主动提醒: 累计 %d 条 (上次: %s) — /proactive-reminders 查看详情\n\n",
+                proactiveReminders.size(),
+                lastProactiveTime != null
+                        ? lastProactiveTime.format(DateTimeFormatter.ofPattern("MM-dd HH:mm"))
+                        : "暂无"));
 
         // L4a Skill
         sb.append("▸ L4a 技能 (Skills)\n");
@@ -1076,6 +1090,58 @@ public class CliRunner implements CommandLineRunner {
                         m.getVerifiedAt()));
             }
         }
+
+        printSystem(sb.toString());
+    }
+
+    private void showProactiveReminders() {
+        StringBuilder sb = new StringBuilder();
+        sb.append("╔══════════════════════════════════════════╗\n");
+        sb.append("║       💡 Proactive Reminders (主动提醒)   ║\n");
+        sb.append("╚══════════════════════════════════════════╝\n\n");
+
+        List<Map<String, Object>> reminders = proactiveReminderService.getRecentReminders(10);
+
+        if (reminders.isEmpty()) {
+            sb.append("  （暂无主动提醒记录）\n\n");
+            sb.append("  主动提醒会在系统运行期间，基于你的用户画像和对话历史，\n");
+            sb.append("  每 4 小时自动检查是否有值得提醒的内容。\n");
+        } else {
+            sb.append(String.format("▸ 最近 %d 条提醒记录\n\n", reminders.size()));
+            for (int i = reminders.size() - 1; i >= 0; i--) {
+                Map<String, Object> r = reminders.get(i);
+                String time = String.valueOf(r.getOrDefault("generated_at", "unknown"));
+                String type = String.valueOf(r.getOrDefault("reminder_type", "?"));
+                String text = String.valueOf(r.getOrDefault("reminder_text", ""));
+                String action = String.valueOf(r.getOrDefault("suggested_action", ""));
+                Object basedOn = r.get("based_on_memories");
+                String basedOnStr = basedOn instanceof List<?> list
+                        ? list.stream().map(String::valueOf).collect(java.util.stream.Collectors.joining(", "))
+                        : "";
+
+                String typeIcon = switch (type) {
+                    case "review" -> "📖";
+                    case "suggestion" -> "💡";
+                    case "follow_up" -> "📌";
+                    case "insight" -> "🔍";
+                    default -> "📬";
+                };
+
+                sb.append(String.format("  %s [%s] %s\n", typeIcon, type, time));
+                sb.append(String.format("    %s\n", text));
+                if (!action.isBlank()) {
+                    sb.append(String.format("    → 建议: %s\n", action));
+                }
+                if (!basedOnStr.isBlank()) {
+                    sb.append(String.format("    基于: %s\n", basedOnStr));
+                }
+                sb.append("\n");
+            }
+        }
+
+        LocalDateTime lastTime = proactiveReminderService.getLastReminderTime();
+        sb.append(String.format("▸ 上次提醒时间: %s\n",
+                lastTime != null ? lastTime.format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm")) : "（本会话尚未生成）"));
 
         printSystem(sb.toString());
     }
@@ -1617,6 +1683,7 @@ public class CliRunner implements CommandLineRunner {
         commands.put("/memory-report", "记忆系统综合状态报告");
         commands.put("/memory-scenes", "按话题/场景分组展示记忆摘要");
         commands.put("/memory-governance", "记忆治理状态（冲突、待审核、归档）");
+        commands.put("/proactive-reminders", "查看主动提醒历史");
         commands.put("/exit", "退出会话");
         commands.put("/quit", "退出会话");
         return Collections.unmodifiableMap(commands);

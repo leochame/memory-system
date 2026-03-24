@@ -398,6 +398,29 @@
   - 修改 `src/main/java/com/memsys/cli/ConversationCli.java` — 在异步记忆操作区域（Phase 8 主题切换检测之后）新增 `extract_scheduled_task` 异步任务，调用 scheduledTaskService.tryCreateTaskFromMessage(userMessage, sourcePlatform, sourceConversationId, sourceSenderId)；成功创建时记录 log.info；失败时 log.debug 不阻断主链路
 - 实际结果：用户在正常对话中说"提醒我明天上午 9 点开会"等自然语言时，系统会异步通过 LLM 提取任务意图并自动创建 ScheduledTask，存储到 scheduled_tasks.json；任务到期后由 ScheduledTaskReminderJob 自动推送通知到 IM 或 CLI；整个流程不影响主对话响应速度
 
+#### 迭代记录 - 2026-03-24 03:00
+
+- 增强目标：创建 ProactiveReminderService，定时基于用户画像和长期记忆通过 LLM 生成个性化回顾与建议，通过现有 IM/CLI 通道推送，覆盖 Phase 9 #5 和答辩场景 #7
+- 涉及文件：新增 `LlmDtos.ProactiveReminderResult` DTO、新增 `Schemas.proactiveReminderResult()` Schema、修改 `LlmExtractionService`（新增 generateProactiveReminder 方法）、新增 `ProactiveReminderService.java`、新增 `ProactiveReminderJob.java`（Spring @Scheduled 定时触发）、修改 `CliRunner.java`（新增 `/proactive-reminders` 命令）
+- 实现方案：
+  1. 新增 ProactiveReminderResult DTO（should_remind, reminder_text, reminder_type, based_on_memories, suggested_action）
+  2. 在 Schemas 中新增对应 JSON Schema（reminder_type 枚举：review/suggestion/follow_up/insight/none）
+  3. LlmExtractionService 新增 generateProactiveReminder(userProfileText, recentSummariesText, currentTime) 方法
+  4. 新增 ProactiveReminderService，封装"何时生成提醒"和"提醒落盘"的逻辑，含最小间隔保护（4小时）
+  5. 新增 ProactiveReminderJob，每天 8:00/12:00/16:00/20:00 检查一次是否应生成主动提醒
+  6. CliRunner 新增 `/proactive-reminders` 命令展示最近的主动提醒记录
+  7. MemoryStorage 新增 proactive_reminders.jsonl 读写方法
+- 状态：已完成
+- 实际修改文件：
+  - 修改 `src/main/java/com/memsys/llm/LlmDtos.java` — 新增 ProactiveReminderResult DTO（should_remind, reminder_text, reminder_type, based_on_memories, suggested_action）
+  - 修改 `src/main/java/com/memsys/llm/schema/Schemas.java` — 新增 proactiveReminderResult() JSON Schema，reminder_type 使用枚举约束
+  - 修改 `src/main/java/com/memsys/llm/LlmExtractionService.java` — 新增 generateProactiveReminder() 方法，基于用户画像+会话摘要+当前时间通过 LLM 生成个性化提醒
+  - 新增 `src/main/java/com/memsys/memory/ProactiveReminderService.java` — 主动提醒服务核心：4小时最小间隔保护、画像检查、LLM 生成、落盘到 proactive_reminders.jsonl
+  - 新增 `src/main/java/com/memsys/memory/ProactiveReminderJob.java` — Spring @Scheduled 定时任务（每天 8/12/16/20 点），调用 ProactiveReminderService 生成提醒
+  - 修改 `src/main/java/com/memsys/memory/storage/MemoryStorage.java` — 新增 appendProactiveReminder() 和 readProactiveReminders() 方法
+  - 修改 `src/main/java/com/memsys/cli/CliRunner.java` — 注入 ProactiveReminderService；注册 `/proactive-reminders` 命令；showProactiveReminders() 展示提醒历史（类型图标、时间、内容、建议、来源）；`/memory-report` 新增主动提醒摘要行
+- 实际结果：系统在每天 8/12/16/20 点自动检查用户画像和最近会话摘要，通过 LLM 判断是否有值得主动提醒的内容；提醒记录落盘到 proactive_reminders.jsonl；用户可通过 `/proactive-reminders` 查看提醒历史；`/memory-report` 可展示主动提醒累计数量和上次提醒时间；4小时最小间隔保护避免过度打扰
+
 ---
 
 ### Phase 10 - 评测、实验与论文支撑（计划中）
@@ -457,6 +480,7 @@
 18. Phase 8 场景化展示 `/memory-scenes` 已落地：按话题聚类展示会话摘要，支持答辩场景 #5 演示。
 19. Phase 9 记忆治理基础已落地：Memory 模型新增 MemoryStatus（ACTIVE/PENDING/CONFLICT/ARCHIVED）+ verifiedAt + verifiedSource 字段；MemoryWriteService 新增冲突检测（saveMemoryWithGovernance）；隐式提取启用冲突检测不再直接覆盖；`/memory-governance` 命令可展示治理全貌。
 20. Phase 9 自然语言任务提取已接入主链路：ConversationCli 在每轮对话后异步调用 scheduledTaskService.tryCreateTaskFromMessage，用户自然语言中的任务意图可自动提取并创建 ScheduledTask；ScheduledTaskReminderJob 定时检查到期任务并推送通知。
+21. Phase 9 主动提醒已落地：ProactiveReminderService + ProactiveReminderJob 每天定时基于用户画像和会话摘要通过 LLM 生成个性化提醒；提醒落盘到 proactive_reminders.jsonl；`/proactive-reminders` 命令可查看历史；`/memory-report` 新增主动提醒摘要行。
 
 ---
 
@@ -531,6 +555,6 @@
 | 4 | 会话摘要与压缩：长对话自动生成摘要 | `/memory-report` | P8 | ✅ |
 | 5 | 场景化时间线：记忆按时间/主题可视展示 | `/memory-timeline`、`/memory-scenes` | P8 | ✅ |
 | 6 | 任务管理：通过自然语言创建、查看、管理任务 | `/tasks` | P9 | ✅ |
-| 7 | 主动提醒：系统基于记忆主动推送提醒与建议 | 定时触发 + CLI/IM 推送 | P9 | ⬜ |
+| 7 | 主动提醒：系统基于记忆主动推送提醒与建议 | 定时触发 + CLI/IM 推送 | P9 | ✅ |
 | 8 | 多平台身份统一：CLI 与飞书共享同一用户画像 | 飞书发消息 → CLI `/what-you-know` 可见 | P9 | ⬜ |
 | 9 | 评测对比：有记忆 vs 无记忆的效果量化对比 | `/eval-run` | P10 | ⬜ |

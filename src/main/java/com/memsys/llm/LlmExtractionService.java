@@ -421,4 +421,58 @@ public class LlmExtractionService {
             return null;
         }
     }
+
+    // ========== 主动提醒生成 ==========
+
+    /**
+     * 基于用户画像和会话摘要生成个性化的主动提醒或建议。
+     * Phase 9 #5 — 基于记忆生成主动提醒、回顾和建议。
+     *
+     * @param userProfileText 当前用户画像正文
+     * @param recentSummariesText 最近的会话摘要文本
+     * @param currentTime 当前时间描述
+     * @return 结构化提醒结果，失败时返回 null
+     */
+    public LlmDtos.ProactiveReminderResult generateProactiveReminder(
+            String userProfileText,
+            String recentSummariesText,
+            String currentTime) {
+        try {
+            String instruction = """
+                你是一个智能记忆助手。请基于用户的画像和最近的对话摘要，判断是否有值得主动提醒用户的内容。
+
+                提醒类型：
+                - review（回顾）：提醒用户回顾之前讨论过的重要话题或决策
+                - suggestion（建议）：基于用户偏好/习惯给出生活或工作建议
+                - follow_up（跟进）：提醒用户跟进之前提到但可能还没完成的事项
+                - insight（洞察）：基于用户画像发现的有趣模式或关联
+                - none：如果没有值得提醒的内容
+
+                规则：
+                - 只有在确实有价值的内容时才 should_remind=true
+                - reminder_text 使用中文，语气友好、简洁（2-4句话）
+                - 不要编造用户没提过的信息
+                - based_on_memories 列出参考了哪些记忆（槽位名或话题关键词）
+                - suggested_action 给出一个简短的建议下一步行动（如"可以回顾一下上次的讨论"）
+
+                当前时间：%s
+
+                用户画像：
+                %s
+
+                最近会话摘要：
+                %s
+                """.formatted(currentTime, userProfileText, recentSummariesText);
+
+            return llmClient.chatWithJsonSchema(
+                    null,
+                    List.of(new UserMessage(instruction)),
+                    Schemas.proactiveReminderResult(),
+                    LlmDtos.ProactiveReminderResult.class
+            );
+        } catch (Exception e) {
+            log.warn("Proactive reminder generation failed", e);
+            return null;
+        }
+    }
 }

@@ -94,4 +94,17 @@ public final class LlmDtos {
             String current_topic
     ) {
     }
+
+    /**
+     * 主动提醒结构化输出：基于用户画像和记忆生成个性化的回顾与建议。
+     * Phase 9 #5 — 基于记忆生成主动提醒、回顾和建议。
+     */
+    public record ProactiveReminderResult(
+            boolean should_remind,
+            String reminder_text,
+            String reminder_type,
+            List<String> based_on_memories,
+            String suggested_action
+    ) {
+    }
 }
