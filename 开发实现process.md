@@ -276,6 +276,21 @@
   - 修改 `src/main/java/com/memsys/cli/ConversationCli.java` — 注入 ConversationSummaryService，每轮对话完成后计数并在达到阈值时异步触发摘要生成
 - 实际结果：系统在对话达到 20 轮阈值时自动通过 LLM 生成会话摘要（含摘要文本、关键话题、轮次数、时间范围），落盘到 `.memory/session_summaries.jsonl`；摘要生成失败不阻断主对话链路；MemoryStorage 提供摘要读写能力供后续 prompt 压缩和展示使用
 
+#### 迭代记录 - 2026-03-24 23:30
+
+- 增强目标：Prompt 优先使用摘要压缩历史上下文 — 当有会话摘要时，用摘要替代 olderUserMessages 原始消息注入 system prompt，大幅降低 prompt 长度
+- 涉及文件：修改 `SystemPromptBuilder.java`（新增 sessionSummariesText 参数和对应 prompt 段落）、修改 `ConversationCli.java`（在 buildSystemPromptWithEvidence 中读取最近摘要并传递给 SystemPromptBuilder）
+- 实现方案：
+  1. SystemPromptBuilder.buildSystemPrompt 新增 sessionSummariesText 参数
+  2. 当 sessionSummariesText 非空时，在 prompt 中新增"## 4a. 历史对话摘要"段落展示摘要文本
+  3. 当有摘要可用时，跳过 olderUserMessages（原始冗长消息），改为仅展示摘要 — 压缩效果明显
+  4. ConversationCli.buildSystemPromptWithEvidence 中读取 conversationSummaryService.getRecentSummaries(3)，格式化后传递
+- 状态：已完成
+- 实际修改文件：
+  - 修改 `src/main/java/com/memsys/prompt/SystemPromptBuilder.java` — buildSystemPrompt 新增 sessionSummariesText 参数；当有摘要时用"历史对话摘要（压缩模式）"段落替代原始 recentMessages 注入；重要说明中新增摘要模式提示
+  - 修改 `src/main/java/com/memsys/cli/ConversationCli.java` — buildSystemPromptWithEvidence 中读取 conversationSummaryService.getRecentSummaries(3)，格式化为 Markdown 文本传递给 SystemPromptBuilder；当有摘要时跳过 olderUserMessages 实现 prompt 压缩
+- 实际结果：当 session_summaries.jsonl 中有摘要记录时，system prompt 第 4 节改为展示压缩后的摘要文本（含时间范围和话题关键词），同时跳过 olderUserMessages（原始第 11-40 轮用户消息），prompt 长度显著下降；无摘要时行为不变，兼容向后
+
 ---
 
 ### Phase 9 - 记忆治理、主动服务与多用户统一身份（计划中）
@@ -349,6 +364,7 @@
 12. Phase 7 Memory Reflection 骨架已落地：`MemoryReflectionService` + `ReflectionResult` + LLM 结构化判断 + `ConversationCli` 主链路接入，支持根据反思结果决定是否加载长期记忆。
 13. Phase 7 Memory Evidence Trace 已落地：`MemoryEvidenceTrace` 记录每轮证据使用，`/memory-debug` 命令可展示反思结果与证据加载详情。
 14. Phase 8 会话摘要基础已落地：`ConversationSummaryService` + LLM 结构化摘要 + `session_summaries.jsonl` 落盘 + 轮次阈值触发，支持对话达到 20 轮时自动生成摘要。
+15. Phase 8 Prompt 摘要压缩已落地：当有会话摘要时，system prompt 用摘要替代 olderUserMessages 原始消息注入，大幅降低 prompt 长度；无摘要时行为不变。
 
 ---
 

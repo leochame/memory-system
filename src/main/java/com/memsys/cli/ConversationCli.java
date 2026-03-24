@@ -396,11 +396,46 @@ public class ConversationCli {
             evidence.userInsightUsed = (userInsightsNarrative != null && !userInsightsNarrative.isBlank());
         }
 
+        // Phase 8: 读取会话摘要，用于替代 olderUserMessages 压缩 prompt
+        String sessionSummariesText = null;
+        if (useChatHistory) {
+            try {
+                List<Map<String, Object>> summaries = conversationSummaryService.getRecentSummaries(3);
+                if (summaries != null && !summaries.isEmpty()) {
+                    StringBuilder sb = new StringBuilder();
+                    for (Map<String, Object> s : summaries) {
+                        String summary = String.valueOf(s.getOrDefault("summary", ""));
+                        String timeRange = String.valueOf(s.getOrDefault("time_range", "unknown"));
+                        Object topicsObj = s.get("key_topics");
+                        String topics = "";
+                        if (topicsObj instanceof List<?> topicList) {
+                            topics = topicList.stream()
+                                    .map(String::valueOf)
+                                    .collect(Collectors.joining(", "));
+                        }
+                        sb.append("**[").append(timeRange).append("]** ");
+                        sb.append(summary);
+                        if (!topics.isEmpty()) {
+                            sb.append(" (话题: ").append(topics).append(")");
+                        }
+                        sb.append("\n\n");
+                    }
+                    sessionSummariesText = sb.toString().trim();
+                }
+            } catch (Exception e) {
+                log.warn("Failed to read session summaries for prompt compression, skipping", e);
+            }
+        }
+
+        // 当有摘要时，跳过 olderUserMessages（压缩效果）
+        List<Map<String, Object>> effectiveOlderMessages = (sessionSummariesText != null && !sessionSummariesText.isBlank())
+                ? List.of() : olderUserMessages;
+
         return promptBuilder.buildSystemPrompt(
             startupMap,
             userMetadata,
             assistantPreferences,
-            olderUserMessages,
+            effectiveOlderMessages,
             userInsightsNarrative,
             availableSkillNames,
             skillToolAvailable,
@@ -410,7 +445,8 @@ public class ConversationCli {
             pythonToolAvailable,
             taskToolAvailable,
             examplesContent,
-            ragContext
+            ragContext,
+            sessionSummariesText
         );
     }
 

@@ -23,7 +23,8 @@ public class SystemPromptBuilder {
             boolean pythonToolAvailable,
             boolean taskToolAvailable,
             String examplesContent,
-            List<RagService.RelevantMemory> ragContext
+            List<RagService.RelevantMemory> ragContext,
+            String sessionSummariesText
     ) {
         StringBuilder prompt = new StringBuilder();
 
@@ -53,8 +54,13 @@ public class SystemPromptBuilder {
             prompt.append("\n");
         }
 
-        // 4. Recent Conversation Content
-        if (recentMessages != null && !recentMessages.isEmpty()) {
+        // 4. Recent Conversation Content — 当有会话摘要时用摘要替代原始消息（Phase 8 压缩）
+        boolean hasSummaries = sessionSummariesText != null && !sessionSummariesText.isBlank();
+        if (hasSummaries) {
+            prompt.append("## 4. 历史对话摘要（压缩模式）\n");
+            prompt.append("以下是之前对话的结构化摘要，已替代原始对话记录以节省上下文空间：\n\n");
+            prompt.append(sessionSummariesText.trim()).append("\n\n");
+        } else if (recentMessages != null && !recentMessages.isEmpty()) {
             prompt.append("## 4. 最近对话内容\n");
             for (Map<String, Object> msg : recentMessages) {
                 String timestamp = (String) msg.get("timestamp");
@@ -110,6 +116,9 @@ public class SystemPromptBuilder {
         prompt.append("重要说明：\n");
         prompt.append("- 以上信息是你的背景知识和记忆，用于理解用户和提供个性化回复\n");
         prompt.append("- 最近 10 轮完整对话通过 messages 列表单独传递\n");
+        if (hasSummaries) {
+            prompt.append("- 更早的对话已被压缩为摘要（见第 4 节），请基于摘要理解历史上下文\n");
+        }
         if (ragToolAvailable) {
             prompt.append("- 如需更多相关记忆，可调用 `search_rag(query)` 工具做按需检索\n");
         }
