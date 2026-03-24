@@ -1,0 +1,322 @@
+package com.memsys.rag;
+
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
+import com.memsys.llm.LlmDtos.ExampleItem;
+import com.memsys.memory.model.Memory;
+import com.memsys.memory.storage.MemoryStorage;
+import dev.langchain4j.data.embedding.Embedding;
+import dev.langchain4j.model.embedding.EmbeddingModel;
+import dev.langchain4j.model.embedding.onnx.allminilml6v2.AllMiniLmL6V2EmbeddingModel;
+import lombok.AllArgsConstructor;
+import lombok.Data;
+import lombok.NoArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.stereotype.Service;
+
+import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
+import java.nio.file.StandardCopyOption;
+import java.time.LocalDateTime;
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
+
+/**
+ * 单文件 RAG 服务：包含索引、检索、持久化与对外业务接口。
+ */
+@Slf4j
+@Service
+public class RagService {
+
+    private static final double DEFAULT_CONTEXT_MIN_SCORE = 0.30;
+
+    private final MemoryStorage memoryStorage;
+    private final VectorIndex vectorIndex;
+
+    public RagService(
+            MemoryStorage memoryStorage,
+            @Value("${memory.base-path:.memory}") String basePath
+    ) {
+        this.memoryStorage = memoryStorage;
+        this.vectorIndex = new VectorIndex(Paths.get(basePath));
+    }
+
+    public void cleanupLegacyDocuments() {
+        List<VectorDocument> docs = vectorIndex.listDocuments();
+        int removed = 0;
+        for (VectorDocument doc : docs) {
+            String memoryType = String.valueOf(doc.getMetadata().get("memory_type"));
+            if ("MODEL_SET_CONTEXT".equals(memoryType) || "NOTABLE_HIGHLIGHTS".equals(memoryType)) {
+                vectorIndex.delete(doc.getId());
+                removed++;
+            }
+        }
+        if (removed > 0) {
+            log.info("Cleaned up {} legacy vector documents", removed);
+        }
+    }
+
+    public void indexMemory(String slotName, Memory memory) {
+        Map<String, Object> metadata = new HashMap<>();
+        metadata.put("slot_name", slotName);
+        metadata.put("memory_type", memory.getMemoryType().toString());
+        metadata.put("source", memory.getSource().toString());
+        metadata.put("created_at", String.valueOf(memory.getCreatedAt()));
+
+        vectorIndex.upsert("memory:" + slotName, memory.getContent(), metadata);
+    }
+
+    public void indexAllMemories() {
+        Map<String, Memory> all = memoryStorage.readUserInsights();
+        for (Map.Entry<String, Memory> entry : all.entrySet()) {
+            indexMemory(entry.getKey(), entry.getValue());
+        }
+        log.info("Indexed {} memories to vector store", all.size());
+    }
+
+    public List<RelevantMemory> searchMemories(String query, int topK, double minScore) {
+        List<SearchHit> hits = vectorIndex.search(query, topK, minScore);
+        List<RelevantMemory> results = new ArrayList<>(hits.size());
+        for (SearchHit hit : hits) {
+            VectorDocument doc = hit.document();
+            String slotName = (String) doc.getMetadata().getOrDefault("slot_name", doc.getId());
+            results.add(new RelevantMemory(slotName, doc.getContent(), hit.score(), doc.getMetadata()));
+        }
+        return results;
+    }
+
+    public List<RelevantMemory> buildSmartContext(String currentMessage, int maxMemories) {
+        return searchMemories(currentMessage, maxMemories, DEFAULT_CONTEXT_MIN_SCORE);
+    }
+
+    public void indexExample(ExampleItem example) {
+        String id = "example:" + System.currentTimeMillis() + "_" + example.problem().hashCode();
+        String content = "Problem: " + example.problem() + "\nSolution: " + example.solution();
+
+        Map<String, Object> metadata = new HashMap<>();
+        metadata.put("type", "example");
+        metadata.put("problem", example.problem());
+        metadata.put("solution", example.solution());
+        if (example.tags() != null && !example.tags().isEmpty()) {
+            metadata.put("tags", String.join(",", example.tags()));
+        }
+
+        vectorIndex.upsert(id, content, metadata);
+    }
+
+    public List<RelevantMemory> searchExamples(String query, int topK, double minScore) {
+        List<SearchHit> hits = vectorIndex.search(query, topK * 2, minScore);
+        List<RelevantMemory> examples = new ArrayList<>();
+        for (SearchHit hit : hits) {
+            VectorDocument doc = hit.document();
+            if (!"example".equals(doc.getMetadata().get("type"))) {
+                continue;
+            }
+            examples.add(new RelevantMemory(doc.getId(), doc.getContent(), hit.score(), doc.getMetadata()));
+            if (examples.size() >= topK) {
+                break;
+            }
+        }
+        return examples;
+    }
+
+    public Map<String, Object> getStatistics() {
+        List<VectorDocument> docs = vectorIndex.listDocuments();
+        long memoryCount = docs.stream().filter(doc -> doc.getId().startsWith("memory:")).count();
+        long conversationCount = docs.stream().filter(doc -> doc.getId().startsWith("conversation:")).count();
+        long exampleCount = docs.stream().filter(doc -> doc.getId().startsWith("example:")).count();
+
+        Map<String, Object> stats = new LinkedHashMap<>();
+        stats.put("total_documents", vectorIndex.size());
+        stats.put("memory_documents", memoryCount);
+        stats.put("conversation_documents", conversationCount);
+        stats.put("example_documents", exampleCount);
+        return stats;
+    }
+
+    public static class RelevantMemory {
+        private final String slotName;
+        private final String content;
+        private final double score;
+        private final Map<String, Object> metadata;
+
+        public RelevantMemory(String slotName, String content, double score, Map<String, Object> metadata) {
+            this.slotName = slotName;
+            this.content = content;
+            this.score = score;
+            this.metadata = metadata;
+        }
+
+        public String getSlotName() {
+            return slotName;
+        }
+
+        public String getContent() {
+            return content;
+        }
+
+        public double getScore() {
+            return score;
+        }
+
+        public Map<String, Object> getMetadata() {
+            return metadata;
+        }
+    }
+
+    private record SearchHit(VectorDocument document, double score) {
+    }
+
+    private static final class VectorIndex {
+
+        private static final int EMBEDDING_DIM = 384;
+
+        private final Path filePath;
+        private final ObjectMapper objectMapper;
+        private final EmbeddingModel embeddingModel;
+        private final Map<String, VectorDocument> documents = new HashMap<>();
+
+        private VectorIndex(Path basePath) {
+            this.filePath = basePath.resolve("vector_store.json");
+            this.objectMapper = new ObjectMapper();
+            this.objectMapper.registerModule(new JavaTimeModule());
+            this.embeddingModel = new AllMiniLmL6V2EmbeddingModel();
+            initialize(basePath);
+        }
+
+        private synchronized void upsert(String id, String content, Map<String, Object> metadata) {
+            VectorDocument doc = documents.getOrDefault(id, new VectorDocument());
+            doc.setId(id);
+            doc.setContent(content == null ? "" : content);
+            doc.setEmbedding(embed(doc.getContent()));
+            doc.setMetadata(metadata == null ? new HashMap<>() : new HashMap<>(metadata));
+            if (doc.getCreatedAt() == null) {
+                doc.setCreatedAt(LocalDateTime.now());
+            }
+            doc.setLastAccessed(LocalDateTime.now());
+            documents.put(id, doc);
+            save();
+        }
+
+        private synchronized List<SearchHit> search(String query, int topK, double minScore) {
+            if (documents.isEmpty() || query == null || query.isBlank() || topK <= 0) {
+                return List.of();
+            }
+
+            float[] queryEmbedding = embed(query);
+            List<SearchHit> hits = documents.values().stream()
+                    .map(doc -> new SearchHit(doc, cosineSimilarity(queryEmbedding, doc.getEmbedding())))
+                    .filter(hit -> hit.score() >= minScore)
+                    .sorted((a, b) -> Double.compare(b.score(), a.score()))
+                    .limit(topK)
+                    .toList();
+
+            if (!hits.isEmpty()) {
+                for (SearchHit hit : hits) {
+                    VectorDocument doc = hit.document();
+                    doc.setLastAccessed(LocalDateTime.now());
+                    doc.setHitCount(doc.getHitCount() + 1);
+                }
+                save();
+            }
+            return hits;
+        }
+
+        private synchronized void delete(String id) {
+            if (documents.remove(id) != null) {
+                save();
+            }
+        }
+
+        private synchronized List<VectorDocument> listDocuments() {
+            return new ArrayList<>(documents.values());
+        }
+
+        private synchronized int size() {
+            return documents.size();
+        }
+
+        private void initialize(Path basePath) {
+            try {
+                Files.createDirectories(basePath);
+                if (Files.exists(filePath)) {
+                    load();
+                } else {
+                    save();
+                }
+                log.info("Vector store initialized with {} documents", documents.size());
+            } catch (IOException e) {
+                log.error("Failed to initialize vector store", e);
+            }
+        }
+
+        private synchronized void save() {
+            try {
+                Path tempFile = filePath.resolveSibling(filePath.getFileName() + ".tmp");
+                objectMapper.writerWithDefaultPrettyPrinter().writeValue(tempFile.toFile(), documents);
+                Files.move(tempFile, filePath, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE);
+            } catch (IOException e) {
+                log.error("Failed to save vector store", e);
+            }
+        }
+
+        private synchronized void load() {
+            try {
+                Map<String, VectorDocument> loaded = objectMapper.readValue(
+                        Files.readString(filePath),
+                        objectMapper.getTypeFactory().constructMapType(
+                                HashMap.class, String.class, VectorDocument.class)
+                );
+                documents.clear();
+                documents.putAll(loaded);
+            } catch (IOException e) {
+                log.error("Failed to load vector store", e);
+            }
+        }
+
+        private float[] embed(String text) {
+            if (text == null || text.isBlank()) {
+                return new float[EMBEDDING_DIM];
+            }
+            Embedding embedding = embeddingModel.embed(text).content();
+            return embedding.vector();
+        }
+
+        private double cosineSimilarity(float[] a, float[] b) {
+            if (a == null || b == null || a.length != b.length || a.length == 0) {
+                return 0.0;
+            }
+            double dot = 0.0;
+            double normA = 0.0;
+            double normB = 0.0;
+            for (int i = 0; i < a.length; i++) {
+                dot += a[i] * b[i];
+                normA += a[i] * a[i];
+                normB += b[i] * b[i];
+            }
+            if (normA == 0.0 || normB == 0.0) {
+                return 0.0;
+            }
+            return dot / (Math.sqrt(normA) * Math.sqrt(normB));
+        }
+    }
+
+    @Data
+    @NoArgsConstructor
+    @AllArgsConstructor
+    private static class VectorDocument {
+        private String id;
+        private String content;
+        private float[] embedding;
+        private Map<String, Object> metadata;
+        private LocalDateTime createdAt;
+        private LocalDateTime lastAccessed;
+        private int hitCount;
+    }
+}

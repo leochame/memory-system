@@ -1,5 +1,7 @@
 package com.memsys.memory;
 
+import com.memsys.memory.model.Memory;
+import com.memsys.memory.storage.MemoryStorage;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
@@ -179,11 +181,7 @@ public class MemoryManager {
         Memory memory = findMemory(slotName);
         if (memory == null) return;
 
-        if (memory.getMemoryType() == Memory.MemoryType.MODEL_SET_CONTEXT) {
-            storage.deleteModelSetContext(slotName);
-        } else {
-            storage.deleteImplicitMemory(slotName);
-        }
+        storage.deleteUserInsight(slotName);
 
         youngQueue.remove(slotName);
         matureQueue.remove(slotName);
@@ -208,25 +206,14 @@ public class MemoryManager {
     // 辅助方法
 
     private Map<String, Memory> getAllMemories() {
-        Map<String, Memory> all = new HashMap<>();
-        all.putAll(storage.readModelSetContext());
-        all.putAll(storage.readImplicitMemories());
-        return all;
+        return new HashMap<>(storage.readUserInsights());
     }
 
     private Memory findMemory(String slotName) {
-        Memory memory = storage.readModelSetContext().get(slotName);
-        if (memory == null) {
-            memory = storage.readImplicitMemories().get(slotName);
-        }
-        return memory;
+        return storage.readUserInsights().get(slotName);
     }
 
     private void saveMemory(String slotName, Memory memory) {
-        if (memory.getMemoryType() == Memory.MemoryType.MODEL_SET_CONTEXT) {
-            storage.writeModelSetContext(slotName, memory);
-        } else {
-            storage.writeImplicitMemory(slotName, memory);
-        }
+        storage.writeUserInsight(slotName, memory);
     }
 }

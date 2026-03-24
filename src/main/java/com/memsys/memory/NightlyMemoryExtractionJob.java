@@ -1,5 +1,12 @@
 package com.memsys.memory;
 
+import com.memsys.llm.LlmExtractionService;
+import com.memsys.llm.LlmDtos.ExampleItem;
+import com.memsys.llm.LlmDtos.SkillGenerationResult;
+import com.memsys.memory.model.Memory;
+import com.memsys.memory.storage.MemoryStorage;
+import com.memsys.rag.RagService;
+import com.memsys.skill.SkillService;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
@@ -7,6 +14,7 @@ import org.springframework.stereotype.Component;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 
 @Slf4j
 @Component
@@ -14,32 +22,36 @@ public class NightlyMemoryExtractionJob {
 
     private final MemoryExtractor memoryExtractor;
     private final MemoryStorage storage;
-    private final MemoryManager memoryManager;
+    private final MemoryWriteService memoryWriteService;
     private final MemoryAsyncService memoryAsync;
+    private final LlmExtractionService llmExtractionService;
+    private final SkillService skillService;
+    private final RagService ragService;
 
     public NightlyMemoryExtractionJob(
             MemoryExtractor memoryExtractor,
             MemoryStorage storage,
-            MemoryManager memoryManager,
-            MemoryAsyncService memoryAsync
+            MemoryWriteService memoryWriteService,
+            MemoryAsyncService memoryAsync,
+            LlmExtractionService llmExtractionService,
+            SkillService skillService,
+            RagService ragService
     ) {
         this.memoryExtractor = memoryExtractor;
         this.storage = storage;
-        this.memoryManager = memoryManager;
+        this.memoryWriteService = memoryWriteService;
         this.memoryAsync = memoryAsync;
+        this.llmExtractionService = llmExtractionService;
+        this.skillService = skillService;
+        this.ragService = ragService;
     }
 
-    /**
-     * 每天凌晨 2 点执行隐式记忆提取
-     */
     @Scheduled(cron = "${scheduling.nightly-extraction-cron:0 0 2 * * ?}")
     public void nightlyMemoryExtraction() {
-        // 放入同一个单线程池，避免与对话链路的记忆写入并发冲突
         memoryAsync.submit("nightly_memory_extraction", () -> {
             log.info("开始执行夜间记忆提取任务");
 
             try {
-                // 获取最近的对话历史
                 LocalDateTime startDate = LocalDateTime.now().minusDays(7);
                 List<Map<String, Object>> recentHistory = storage.getHistory(startDate, null);
 
@@ -51,51 +63,44 @@ public class NightlyMemoryExtractionJob {
                 // 提取用户档案卡
                 List<Map<String, Object>> userInsights = memoryExtractor.extractUserInsights(recentHistory, "scheduled");
                 for (Map<String, Object> insight : userInsights) {
-                    saveMemory(insight);
+                    memoryWriteService.saveMemory(
+                        (String) insight.get("slot_name"),
+                        (String) insight.get("content"),
+                        Memory.MemoryType.USER_INSIGHT,
+                        Memory.SourceType.IMPLICIT,
+                        (String) insight.getOrDefault("confidence", "medium")
+                    );
                 }
 
-                // 提取显著话题
-                List<Map<String, Object>> highlights = memoryExtractor.extractNotableHighlights(recentHistory);
-                for (Map<String, Object> highlight : highlights) {
-                    saveMemory(highlight);
-                }
+                log.info("夜间记忆提取任务完成: insights={}", userInsights.size());
 
-                // 生成对话摘要（每周一次）
-                if (LocalDateTime.now().getDayOfWeek().getValue() == 1) {
-                    List<Map<String, Object>> summaries = memoryExtractor.summarizeConversations(recentHistory);
-                    for (Map<String, Object> summary : summaries) {
-                        saveMemory(summary);
+                // Skill 生成
+                try {
+                    Optional<SkillGenerationResult> skillResult = llmExtractionService.generateSkill(recentHistory);
+                    if (skillResult.isPresent()) {
+                        SkillGenerationResult skill = skillResult.get();
+                        skillService.saveSkill(skill.skill_name(), skill.skill_content());
+                        log.info("夜间任务生成 skill: {}", skill.skill_name());
                     }
+                } catch (Exception e) {
+                    log.warn("夜间 skill 生成失败", e);
                 }
 
-                log.info("夜间记忆提取任务完成");
+                // Example 提取
+                try {
+                    List<ExampleItem> examples = llmExtractionService.extractExamples(recentHistory);
+                    for (ExampleItem example : examples) {
+                        ragService.indexExample(example);
+                    }
+                    if (!examples.isEmpty()) {
+                        log.info("夜间任务提取 {} 个 examples", examples.size());
+                    }
+                } catch (Exception e) {
+                    log.warn("夜间 example 提取失败", e);
+                }
             } catch (Exception e) {
                 log.error("夜间记忆提取任务失败", e);
             }
         });
-    }
-
-    private void saveMemory(Map<String, Object> memoryData) {
-        String slotName = (String) memoryData.get("slot_name");
-        String content = (String) memoryData.get("content");
-        String memoryType = (String) memoryData.get("memory_type");
-
-        Memory memory = new Memory();
-        memory.setContent(content);
-        memory.setMemoryType(Memory.MemoryType.valueOf(memoryType.toUpperCase()));
-        memory.setSource(Memory.SourceType.IMPLICIT);
-        memory.setHitCount(0);
-        memory.setCreatedAt(LocalDateTime.now());
-        memory.setLastAccessed(LocalDateTime.now());
-        memory.setConfidence((String) memoryData.getOrDefault("confidence", "medium"));
-
-        if (memory.getMemoryType() == Memory.MemoryType.MODEL_SET_CONTEXT) {
-            storage.writeModelSetContext(slotName, memory);
-        } else {
-            storage.writeImplicitMemory(slotName, memory);
-        }
-
-        memoryManager.updateAccessTime(slotName);
-        log.info("已保存隐式记忆: {} -> {}", slotName, content);
     }
 }

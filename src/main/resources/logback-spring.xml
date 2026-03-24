@@ -2,34 +2,49 @@
 
     <!-- 日志文件目录 -->
     <property name="LOG_PATH" value="logs"/>
-    <property name="APP_NAME" value="memory-box"/>
+    <property name="LLM_IO_LOG_NAME" value="llm-io"/>
+    <property name="APP_LOG_NAME" value="memory-box"/>
 
-    <!-- 只写入文件，不输出到控制台，这样 CLI 终端就不会被日志打断 -->
-    <appender name="FILE" class="ch.qos.logback.core.rolling.RollingFileAppender">
-        <file>${LOG_PATH}/${APP_NAME}.log</file>
-
+    <appender name="APP_FILE" class="ch.qos.logback.core.rolling.RollingFileAppender">
         <rollingPolicy class="ch.qos.logback.core.rolling.TimeBasedRollingPolicy">
-            <!-- 每天一个文件，保留 30 天 -->
-            <fileNamePattern>${LOG_PATH}/${APP_NAME}.%d{yyyy-MM-dd}.log</fileNamePattern>
-            <maxHistory>30</maxHistory>
+            <fileNamePattern>${LOG_PATH}/${APP_LOG_NAME}.%d{yyyy-MM-dd}.log</fileNamePattern>
+            <maxHistory>14</maxHistory>
         </rollingPolicy>
 
         <encoder>
-            <pattern>%d{yyyy-MM-dd HH:mm:ss.SSS} %-5level [%thread] %logger{36} - %msg%n</pattern>
+            <pattern>%d{HH:mm:ss} %-5level [%thread] %logger - %msg%n</pattern>
             <charset>UTF-8</charset>
         </encoder>
     </appender>
 
-    <!-- 业务包单独配置（包括 MemoryBoxApplication 和所有 com.memsys.* 日志） -->
-    <logger name="com.memsys" level="INFO" additivity="false">
-        <appender-ref ref="FILE"/>
+    <!-- 仅保留大模型输入输出日志，按日期落盘（Kafka 风格的分段文件） -->
+    <appender name="LLM_IO_FILE" class="ch.qos.logback.core.rolling.RollingFileAppender">
+        <rollingPolicy class="ch.qos.logback.core.rolling.TimeBasedRollingPolicy">
+            <!-- 每天一个文件，保留 30 天 -->
+            <fileNamePattern>${LOG_PATH}/${LLM_IO_LOG_NAME}.%d{yyyy-MM-dd}.log</fileNamePattern>
+            <maxHistory>30</maxHistory>
+        </rollingPolicy>
+
+        <encoder>
+            <pattern>%d{HH:mm:ss} %-5level %msg%n</pattern>
+            <charset>UTF-8</charset>
+        </encoder>
+    </appender>
+
+    <!-- 仅开启 LLM I/O 专用 logger -->
+    <logger name="com.memsys.llm.io" level="INFO" additivity="false">
+        <appender-ref ref="LLM_IO_FILE"/>
     </logger>
 
-    <!-- Spring / 第三方库的日志 -->
-    <root level="WARN">
-        <appender-ref ref="FILE"/>
-    </root>
+    <!-- IM/任务链路落盘，便于联调排障 -->
+    <logger name="com.memsys.im" level="INFO" additivity="false">
+        <appender-ref ref="APP_FILE"/>
+    </logger>
+    <logger name="com.memsys.task" level="INFO" additivity="false">
+        <appender-ref ref="APP_FILE"/>
+    </logger>
+
+    <!-- 关闭 Spring 和其他系统日志落盘 -->
+    <root level="OFF"/>
 
 </configuration>
-
-

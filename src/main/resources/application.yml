@@ -1,6 +1,9 @@
 spring:
   application:
     name: memory-box
+  main:
+    banner-mode: "off"
+    log-startup-info: false
 
 # LLM 配置
 llm:
@@ -8,6 +11,10 @@ llm:
   base-url: ${OPENAI_BASE_URL:https://api.openai.com/v1}
   model-name: ${OPENAI_MODEL:gpt-4}
   temperature: 0.7
+  max-tool-rounds: 4
+  retry:
+    max-attempts: 2
+    backoff-ms: 300
 
 # 记忆管理配置
 memory:
@@ -21,7 +28,67 @@ memory:
     queue-capacity: 512
     shutdown-timeout-seconds: 5
 
+# RAG 配置
+rag:
+  enabled: true
+  min-similarity-score: 0.35
+  max-search-results: 5
+  index-conversation-days: 30
+
+tool:
+  shell:
+    enabled: true
+    timeout-seconds: 8
+    max-output-chars: 6000
+    workspace-root: .
+  shell-command:
+    enabled: true
+    shell: /bin/zsh
+    timeout-seconds: 30
+    max-output-chars: 12000
+    workspace-root: .
+  python:
+    enabled: true
+    interpreter: ${PYTHON_EXECUTABLE:python3}
+    timeout-seconds: 20
+    max-output-chars: 12000
+    scripts-dir: scripts
+
+# CLI 展示配置
+cli:
+  enabled: true
+  theme: classic   # classic | ocean | mono
+  show-footer: true
+  show-shortcuts-panel: false
+
 # 定时任务配置
 scheduling:
   enabled: true
   nightly-extraction-cron: "0 0 2 * * ?"
+  task-reminder-check-ms: 30000
+  im-reminder-enabled: true
+  task-execution-shell: /bin/zsh
+  task-execution-timeout-seconds: 60
+  task-execution-max-output-chars: 12000
+
+# IM 接入配置（飞书/Telegram）
+im:
+  api:
+    enabled: ${IM_API_ENABLED:true}
+  telegram:
+    enabled: ${IM_TELEGRAM_ENABLED:false}
+    base-url: https://api.telegram.org
+    bot-token: ${TELEGRAM_BOT_TOKEN:}
+    webhook-secret: ${TELEGRAM_WEBHOOK_SECRET:}
+    webhook-url: ${TELEGRAM_WEBHOOK_URL:}
+    send-timeout-seconds: 8
+  feishu:
+    enabled: ${IM_FEISHU_ENABLED:false}
+    long-connection-enabled: ${FEISHU_LONG_CONNECTION_ENABLED:true}
+    webhook-enabled: ${FEISHU_WEBHOOK_ENABLED:false}
+    base-url: https://open.feishu.cn
+    app-id: ${FEISHU_APP_ID:}
+    app-secret: ${FEISHU_APP_SECRET:}
+    verification-token: ${FEISHU_VERIFICATION_TOKEN:}
+    webhook-url: ${FEISHU_WEBHOOK_URL:}
+    send-timeout-seconds: 8

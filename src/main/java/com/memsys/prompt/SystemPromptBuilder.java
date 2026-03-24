@@ -1,6 +1,6 @@
 package com.memsys.prompt;
 
-import com.memsys.memory.Memory;
+import com.memsys.rag.RagService;
 import org.springframework.stereotype.Component;
 
 import java.util.List;
@@ -9,50 +9,53 @@ import java.util.Map;
 @Component
 public class SystemPromptBuilder {
 
-    /**
-     * 构建完整的系统提示词，按六个区块组织
-     */
     public String buildSystemPrompt(
+            String agentGuide,
             Map<String, Object> userMetadata,
             Map<String, Object> assistantPreferences,
             List<Map<String, Object>> recentMessages,
-            Map<String, Memory> modelSetContext,
-            Map<String, Memory> notableHighlights,
-            Map<String, Memory> userInsights
+            String userInsightsNarrative,
+            List<String> availableSkillNames,
+            boolean skillToolAvailable,
+            boolean ragToolAvailable,
+            boolean shellToolAvailable,
+            boolean shellCommandToolAvailable,
+            boolean pythonToolAvailable,
+            boolean taskToolAvailable,
+            String examplesContent,
+            List<RagService.RelevantMemory> ragContext
     ) {
         StringBuilder prompt = new StringBuilder();
 
         prompt.append("# 系统提示词\n\n");
 
-        // 1. User Interaction Metadata
+        // 1. Agent Navigation
+        if (agentGuide != null && !agentGuide.isBlank()) {
+            prompt.append("## 1. 会话启动导航地图\n");
+            prompt.append(agentGuide.trim()).append("\n\n");
+        }
+
+        // 2. User Interaction Metadata
         if (userMetadata != null && !userMetadata.isEmpty()) {
-            prompt.append("## 1. 用户交互元数据\n");
+            prompt.append("## 2. 用户交互元数据\n");
             userMetadata.forEach((key, value) ->
                 prompt.append(String.format("- %s: %s\n", key, value))
             );
             prompt.append("\n");
         }
 
-        // 2. Assistant Response Preferences
+        // 3. Assistant Response Preferences
         if (assistantPreferences != null && !assistantPreferences.isEmpty()) {
-            prompt.append("## 2. 助手回复偏好\n");
+            prompt.append("## 3. 助手回复偏好\n");
             assistantPreferences.forEach((key, value) ->
                 prompt.append(String.format("- %s: %s\n", key, value))
             );
-            Object confidence = assistantPreferences.get("confidence");
-            if (confidence != null) {
-                prompt.append(String.format("**置信度**: %s\n", confidence));
-            }
             prompt.append("\n");
         }
 
-        // 3. Recent Conversation Content（最近对话内容）
-        // 包含第 11-40 轮的用户消息，作为"连续性日志"连接过去的讨论与当前对话
-        // 注意：这里只显示用户的消息，不包括助手的回复
+        // 4. Recent Conversation Content
         if (recentMessages != null && !recentMessages.isEmpty()) {
-            prompt.append("## 3. 最近对话内容（Recent Conversation Content）\n");
-            prompt.append("以下是你最近与用户的对话记录，每次对话都有时间戳。这个\"连续性日志\"将过去的讨论与当前的对话连接起来。\n\n");
-            
+            prompt.append("## 4. 最近对话内容\n");
             for (Map<String, Object> msg : recentMessages) {
                 String timestamp = (String) msg.get("timestamp");
                 String message = (String) msg.get("message");
@@ -61,50 +64,75 @@ public class SystemPromptBuilder {
             prompt.append("\n");
         }
 
-        // 4. Model Set Context
-        if (modelSetContext != null && !modelSetContext.isEmpty()) {
-            prompt.append("## 4. 对话历史摘要（Model Set Context）\n");
-            modelSetContext.forEach((slotName, memory) ->
-                prompt.append(String.format("### %s\n%s\n\n", slotName, memory.getContent()))
-            );
+        // 5. User Insights
+        if (userInsightsNarrative != null && !userInsightsNarrative.isBlank()) {
+            prompt.append("## 5. 用户画像正文（User Insights）\n");
+            prompt.append(userInsightsNarrative.trim()).append("\n\n");
         }
 
-        // 5. User Insights
-        if (userInsights != null && !userInsights.isEmpty()) {
-            prompt.append("## 5. 用户档案卡（User Insights）\n");
-            userInsights.forEach((slotName, memory) -> {
-                prompt.append(String.format("- **%s**: %s", slotName, memory.getContent()));
-                if (memory.getConfidence() != null) {
-                    prompt.append(String.format(" [置信度: %s]", memory.getConfidence()));
-                }
-                prompt.append("\n");
-            });
+        // 6. Skill Load Strategy
+        if (availableSkillNames != null && !availableSkillNames.isEmpty()) {
+            prompt.append("## 6. Skill 加载策略\n");
+            prompt.append("当前不会自动注入全部 skill 正文。可用 skill 名称如下：\n");
+            for (String skillName : availableSkillNames) {
+                prompt.append("- ").append(skillName).append("\n");
+            }
+            prompt.append("\n");
+            if (skillToolAvailable) {
+                prompt.append("如需某个 skill 的正文，请调用 `load_skill(name)` 工具按名称加载，避免全量读取。\n\n");
+            } else {
+                prompt.append("当前未提供 skill 加载工具，直接基于现有上下文回答用户。\n\n");
+            }
+        } else if (!skillToolAvailable) {
+            prompt.append("## 6. Skill 加载策略\n");
+            prompt.append("当前没有可加载的 skill，直接基于现有上下文回答用户。\n\n");
+        }
+
+        // 7. Examples
+        if (examplesContent != null && !examplesContent.isBlank()) {
+            prompt.append("## 7. 相关案例（RAG Examples）\n");
+            prompt.append("以下是与当前对话相关的历史 Problem/Solution 案例：\n\n");
+            prompt.append(examplesContent);
             prompt.append("\n");
         }
 
-        // 6. Notable Highlights
-        if (notableHighlights != null && !notableHighlights.isEmpty()) {
-            prompt.append("## 6. 显著话题（Notable Highlights）\n");
-            notableHighlights.forEach((slotName, memory) ->
-                prompt.append(String.format("- **%s**: %s\n", slotName, memory.getContent()))
-            );
+        // 8. RAG Memory Context
+        if (ragContext != null && !ragContext.isEmpty()) {
+            prompt.append("## 8. 语义相关记忆（RAG Retrieved Context）\n");
+            for (RagService.RelevantMemory mem : ragContext) {
+                prompt.append(String.format("- **%s** (相关度: %.0f%%): %s\n",
+                    mem.getSlotName(), mem.getScore() * 100, mem.getContent()));
+            }
             prompt.append("\n");
         }
 
         prompt.append("---\n\n");
         prompt.append("重要说明：\n");
         prompt.append("- 以上信息是你的背景知识和记忆，用于理解用户和提供个性化回复\n");
-        prompt.append("- 最近 10 轮完整对话（包括用户和助手的回复）会通过 messages 列表单独传递\n");
-        prompt.append("- 第 3 部分的\"最近对话内容\"是第 11-40 轮的用户消息，作为连续性日志帮助你了解更早的讨论主题\n");
+        prompt.append("- 最近 10 轮完整对话通过 messages 列表单独传递\n");
+        if (ragToolAvailable) {
+            prompt.append("- 如需更多相关记忆，可调用 `search_rag(query)` 工具做按需检索\n");
+        }
+        if (shellToolAvailable) {
+            prompt.append("- 如需查询项目文件，可调用 `run_shell(command, cwd)` 进行只读 shell 检索\n");
+        }
+        if (shellCommandToolAvailable) {
+            prompt.append("- 当用户明确要求执行命令或修改文件时，可调用 `run_shell_command(command, cwd)`\n");
+        }
+        if (pythonToolAvailable) {
+            prompt.append("- 如需执行自动化脚本，可调用 `run_python_script(script, args_json)`（仅允许 scripts 目录下 .py 文件）\n");
+            prompt.append("- 当用户明确要求执行脚本时，应优先调用该工具并基于脚本输出给出结果\n");
+        }
+        if (taskToolAvailable) {
+            prompt.append("- 当用户明确提出提醒/日程需求时，可调用 `create_task(...)` 创建定时任务\n");
+            prompt.append("- 若前端已提供明确标题/时间/命令，优先传 `title/due_at_iso/execute_command` 直接建任务\n");
+        }
         prompt.append("- 请根据 messages 列表中的实际对话内容进行回复，同时参考背景信息提供个性化回复\n");
         prompt.append("\n请基于以上背景信息和 messages 列表中的实际对话内容，与用户进行对话。\n");
 
         return prompt.toString();
     }
 
-    /**
-     * 构建简化版系统提示词（临时对话模式）
-     */
     public String buildTemporaryPrompt() {
         return """
             # 临时对话模式

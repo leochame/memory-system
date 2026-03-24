@@ -7,6 +7,7 @@ import com.memsys.memory.MemoryManager;
 import com.memsys.memory.MemoryReflectionService;
 import com.memsys.memory.MemoryWriteService;
 import com.memsys.memory.storage.MemoryStorage;
+import com.memsys.memory.model.MemoryEvidenceTrace;
 import com.memsys.memory.model.ReflectionResult;
 import com.memsys.prompt.AgentGuideService;
 import com.memsys.prompt.SystemPromptBuilder;
@@ -60,6 +61,7 @@ public class ConversationCli {
     private boolean temporaryMode = false;
     private boolean appendedStartupMapForSession = false;
     private volatile ReflectionResult lastReflectionResult = null;
+    private volatile MemoryEvidenceTrace lastEvidenceTrace = null;
 
     public ConversationCli(
             LlmClient llmClient,
@@ -257,7 +259,10 @@ public class ConversationCli {
         boolean shellCommandToolAvailable = hasTool(tools, "run_shell_command");
         boolean pythonToolAvailable = hasTool(tools, "run_python_script");
         boolean taskToolAvailable = hasTool(tools, "create_task");
-        String systemPrompt = buildSystemPrompt(
+
+        // 构建系统提示词并记录证据使用情况
+        EvidenceCollector evidence = new EvidenceCollector();
+        String systemPrompt = buildSystemPromptWithEvidence(
                 shouldLoadMemory,
                 useChatHistory,
                 currentMessage,
@@ -268,13 +273,44 @@ public class ConversationCli {
                 shellToolAvailable,
                 shellCommandToolAvailable,
                 pythonToolAvailable,
-                taskToolAvailable
+                taskToolAvailable,
+                evidence
         );
+
+        // 记录 Memory Evidence Trace
+        String truncatedMessage = currentMessage.length() > 200
+                ? currentMessage.substring(0, 200) + "..."
+                : currentMessage;
+        this.lastEvidenceTrace = new MemoryEvidenceTrace(
+                LocalDateTime.now(),
+                truncatedMessage,
+                reflection,
+                shouldLoadMemory,
+                evidence.topOfMindCount,
+                evidence.ragResultCount,
+                evidence.examplesUsed,
+                evidence.userInsightUsed,
+                availableSkillNames.size(),
+                shouldLoadMemory ? "记忆已加载" : "反思判断不需要记忆，已跳过"
+        );
+
+        log.info("Memory Evidence Trace: loaded={}, topOfMind={}, rag={}, insight={}, examples={}, skills={}",
+                shouldLoadMemory, evidence.topOfMindCount, evidence.ragResultCount,
+                evidence.userInsightUsed, evidence.examplesUsed, availableSkillNames.size());
+
         return llmClient.chatWithTools(systemPrompt, messages, tools, 0.7);
     }
 
+    /** 内部辅助类，用于在构建 system prompt 时收集证据使用数据 */
+    private static class EvidenceCollector {
+        int topOfMindCount = 0;
+        int ragResultCount = 0;
+        boolean examplesUsed = false;
+        boolean userInsightUsed = false;
+    }
+
     @SuppressWarnings("unchecked")
-    private String buildSystemPrompt(boolean useSavedMemories,
+    private String buildSystemPromptWithEvidence(boolean useSavedMemories,
                                      boolean useChatHistory,
                                      String currentMessage,
                                      String startupMap,
@@ -284,7 +320,8 @@ public class ConversationCli {
                                      boolean shellToolAvailable,
                                      boolean shellCommandToolAvailable,
                                      boolean pythonToolAvailable,
-                                     boolean taskToolAvailable) {
+                                     boolean taskToolAvailable,
+                                     EvidenceCollector evidence) {
         if (!useSavedMemories && !useChatHistory) {
             return promptBuilder.buildTemporaryPrompt();
         }
@@ -335,6 +372,14 @@ public class ConversationCli {
             } catch (Exception e) {
                 log.warn("Example search failed", e);
             }
+        }
+
+        // 收集证据使用数据
+        if (evidence != null) {
+            evidence.topOfMindCount = topMemories.size();
+            evidence.ragResultCount = (ragContext != null) ? ragContext.size() : 0;
+            evidence.examplesUsed = (examplesContent != null && !examplesContent.isBlank());
+            evidence.userInsightUsed = (userInsightsNarrative != null && !userInsightsNarrative.isBlank());
         }
 
         return promptBuilder.buildSystemPrompt(
@@ -408,6 +453,13 @@ public class ConversationCli {
      */
     public ReflectionResult getLastReflectionResult() {
         return lastReflectionResult;
+    }
+
+    /**
+     * 获取最近一轮的 Memory Evidence Trace，供 /memory-debug 命令展示完整证据审计。
+     */
+    public MemoryEvidenceTrace getLastEvidenceTrace() {
+        return lastEvidenceTrace;
     }
 
     /**

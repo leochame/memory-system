@@ -222,6 +222,21 @@
   - 修改 `src/main/java/com/memsys/cli/ConversationCli.java` — 接入反思链路，根据反思结果决定是否加载记忆
 - 实际结果：系统在回答前先通过 LLM 判断"当前问题是否需要长期记忆"，不需要时跳过记忆加载；反思失败时 fallback 为默认加载记忆，不阻断主链路
 
+#### 迭代记录 - 2026-03-24 21:30
+
+- 增强目标：实现 `/memory-debug` 命令与 Memory Evidence Trace 数据结构，让每轮回答的记忆反思与证据使用情况可观测
+- 涉及文件：新增 `src/main/java/com/memsys/memory/model/MemoryEvidenceTrace.java`、修改 `ConversationCli.java`（记录证据跟踪）、修改 `CliRunner.java`（注册 `/memory-debug` 命令）
+- 实现方案：
+  1. 新增 `MemoryEvidenceTrace` record，记录一轮回答中的反思结果 + 实际加载了哪些记忆源（TopOfMind/RAG/UserInsight/Example/Skill）
+  2. 在 `ConversationCli.generateResponse()` 中构建 `MemoryEvidenceTrace`，记录本轮使用的证据类型与数量
+  3. 在 `CliRunner` 中注册 `/memory-debug` 命令，展示最近一轮的反思结果和证据使用详情
+- 状态：已完成
+- 实际修改文件：
+  - 新增 `src/main/java/com/memsys/memory/model/MemoryEvidenceTrace.java` — 证据跟踪数据模型（record），记录反思结果 + 各证据源使用情况 + 可视化展示方法
+  - 修改 `src/main/java/com/memsys/cli/ConversationCli.java` — generateResponse 中构建 EvidenceTrace，记录 TopOfMind/RAG/UserInsight/Example/Skill 使用量；新增 `getLastEvidenceTrace()` 访问器
+  - 修改 `src/main/java/com/memsys/cli/CliRunner.java` — 注册 `/memory-debug` 命令，展示最近一轮反思与证据使用详情
+- 实际结果：用户可通过 `/memory-debug` 命令查看最近一轮回答的完整记忆反思过程（需要/不需要记忆、判断理由、证据用途）和实际证据加载情况（TopOfMind 条数、RAG 命中数、用户画像、Example、Skill）
+
 ---
 
 ### Phase 8 - 会话摘要与场景化展示（计划中）
@@ -311,6 +326,7 @@
 10. 真实 API E2E 已落地手动回归入口：`RealApiE2ETest` + `scripts/run-real-api-e2e.sh`（默认不自动执行）。
 11. 项目毕设升级方向已明确收敛为：Memory Reflection、证据视图、会话摘要、场景化展示、多用户身份映射、自然语言任务、主动服务、案例蒸馏与评测。
 12. Phase 7 Memory Reflection 骨架已落地：`MemoryReflectionService` + `ReflectionResult` + LLM 结构化判断 + `ConversationCli` 主链路接入，支持根据反思结果决定是否加载长期记忆。
+13. Phase 7 Memory Evidence Trace 已落地：`MemoryEvidenceTrace` 记录每轮证据使用，`/memory-debug` 命令可展示反思结果与证据加载详情。
 
 ---
 

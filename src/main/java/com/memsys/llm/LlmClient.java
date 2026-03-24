@@ -1,51 +1,77 @@
 package com.memsys.llm;
 
-import com.memsys.llm.dto.ConversationSummariesResult;
-import com.memsys.llm.dto.ConversationSummaryItem;
-import com.memsys.llm.dto.ExplicitMemoryResult;
-import com.memsys.llm.dto.TopicItem;
-import com.memsys.llm.dto.TopicsResult;
-import com.memsys.llm.dto.UserInsightItem;
-import com.memsys.llm.dto.UserInsightsResult;
-import com.memsys.llm.schema.Schemas;
-import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import dev.langchain4j.agent.tool.ToolExecutionRequest;
+import dev.langchain4j.agent.tool.ToolSpecification;
+import dev.langchain4j.data.message.AiMessage;
+import dev.langchain4j.data.message.ChatMessage;
+import dev.langchain4j.data.message.SystemMessage;
+import dev.langchain4j.data.message.ToolExecutionResultMessage;
+import dev.langchain4j.data.message.UserMessage;
 import dev.langchain4j.model.chat.request.ChatRequest;
 import dev.langchain4j.model.chat.request.ResponseFormat;
 import dev.langchain4j.model.chat.request.ResponseFormatType;
 import dev.langchain4j.model.chat.request.json.JsonSchema;
-import dev.langchain4j.data.message.AiMessage;
-import dev.langchain4j.data.message.ChatMessage;
-import dev.langchain4j.data.message.SystemMessage;
-import dev.langchain4j.data.message.UserMessage;
 import dev.langchain4j.model.openai.OpenAiChatModel;
 import lombok.extern.slf4j.Slf4j;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
-import java.time.LocalDate;
-import java.util.*;
-import java.util.stream.Collectors;
+import java.util.ArrayList;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.function.Function;
 
+/**
+ * 通用 LLM 客户端：只负责与模型通信，不包含业务提取逻辑。
+ */
 @Slf4j
 @Component
 public class LlmClient {
 
-    private final OpenAiChatModel model;
-    private final ObjectMapper objectMapper = new ObjectMapper();
+    private static final Logger llmIoLog = LoggerFactory.getLogger("com.memsys.llm.io");
+    private static final int LOG_TEXT_LIMIT = 8_000;
+    private static final String GENERIC_ERROR_MESSAGE = "抱歉，我遇到了一些问题，请稍后再试。";
 
+    private final ChatModelGateway modelGateway;
+    private final int maxToolRounds;
+    private final int maxRetryAttempts;
+    private final long retryBackoffMillis;
+    final ObjectMapper objectMapper = new ObjectMapper();
+
+    @Autowired
     public LlmClient(
             @Value("${llm.api-key}") String apiKey,
             @Value("${llm.base-url}") String baseUrl,
-            @Value("${llm.model-name}") String modelName
+            @Value("${llm.model-name}") String modelName,
+            @Value("${llm.max-tool-rounds:4}") int maxToolRounds,
+            @Value("${llm.retry.max-attempts:2}") int maxRetryAttempts,
+            @Value("${llm.retry.backoff-ms:300}") long retryBackoffMillis
     ) {
-        this.model = OpenAiChatModel.builder()
-            .apiKey(apiKey)
-            .baseUrl(baseUrl)
-            .modelName(modelName)
-            .strictJsonSchema(true)
-            .build();
+        this(new OpenAiChatModelGateway(
+                OpenAiChatModel.builder()
+                        .apiKey(apiKey)
+                        .baseUrl(baseUrl)
+                        .modelName(modelName)
+                        .strictJsonSchema(true)
+                        .build()
+        ), maxToolRounds, maxRetryAttempts, retryBackoffMillis);
         log.info("LLM client initialized with model: {}", modelName);
+    }
+
+    LlmClient(ChatModelGateway modelGateway, int maxToolRounds) {
+        this(modelGateway, maxToolRounds, 1, 0);
+    }
+
+    LlmClient(ChatModelGateway modelGateway, int maxToolRounds, int maxRetryAttempts, long retryBackoffMillis) {
+        this.modelGateway = modelGateway;
+        this.maxToolRounds = maxToolRounds;
+        this.maxRetryAttempts = Math.max(1, maxRetryAttempts);
+        this.retryBackoffMillis = Math.max(0, retryBackoffMillis);
     }
 
     /**
@@ -57,30 +83,112 @@ public class LlmClient {
         if (systemPrompt != null && !systemPrompt.isEmpty()) {
             finalMessages.add(new SystemMessage(systemPrompt));
         }
-
         if (messages != null && !messages.isEmpty()) {
             finalMessages.addAll(messages);
         }
 
         try {
-            return model.generate(finalMessages).content().text();
+            logLlmInput("chat", finalMessages, List.of(), null);
+            String response = callWithRetry("chat", () -> modelGateway.generateText(finalMessages));
+            logLlmOutput("chat", response);
+            return response;
         } catch (Exception e) {
             log.error("Failed to chat with LLM", e);
-            return "抱歉，我遇到了一些问题，请稍后再试。";
+            logLlmError("chat", e);
+            return GENERIC_ERROR_MESSAGE;
         }
     }
 
-    private <T> T chatWithJsonSchema(String systemPrompt,
-                                     List<ChatMessage> messages,
-                                     JsonSchema jsonSchema,
-                                     Class<T> clazz) {
-        List<ChatMessage> finalMessages = new ArrayList<>();
-        if (systemPrompt != null && !systemPrompt.isEmpty()) {
-            finalMessages.add(new SystemMessage(systemPrompt));
+    public String chatWithTools(String systemPrompt,
+                                List<ChatMessage> messages,
+                                List<ToolDefinition> toolDefinitions,
+                                double temperature) {
+        List<ChatMessage> conversation = composeMessages(systemPrompt, messages);
+        if (toolDefinitions == null || toolDefinitions.isEmpty()) {
+            return chat(systemPrompt, messages, temperature);
         }
-        if (messages != null && !messages.isEmpty()) {
-            finalMessages.addAll(messages);
+
+        List<ToolSpecification> toolSpecifications = toolDefinitions.stream()
+                .map(ToolDefinition::specification)
+                .toList();
+        Map<String, ToolDefinition> toolsByName = new LinkedHashMap<>();
+        for (ToolDefinition definition : toolDefinitions) {
+            toolsByName.put(definition.specification().name(), definition);
         }
+
+        for (int round = 0; round <= maxToolRounds; round++) {
+            try {
+                logLlmInput("chatWithTools", conversation, toolSpecifications, round);
+                AiMessage aiMessage = callWithRetry(
+                        "chatWithTools",
+                        () -> modelGateway.generateWithTools(conversation, toolSpecifications)
+                );
+                if (aiMessage == null) {
+                    log.warn("LLM returned null AiMessage during tool chat");
+                    logLlmOutput("chatWithTools", "[null ai message]");
+                    return GENERIC_ERROR_MESSAGE;
+                }
+
+                logLlmAiMessage("chatWithTools", round, aiMessage);
+                conversation.add(aiMessage);
+
+                if (!aiMessage.hasToolExecutionRequests()) {
+                    String text = aiMessage.text();
+                    if (text != null && !text.isBlank()) {
+                        logLlmOutput("chatWithTools", text);
+                        return text;
+                    }
+                    log.warn("LLM finished tool chat without text response");
+                    logLlmOutput("chatWithTools", "[blank ai message]");
+                    return GENERIC_ERROR_MESSAGE;
+                }
+
+                if (round == maxToolRounds) {
+                    log.warn("Tool chat exceeded max rounds: {}", maxToolRounds);
+                    String text = aiMessage.text();
+                    logLlmOutput("chatWithTools", text);
+                    return (text != null && !text.isBlank())
+                            ? text
+                            : GENERIC_ERROR_MESSAGE;
+                }
+
+                for (ToolExecutionRequest request : aiMessage.toolExecutionRequests()) {
+                    ToolDefinition tool = toolsByName.get(request.name());
+                    String result;
+                    if (tool == null) {
+                        result = "Tool not found: " + request.name();
+                        log.warn("Model requested unknown tool: {}", request.name());
+                    } else {
+                        try {
+                            result = tool.executor().apply(request);
+                        } catch (Exception e) {
+                            log.warn("Tool execution failed: {}", request.name(), e);
+                            result = "Tool execution failed: " + e.getMessage();
+                        }
+                    }
+                    logLlmToolResult(round, request, result);
+                    conversation.add(ToolExecutionResultMessage.from(request, result));
+                }
+            } catch (Exception e) {
+                log.error("Failed to chat with LLM tools", e);
+                logLlmError("chatWithTools", e);
+                return GENERIC_ERROR_MESSAGE;
+            }
+        }
+
+        logLlmOutput("chatWithTools", "[fallback generic error]");
+        return GENERIC_ERROR_MESSAGE;
+    }
+
+    /**
+     * 使用 JSON Schema 约束的结构化输出聊天。
+     * Package-visible，供 LlmExtractionService 调用。
+     */
+    <T> T chatWithJsonSchema(String systemPrompt,
+                             List<ChatMessage> messages,
+                             JsonSchema jsonSchema,
+                             Class<T> clazz) {
+        List<ChatMessage> finalMessages = composeMessages(systemPrompt, messages);
 
         ChatRequest request = ChatRequest.builder()
                 .messages(finalMessages)
@@ -90,19 +198,28 @@ public class LlmClient {
                         .build())
                 .build();
 
-        String json = model.chat(request).aiMessage().text();
+        logLlmInput("chatWithJsonSchema", finalMessages, List.of(), null);
+        String json;
+        try {
+            json = callWithRetry("chatWithJsonSchema", () -> modelGateway.generateStructured(request));
+        } catch (Exception e) {
+            logLlmError("chatWithJsonSchema", e);
+            throw new RuntimeException("Failed to call structured JSON API", e);
+        }
+        logLlmOutput("chatWithJsonSchema", json);
         try {
             return objectMapper.readValue(json, clazz);
         } catch (Exception e) {
+            logLlmError("chatWithJsonSchema", e);
             throw new RuntimeException("Failed to parse structured JSON response: " + json, e);
         }
     }
 
     /**
      * 兼容旧实现的辅助方法：从 Map 结构转换为 ChatMessage 列表后再调用主入口。
-     * 目前仅在本类内部使用。
+     * Package-visible，供 LlmExtractionService 的 legacy fallback 使用。
      */
-    private String chatWithRoleMaps(String systemPrompt, List<Map<String, String>> messages, double temperature) {
+    String chatWithRoleMaps(String systemPrompt, List<Map<String, String>> messages, double temperature) {
         List<ChatMessage> chatMessages = new ArrayList<>();
 
         if (messages != null) {
@@ -121,352 +238,20 @@ public class LlmClient {
         return chat(systemPrompt, chatMessages, temperature);
     }
 
-    public Map<String, Object> extractExplicitMemory(String userMessage) {
-        try {
-            String instruction = """
-                分析以下用户消息，判断是否包含需要记住的显式信息（如用户偏好、个人信息等）。
-                - 如果不包含，has_memory=false，其他字段填空字符串或任意合法枚举值。
-                - 如果包含，has_memory=true，并给出 slot_name/content/memory_type/source。
-                
-                用户消息：
-                %s
-                """.formatted(userMessage);
-
-            ExplicitMemoryResult parsed = chatWithJsonSchema(
-                    null,
-                    List.of(new UserMessage(instruction)),
-                    Schemas.explicitMemoryResult(),
-                    ExplicitMemoryResult.class
-            );
-
-            if (!parsed.has_memory()) {
-                return Map.of("has_memory", false);
-            }
-
-            Map<String, Object> result = new HashMap<>();
-            result.put("has_memory", true);
-            result.put("slot_name", Optional.ofNullable(parsed.slot_name()).orElse(""));
-            result.put("content", Optional.ofNullable(parsed.content()).orElse(""));
-            result.put("memory_type", Optional.ofNullable(parsed.memory_type()).orElse(""));
-            result.put("source", Optional.ofNullable(parsed.source()).orElse("explicit"));
-            return result;
-        } catch (Exception e) {
-            log.warn("Structured explicit memory extraction failed; falling back to legacy parsing", e);
-            return extractExplicitMemoryLegacy(userMessage);
+    private List<ChatMessage> composeMessages(String systemPrompt, List<ChatMessage> messages) {
+        List<ChatMessage> finalMessages = new ArrayList<>();
+        if (systemPrompt != null && !systemPrompt.isEmpty()) {
+            finalMessages.add(new SystemMessage(systemPrompt));
         }
+        if (messages != null && !messages.isEmpty()) {
+            finalMessages.addAll(messages);
+        }
+        return finalMessages;
     }
 
-    private Map<String, Object> extractExplicitMemoryLegacy(String userMessage) {
-        String prompt = """
-            分析以下用户消息，判断是否包含需要记住的显式信息（如用户偏好、个人信息等）。
+    // ========== JSON 提取工具方法（package-visible） ==========
 
-            如果包含需要记住的信息，返回 JSON 格式：
-            {
-              "has_memory": true,
-              "slot_name": "槽位名称（如 diet_preference）",
-              "content": "记忆内容描述",
-              "memory_type": "model_set_context 或 user_insight",
-              "source": "explicit"
-            }
-
-            如果不包含，返回：
-            {
-              "has_memory": false
-            }
-
-            用户消息：%s
-            """.formatted(userMessage);
-
-        String response = chatWithRoleMaps(null, List.of(Map.of("role", "user", "content", prompt)), 0.3);
-
-        try {
-            // 从回复中提取 JSON 对象并用 Jackson 解析，避免手写正则
-            String jsonObject = extractJsonObject(response);
-            if (jsonObject != null) {
-                Map<String, Object> parsed = objectMapper.readValue(
-                    jsonObject, new TypeReference<Map<String, Object>>() {});
-
-                Object hasMemory = parsed.get("has_memory");
-                if (Boolean.TRUE.equals(hasMemory)) {
-                    Map<String, Object> result = new HashMap<>();
-                    result.put("has_memory", true);
-                    result.put("slot_name", parsed.getOrDefault("slot_name", ""));
-                    result.put("content", parsed.getOrDefault("content", ""));
-                    result.put("memory_type", parsed.getOrDefault("memory_type", ""));
-                    result.put("source", "explicit");
-                    return result;
-                }
-            }
-        } catch (Exception e) {
-            log.error("Failed to parse explicit memory JSON", e);
-        }
-
-        // 兜底：无记忆
-        return Map.of("has_memory", false);
-    }
-
-    public List<Map<String, Object>> summarizeConversations(List<Map<String, Object>> conversationHistory) {
-        try {
-            String historyText = conversationHistory.stream()
-                    .map(entry -> String.format("[%s] %s: %s",
-                            entry.get("timestamp"),
-                            entry.get("role"),
-                            entry.get("message")))
-                    .collect(Collectors.joining("\n"));
-
-            String month = LocalDate.now().toString().substring(0, 7).replace("-", "_");
-            String instruction = """
-                请对以下对话历史进行总结，提取关键主题和重要信息。
-                - 你可以返回多条摘要，每条一个独立的 slot_name。
-                - slot_name 建议使用 conversation_summary_%s 或类似稳定命名。
-                - items 允许为空数组。
-                
-                对话历史：
-                %s
-                """.formatted(month, historyText);
-
-            ConversationSummariesResult parsed = chatWithJsonSchema(
-                    null,
-                    List.of(new UserMessage(instruction)),
-                    Schemas.conversationSummariesResult(),
-                    ConversationSummariesResult.class
-            );
-
-            List<ConversationSummaryItem> items = parsed == null ? null : parsed.items();
-            if (items == null || items.isEmpty()) {
-                return summarizeConversationsLegacy(conversationHistory);
-            }
-
-            return items.stream()
-                    .map(item -> {
-                        Map<String, Object> m = new HashMap<>();
-                        m.put("slot_name", item.slot_name());
-                        m.put("content", item.content());
-                        return m;
-                    })
-                    .toList();
-        } catch (Exception e) {
-            log.warn("Structured conversation summarization failed; falling back to legacy parsing", e);
-            return summarizeConversationsLegacy(conversationHistory);
-        }
-    }
-
-    private List<Map<String, Object>> summarizeConversationsLegacy(List<Map<String, Object>> conversationHistory) {
-        String historyText = conversationHistory.stream()
-            .map(entry -> String.format("[%s] %s: %s",
-                entry.get("timestamp"),
-                entry.get("role"),
-                entry.get("message")))
-            .collect(Collectors.joining("\n"));
-
-        String prompt = """
-            请对以下对话历史进行总结，提取关键主题和重要信息。
-
-            返回 JSON 数组格式：
-            [
-              {
-                "slot_name": "conversation_summary_YYYY_MM",
-                "content": "摘要内容"
-              }
-            ]
-
-            对话历史：
-            %s
-            """.formatted(historyText);
-
-        String response = chatWithRoleMaps(null, List.of(Map.of("role", "user", "content", prompt)), 0.5);
-
-        // 优先尝试解析为 JSON 数组，保持结构化输出
-        try {
-            String jsonArray = extractJsonArray(response);
-            if (jsonArray != null && !jsonArray.trim().isEmpty()) {
-                List<Map<String, Object>> summaries = objectMapper.readValue(
-                    jsonArray, new TypeReference<List<Map<String, Object>>>() {});
-                if (!summaries.isEmpty()) {
-                    return summaries;
-                }
-            }
-        } catch (Exception e) {
-            log.error("Failed to parse conversation summaries JSON", e);
-        }
-
-        // 兜底：至少返回一个文本摘要，避免影响后续流程
-        Map<String, Object> summary = new HashMap<>();
-        summary.put("slot_name", "conversation_summary_" + java.time.LocalDate.now().toString().replace("-", "_"));
-        summary.put("content", response);
-        return List.of(summary);
-    }
-
-    public List<Map<String, Object>> extractUserInsights(List<Map<String, Object>> conversationHistory) {
-        try {
-            String historyText = conversationHistory.stream()
-                    .limit(100)
-                    .map(entry -> String.format("%s: %s", entry.get("role"), entry.get("message")))
-                    .collect(Collectors.joining("\n"));
-
-            String instruction = """
-                从以下对话中提取用户的个人信息和偏好，构建用户档案条目。
-                - 每条信息一个独立槽位 slot_name
-                - confidence 必须是 low/medium/high
-                - items 允许为空数组
-                
-                对话历史：
-                %s
-                """.formatted(historyText);
-
-            UserInsightsResult parsed = chatWithJsonSchema(
-                    null,
-                    List.of(new UserMessage(instruction)),
-                    Schemas.userInsightsResult(),
-                    UserInsightsResult.class
-            );
-
-            List<UserInsightItem> items = parsed == null ? null : parsed.items();
-            if (items == null || items.isEmpty()) {
-                return List.of();
-            }
-
-            return items.stream()
-                    .map(item -> {
-                        Map<String, Object> m = new HashMap<>();
-                        m.put("slot_name", item.slot_name());
-                        m.put("content", item.content());
-                        m.put("confidence", item.confidence());
-                        return m;
-                    })
-                    .toList();
-        } catch (Exception e) {
-            log.warn("Structured user insight extraction failed; falling back to legacy parsing", e);
-            return extractUserInsightsLegacy(conversationHistory);
-        }
-    }
-
-    private List<Map<String, Object>> extractUserInsightsLegacy(List<Map<String, Object>> conversationHistory) {
-        String historyText = conversationHistory.stream()
-            .limit(100)
-            .map(entry -> String.format("%s: %s", entry.get("role"), entry.get("message")))
-            .collect(Collectors.joining("\n"));
-
-        String prompt = """
-            从以下对话中提取用户的个人信息和偏好，构建用户档案。
-
-            返回 JSON 数组，每条信息一个独立槽位：
-            [
-              {
-                "slot_name": "home_city",
-                "content": "用户住在某城市",
-                "confidence": "high"
-              }
-            ]
-
-            如果没有发现任何用户信息，返回空数组：[]
-
-            对话历史：
-            %s
-            """.formatted(historyText);
-
-        String response = chatWithRoleMaps(null, List.of(Map.of("role", "user", "content", prompt)), 0.3);
-
-        try {
-            // 提取JSON数组部分
-            String jsonArray = extractJsonArray(response);
-            if (jsonArray != null && !jsonArray.trim().equals("[]")) {
-                List<Map<String, Object>> insights = objectMapper.readValue(
-                    jsonArray, new TypeReference<List<Map<String, Object>>>() {});
-                log.info("Extracted {} user insights", insights.size());
-                return insights;
-            }
-        } catch (Exception e) {
-            log.error("Failed to parse user insights JSON", e);
-        }
-
-        return new ArrayList<>();
-    }
-
-    public List<Map<String, Object>> analyzeTopics(List<Map<String, Object>> conversationHistory) {
-        try {
-            String historyText = conversationHistory.stream()
-                    .limit(50)
-                    .map(entry -> String.format("%s: %s", entry.get("role"), entry.get("message")))
-                    .collect(Collectors.joining("\n"));
-
-            String instruction = """
-                分析以下对话，提取用户频繁讨论的主题和话题。
-                - 每个话题一个独立槽位 slot_name
-                - items 允许为空数组
-                
-                对话历史：
-                %s
-                """.formatted(historyText);
-
-            TopicsResult parsed = chatWithJsonSchema(
-                    null,
-                    List.of(new UserMessage(instruction)),
-                    Schemas.topicsResult(),
-                    TopicsResult.class
-            );
-
-            List<TopicItem> items = parsed == null ? null : parsed.items();
-            if (items == null || items.isEmpty()) {
-                return List.of();
-            }
-
-            return items.stream()
-                    .map(item -> {
-                        Map<String, Object> m = new HashMap<>();
-                        m.put("slot_name", item.slot_name());
-                        m.put("content", item.content());
-                        return m;
-                    })
-                    .toList();
-        } catch (Exception e) {
-            log.warn("Structured topic analysis failed; falling back to legacy parsing", e);
-            return analyzeTopicsLegacy(conversationHistory);
-        }
-    }
-
-    private List<Map<String, Object>> analyzeTopicsLegacy(List<Map<String, Object>> conversationHistory) {
-        String historyText = conversationHistory.stream()
-            .limit(50)
-            .map(entry -> String.format("%s: %s", entry.get("role"), entry.get("message")))
-            .collect(Collectors.joining("\n"));
-
-        String prompt = """
-            分析以下对话，提取用户频繁讨论的主题和话题。
-
-            返回 JSON 数组：
-            [
-              {
-                "slot_name": "topic_name",
-                "content": "话题描述"
-              }
-            ]
-
-            如果没有发现明显的话题，返回空数组：[]
-
-            对话历史：
-            %s
-            """.formatted(historyText);
-
-        String response = chatWithRoleMaps(null, List.of(Map.of("role", "user", "content", prompt)), 0.5);
-
-        try {
-            String jsonArray = extractJsonArray(response);
-            if (jsonArray != null && !jsonArray.trim().equals("[]")) {
-                List<Map<String, Object>> topics = objectMapper.readValue(
-                    jsonArray, new TypeReference<List<Map<String, Object>>>() {});
-                log.info("Extracted {} notable topics", topics.size());
-                return topics;
-            }
-        } catch (Exception e) {
-            log.error("Failed to parse topics JSON", e);
-        }
-
-        return new ArrayList<>();
-    }
-
-    private String extractJsonArray(String response) {
-        // 从响应中提取JSON数组部分（处理LLM可能在JSON前后添加说明文字的情况）
+    String extractJsonArray(String response) {
         int start = response.indexOf('[');
         int end = response.lastIndexOf(']');
         if (start != -1 && end != -1 && end > start) {
@@ -475,8 +260,7 @@ public class LlmClient {
         return null;
     }
 
-    private String extractJsonObject(String response) {
-        // 允许 LLM 在 JSON 前后加说明文字，这里只尝试提取第一个完整的 { ... } 块
+    String extractJsonObject(String response) {
         int start = response.indexOf('{');
         if (start == -1) {
             return null;
@@ -494,5 +278,227 @@ public class LlmClient {
             }
         }
         return null;
+    }
+
+    private void logLlmInput(String channel,
+                             List<ChatMessage> messages,
+                             List<ToolSpecification> toolSpecifications,
+                             Integer round) {
+        Map<String, Object> payload = new LinkedHashMap<>();
+        payload.put("channel", channel);
+        if (round != null) {
+            payload.put("round", round);
+        }
+        payload.put("messages", toLogMessages(messages));
+        if (toolSpecifications != null && !toolSpecifications.isEmpty()) {
+            payload.put("tools", toLogTools(toolSpecifications));
+        }
+        logLlmIo("LLM_INPUT", payload);
+    }
+
+    private void logLlmAiMessage(String channel, int round, AiMessage aiMessage) {
+        Map<String, Object> payload = new LinkedHashMap<>();
+        payload.put("channel", channel);
+        payload.put("round", round);
+        payload.put("ai_message", toLogAiMessage(aiMessage));
+        logLlmIo("LLM_MODEL_OUTPUT", payload);
+    }
+
+    private void logLlmToolResult(int round, ToolExecutionRequest request, String result) {
+        Map<String, Object> payload = new LinkedHashMap<>();
+        payload.put("round", round);
+        payload.put("tool_name", request.name());
+        payload.put("tool_id", request.id());
+        payload.put("tool_arguments", truncateForLog(request.arguments()));
+        payload.put("tool_result", truncateForLog(result));
+        logLlmIo("LLM_TOOL_RESULT", payload);
+    }
+
+    private void logLlmOutput(String channel, String output) {
+        Map<String, Object> payload = new LinkedHashMap<>();
+        payload.put("channel", channel);
+        payload.put("output", truncateForLog(output));
+        logLlmIo("LLM_OUTPUT", payload);
+    }
+
+    private void logLlmError(String channel, Exception e) {
+        Map<String, Object> payload = new LinkedHashMap<>();
+        payload.put("channel", channel);
+        payload.put("error_type", e.getClass().getName());
+        payload.put("error_message", truncateForLog(e.getMessage()));
+        logLlmIo("LLM_ERROR", payload);
+    }
+
+    private void logLlmIo(String event, Map<String, Object> payload) {
+        if (!llmIoLog.isInfoEnabled()) {
+            return;
+        }
+        try {
+            llmIoLog.info("{} {}", event, objectMapper.writeValueAsString(payload));
+        } catch (Exception ignored) {
+            llmIoLog.info("{} {}", event, payload);
+        }
+    }
+
+    private List<Map<String, Object>> toLogMessages(List<ChatMessage> messages) {
+        if (messages == null || messages.isEmpty()) {
+            return List.of();
+        }
+
+        List<Map<String, Object>> result = new ArrayList<>();
+        for (ChatMessage message : messages) {
+            Map<String, Object> item = new LinkedHashMap<>();
+            item.put("type", message.type().name());
+
+            if (message instanceof SystemMessage systemMessage) {
+                item.put("text", truncateForLog(systemMessage.text()));
+            } else if (message instanceof UserMessage userMessage) {
+                String text = userMessage.hasSingleText()
+                        ? userMessage.singleText()
+                        : String.valueOf(userMessage.contents());
+                item.put("text", truncateForLog(text));
+            } else if (message instanceof ToolExecutionResultMessage toolResult) {
+                item.put("tool_name", toolResult.toolName());
+                item.put("tool_result", truncateForLog(toolResult.text()));
+            } else if (message instanceof AiMessage aiMessage) {
+                item.putAll(toLogAiMessage(aiMessage));
+            } else {
+                item.put("content", truncateForLog(String.valueOf(message)));
+            }
+
+            result.add(item);
+        }
+        return result;
+    }
+
+    private Map<String, Object> toLogAiMessage(AiMessage aiMessage) {
+        Map<String, Object> item = new LinkedHashMap<>();
+        item.put("text", truncateForLog(aiMessage.text()));
+        if (aiMessage.hasToolExecutionRequests()) {
+            List<Map<String, Object>> requests = new ArrayList<>();
+            for (ToolExecutionRequest request : aiMessage.toolExecutionRequests()) {
+                Map<String, Object> req = new LinkedHashMap<>();
+                req.put("id", request.id());
+                req.put("name", request.name());
+                req.put("arguments", truncateForLog(request.arguments()));
+                requests.add(req);
+            }
+            item.put("tool_requests", requests);
+        }
+        return item;
+    }
+
+    private List<Map<String, Object>> toLogTools(List<ToolSpecification> toolSpecifications) {
+        List<Map<String, Object>> tools = new ArrayList<>();
+        for (ToolSpecification specification : toolSpecifications) {
+            Map<String, Object> tool = new LinkedHashMap<>();
+            tool.put("name", specification.name());
+            tool.put("description", truncateForLog(specification.description()));
+            tools.add(tool);
+        }
+        return tools;
+    }
+
+    private String truncateForLog(String raw) {
+        if (raw == null) {
+            return "";
+        }
+        if (raw.length() <= LOG_TEXT_LIMIT) {
+            return raw;
+        }
+        int omitted = raw.length() - LOG_TEXT_LIMIT;
+        return raw.substring(0, LOG_TEXT_LIMIT) + "... [truncated " + omitted + " chars]";
+    }
+
+    private <T> T callWithRetry(String channel, ThrowingSupplier<T> supplier) throws Exception {
+        Exception lastError = null;
+        for (int attempt = 1; attempt <= maxRetryAttempts; attempt++) {
+            try {
+                return supplier.get();
+            } catch (Exception e) {
+                lastError = e;
+                if (!isRetriable(e) || attempt >= maxRetryAttempts) {
+                    throw e;
+                }
+
+                long backoff = retryBackoffMillis * attempt;
+                log.warn("LLM {} attempt {}/{} failed with retriable error: {}. Retrying in {} ms.",
+                        channel, attempt, maxRetryAttempts, e.toString(), backoff);
+                if (backoff > 0) {
+                    try {
+                        Thread.sleep(backoff);
+                    } catch (InterruptedException interrupted) {
+                        Thread.currentThread().interrupt();
+                        throw new RuntimeException("LLM retry interrupted", interrupted);
+                    }
+                }
+            }
+        }
+        throw lastError == null ? new RuntimeException("Unknown LLM retry error") : lastError;
+    }
+
+    private boolean isRetriable(Exception exception) {
+        for (Throwable cursor = exception; cursor != null; cursor = cursor.getCause()) {
+            String className = cursor.getClass().getName().toLowerCase();
+            String message = String.valueOf(cursor.getMessage()).toLowerCase();
+            String text = className + " " + message;
+
+            if (text.contains("unknownhost")
+                    || text.contains("socketexception")
+                    || text.contains("connectexception")
+                    || text.contains("connection reset")
+                    || text.contains("timed out")
+                    || text.contains("timeout")
+                    || text.contains("429")
+                    || text.contains("rate limit")
+                    || text.contains("temporarily unavailable")
+                    || text.contains("service unavailable")) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    @FunctionalInterface
+    private interface ThrowingSupplier<T> {
+        T get() throws Exception;
+    }
+
+    public record ToolDefinition(
+            ToolSpecification specification,
+            Function<ToolExecutionRequest, String> executor
+    ) {
+    }
+
+    interface ChatModelGateway {
+        String generateText(List<ChatMessage> messages);
+
+        AiMessage generateWithTools(List<ChatMessage> messages, List<ToolSpecification> toolSpecifications);
+
+        String generateStructured(ChatRequest request);
+    }
+
+    private static final class OpenAiChatModelGateway implements ChatModelGateway {
+
+        private final OpenAiChatModel model;
+
+        private OpenAiChatModelGateway(OpenAiChatModel model) {
+            this.model = model;
+        }
+
+        @Override
+        public String generateText(List<ChatMessage> messages) {
+            return model.generate(messages).content().text();
+        }
+
+        @Override
+        public AiMessage generateWithTools(List<ChatMessage> messages, List<ToolSpecification> toolSpecifications) {
+            return model.generate(messages, toolSpecifications).content();
+        }
+
+        @Override
+        public String generateStructured(ChatRequest request) {
+            return model.chat(request).aiMessage().text();
+        }
     }
 }
