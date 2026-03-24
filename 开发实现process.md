@@ -421,6 +421,26 @@
   - 修改 `src/main/java/com/memsys/cli/CliRunner.java` — 注入 ProactiveReminderService；注册 `/proactive-reminders` 命令；showProactiveReminders() 展示提醒历史（类型图标、时间、内容、建议、来源）；`/memory-report` 新增主动提醒摘要行
 - 实际结果：系统在每天 8/12/16/20 点自动检查用户画像和最近会话摘要，通过 LLM 判断是否有值得主动提醒的内容；提醒记录落盘到 proactive_reminders.jsonl；用户可通过 `/proactive-reminders` 查看提醒历史；`/memory-report` 可展示主动提醒累计数量和上次提醒时间；4小时最小间隔保护避免过度打扰
 
+#### 迭代记录 - 2026-03-24 03:30
+
+- 增强目标：创建 UserIdentityService 统一身份映射，支持将不同平台（CLI/飞书/Telegram）的用户 ID 映射到统一身份，覆盖 Phase 9 #2 和 #3 基础，以及答辩场景 #8
+- 涉及文件：新增 `src/main/java/com/memsys/identity/UserIdentityService.java`、新增 `src/main/java/com/memsys/identity/model/UserIdentity.java`、修改 `MemoryStorage.java`（新增 identity_mappings.json 读写）、修改 `ImRuntimeService.java`（接入身份解析）、修改 `CliRunner.java`（新增 `/identity` 命令）
+- 实现方案：
+  1. 新增 UserIdentity 数据模型（unified_id, platform_bindings, display_name, created_at）
+  2. 新增 UserIdentityService，维护 platform+senderId → unified_id 映射表
+  3. MemoryStorage 新增 identity_mappings.json 读写
+  4. ImRuntimeService 在处理消息时通过 UserIdentityService 解析统一身份
+  5. 支持自动绑定（首次出现的平台用户自动创建身份）和手动绑定（/identity bind）
+  6. CliRunner 新增 /identity 命令展示当前身份绑定列表
+- 状态：已完成
+- 实际修改文件：
+  - 新增 `src/main/java/com/memsys/identity/model/UserIdentity.java` — 统一用户身份数据模型（unifiedId, displayName, platformBindings, createdAt），支持平台绑定/查询/检查
+  - 新增 `src/main/java/com/memsys/identity/UserIdentityService.java` — 统一身份映射服务：resolveUnifiedId() 解析统一身份（首次出现自动创建）、bindPlatformToIdentity() 手动跨平台绑定、内存缓存+反向索引+持久化到 identity_mappings.json
+  - 修改 `src/main/java/com/memsys/memory/storage/MemoryStorage.java` — 新增 identity_mappings.json 初始化、readIdentityMappings()、writeIdentityMappings() 方法
+  - 修改 `src/main/java/com/memsys/im/ImRuntimeService.java` — 注入 UserIdentityService，在 handleIncomingAndReply() 中调用 resolveUnifiedId() 解析统一身份（IM 消息到达时自动绑定）
+  - 修改 `src/main/java/com/memsys/cli/CliRunner.java` — 注入 UserIdentityService；注册 `/identity` 命令；showIdentityMappings() 展示所有统一身份及其平台绑定（含平台图标、绑定数统计）；注册命令描述
+- 实际结果：系统在收到 IM 消息时自动将 platform+senderId 映射到统一身份（首次出现自动创建 UserIdentity 并持久化到 identity_mappings.json）；CLI 默认用户映射为 user_default；用户可通过 `/identity` 查看所有身份绑定关系；支持手动跨平台身份合并（bindPlatformToIdentity）；为后续跨平台共享用户画像和任务奠定基础
+
 ---
 
 ### Phase 10 - 评测、实验与论文支撑（计划中）
@@ -481,6 +501,7 @@
 19. Phase 9 记忆治理基础已落地：Memory 模型新增 MemoryStatus（ACTIVE/PENDING/CONFLICT/ARCHIVED）+ verifiedAt + verifiedSource 字段；MemoryWriteService 新增冲突检测（saveMemoryWithGovernance）；隐式提取启用冲突检测不再直接覆盖；`/memory-governance` 命令可展示治理全貌。
 20. Phase 9 自然语言任务提取已接入主链路：ConversationCli 在每轮对话后异步调用 scheduledTaskService.tryCreateTaskFromMessage，用户自然语言中的任务意图可自动提取并创建 ScheduledTask；ScheduledTaskReminderJob 定时检查到期任务并推送通知。
 21. Phase 9 主动提醒已落地：ProactiveReminderService + ProactiveReminderJob 每天定时基于用户画像和会话摘要通过 LLM 生成个性化提醒；提醒落盘到 proactive_reminders.jsonl；`/proactive-reminders` 命令可查看历史；`/memory-report` 新增主动提醒摘要行。
+22. Phase 9 统一身份映射已落地：UserIdentityService 支持 platform+senderId → unified_id 双向映射；首次出现自动创建身份并持久化到 identity_mappings.json；ImRuntimeService 在消息到达时自动解析统一身份；`/identity` 命令可查看所有身份绑定；支持手动跨平台身份合并。
 
 ---
 
@@ -556,5 +577,5 @@
 | 5 | 场景化时间线：记忆按时间/主题可视展示 | `/memory-timeline`、`/memory-scenes` | P8 | ✅ |
 | 6 | 任务管理：通过自然语言创建、查看、管理任务 | `/tasks` | P9 | ✅ |
 | 7 | 主动提醒：系统基于记忆主动推送提醒与建议 | 定时触发 + CLI/IM 推送 | P9 | ✅ |
-| 8 | 多平台身份统一：CLI 与飞书共享同一用户画像 | 飞书发消息 → CLI `/what-you-know` 可见 | P9 | ⬜ |
+| 8 | 多平台身份统一：CLI 与飞书共享同一用户画像 | 飞书发消息 → CLI `/what-you-know` 可见 | P9 | ✅ |
 | 9 | 评测对比：有记忆 vs 无记忆的效果量化对比 | `/eval-run` | P10 | ⬜ |

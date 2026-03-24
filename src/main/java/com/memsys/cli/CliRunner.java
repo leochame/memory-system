@@ -2,6 +2,8 @@ package com.memsys.cli;
 
 import com.memsys.memory.model.Memory;
 import com.memsys.memory.model.MemoryEvidenceTrace;
+import com.memsys.identity.UserIdentityService;
+import com.memsys.identity.model.UserIdentity;
 import com.memsys.memory.ConversationSummaryService;
 import com.memsys.memory.MemoryExtractor;
 import com.memsys.memory.MemoryManager;
@@ -102,6 +104,7 @@ public class CliRunner implements CommandLineRunner {
     private final ScheduledTaskService scheduledTaskService;
     private final ConversationSummaryService conversationSummaryService;
     private final ProactiveReminderService proactiveReminderService;
+    private final UserIdentityService userIdentityService;
 
     @Value("${memory.max-slots:100}")
     private int maxSlots;
@@ -139,7 +142,8 @@ public class CliRunner implements CommandLineRunner {
             LlmExtractionService llmExtractionService,
             ScheduledTaskService scheduledTaskService,
             ConversationSummaryService conversationSummaryService,
-            ProactiveReminderService proactiveReminderService
+            ProactiveReminderService proactiveReminderService,
+            UserIdentityService userIdentityService
     ) {
         this.conversationCli = conversationCli;
         this.memoryManager = memoryManager;
@@ -152,6 +156,7 @@ public class CliRunner implements CommandLineRunner {
         this.scheduledTaskService = scheduledTaskService;
         this.conversationSummaryService = conversationSummaryService;
         this.proactiveReminderService = proactiveReminderService;
+        this.userIdentityService = userIdentityService;
     }
 
     @Override
@@ -326,6 +331,7 @@ public class CliRunner implements CommandLineRunner {
             case "/memory-scenes" -> showMemoryScenes();
             case "/memory-governance" -> showMemoryGovernance();
             case "/proactive-reminders" -> showProactiveReminders();
+            case "/identity" -> showIdentityMappings();
             case "/exit", "/quit" -> {
                 printSystem("会话结束。");
                 return false;
@@ -1146,6 +1152,63 @@ public class CliRunner implements CommandLineRunner {
         printSystem(sb.toString());
     }
 
+    private void showIdentityMappings() {
+        StringBuilder sb = new StringBuilder();
+        sb.append("╔══════════════════════════════════════════╗\n");
+        sb.append("║     🔗 Identity Mappings (身份映射)       ║\n");
+        sb.append("╚══════════════════════════════════════════╝\n\n");
+
+        List<UserIdentity> identities = userIdentityService.listAllIdentities();
+
+        if (identities.isEmpty()) {
+            sb.append("  （暂无身份映射记录）\n\n");
+            sb.append("  身份映射会在以下情况自动创建：\n");
+            sb.append("  - CLI 对话时自动绑定默认身份\n");
+            sb.append("  - 飞书/Telegram 消息到达时自动绑定平台用户\n\n");
+            sb.append("  手动合并身份：在对话中告诉系统你的跨平台 ID\n");
+        } else {
+            sb.append(String.format("▸ 已注册 %d 个统一身份\n\n", identities.size()));
+            for (UserIdentity identity : identities) {
+                sb.append(String.format("  📋 %s", identity.getUnifiedId()));
+                if (identity.getDisplayName() != null && !identity.getDisplayName().isBlank()) {
+                    sb.append(String.format(" (%s)", identity.getDisplayName()));
+                }
+                sb.append("\n");
+
+                Map<String, String> bindings = identity.getPlatformBindings();
+                if (bindings != null && !bindings.isEmpty()) {
+                    for (Map.Entry<String, String> binding : bindings.entrySet()) {
+                        String platformIcon = switch (binding.getKey()) {
+                            case "cli" -> "💻";
+                            case "feishu" -> "🐦";
+                            case "telegram" -> "✈️";
+                            default -> "🔌";
+                        };
+                        sb.append(String.format("    %s %s: %s\n",
+                                platformIcon, binding.getKey(), binding.getValue()));
+                    }
+                } else {
+                    sb.append("    (无平台绑定)\n");
+                }
+
+                if (identity.getCreatedAt() != null) {
+                    sb.append(String.format("    创建于: %s\n",
+                            identity.getCreatedAt().format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm"))));
+                }
+                sb.append("\n");
+            }
+        }
+
+        // 统计
+        long totalBindings = identities.stream()
+                .mapToLong(id -> id.getPlatformBindings() != null ? id.getPlatformBindings().size() : 0)
+                .sum();
+        sb.append(String.format("▸ 统计: %d 个统一身份, %d 个平台绑定\n",
+                identities.size(), totalBindings));
+
+        printSystem(sb.toString());
+    }
+
     private String truncateForDisplay(String text, int maxLen) {
         if (text == null) return "";
         return text.length() > maxLen ? text.substring(0, maxLen) + "..." : text;
@@ -1684,6 +1747,7 @@ public class CliRunner implements CommandLineRunner {
         commands.put("/memory-scenes", "按话题/场景分组展示记忆摘要");
         commands.put("/memory-governance", "记忆治理状态（冲突、待审核、归档）");
         commands.put("/proactive-reminders", "查看主动提醒历史");
+        commands.put("/identity", "查看统一身份映射");
         commands.put("/exit", "退出会话");
         commands.put("/quit", "退出会话");
         return Collections.unmodifiableMap(commands);

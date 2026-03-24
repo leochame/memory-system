@@ -1,6 +1,7 @@
 package com.memsys.im;
 
 import com.memsys.cli.ConversationCli;
+import com.memsys.identity.UserIdentityService;
 import com.memsys.im.feishu.FeishuOutboundClient;
 import com.memsys.im.model.IncomingImMessage;
 import com.memsys.im.telegram.TelegramOutboundClient;
@@ -10,24 +11,28 @@ import org.springframework.stereotype.Service;
 
 /**
  * IM 消息统一编排：
- * 1) 收到消息后执行现有对话主流程
- * 2) 将回复通过对应平台发回
- * 3) 提供主动发送能力
+ * 1) 收到消息后通过 UserIdentityService 解析统一身份
+ * 2) 执行现有对话主流程
+ * 3) 将回复通过对应平台发回
+ * 4) 提供主动发送能力
  */
 @Slf4j
 @Service
 public class ImRuntimeService {
 
     private final ConversationCli conversationCli;
+    private final UserIdentityService userIdentityService;
     private final ObjectProvider<TelegramOutboundClient> telegramOutboundClientProvider;
     private final ObjectProvider<FeishuOutboundClient> feishuOutboundClientProvider;
 
     public ImRuntimeService(
             ConversationCli conversationCli,
+            UserIdentityService userIdentityService,
             ObjectProvider<TelegramOutboundClient> telegramOutboundClientProvider,
             ObjectProvider<FeishuOutboundClient> feishuOutboundClientProvider
     ) {
         this.conversationCli = conversationCli;
+        this.userIdentityService = userIdentityService;
         this.telegramOutboundClientProvider = telegramOutboundClientProvider;
         this.feishuOutboundClientProvider = feishuOutboundClientProvider;
     }
@@ -36,6 +41,12 @@ public class ImRuntimeService {
         if (incoming == null || incoming.text().isBlank()) {
             return "";
         }
+
+        // Phase 9 #2: 统一身份解析 — 将平台+senderId 映射到统一身份
+        String unifiedId = userIdentityService.resolveUnifiedId(
+                incoming.platform(), incoming.senderId());
+        log.debug("Identity resolved: {}:{} -> {}", incoming.platform(), incoming.senderId(), unifiedId);
+
         String reply = conversationCli.processUserMessage(
                 incoming.text(),
                 incoming.platform(),

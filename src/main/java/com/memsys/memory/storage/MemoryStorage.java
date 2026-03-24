@@ -62,6 +62,7 @@ public class MemoryStorage {
             createFileIfNotExists("scheduled_tasks.json", "[]");
             createFileIfNotExists("pending_task_notifications.jsonl", "");
             createFileIfNotExists("session_summaries.jsonl", "");
+            createFileIfNotExists("identity_mappings.json", "{}");
 
             log.info("Memory storage initialized at: {}", basePath.toAbsolutePath());
         } catch (IOException e) {
@@ -548,6 +549,42 @@ public class MemoryStorage {
             log.error("Failed to load queues", e);
             return Arrays.asList(new ArrayList<>(), new ArrayList<>());
         }
+    }
+
+    // ========== identity_mappings.json 操作 ==========
+
+    /**
+     * 读取身份映射文件。
+     * Phase 9 #2 — 统一身份映射。
+     *
+     * @return unifiedId -> UserIdentity 映射
+     */
+    public Map<String, com.memsys.identity.model.UserIdentity> readIdentityMappings() {
+        try {
+            Path filePath = basePath.resolve("identity_mappings.json");
+            if (!Files.exists(filePath)) {
+                return new LinkedHashMap<>();
+            }
+            String content = Files.readString(filePath);
+            if (content.isBlank() || content.trim().equals("{}")) {
+                return new LinkedHashMap<>();
+            }
+            return objectMapper.readValue(content,
+                    objectMapper.getTypeFactory().constructMapType(
+                            LinkedHashMap.class, String.class,
+                            com.memsys.identity.model.UserIdentity.class));
+        } catch (IOException e) {
+            log.error("Failed to read identity mappings", e);
+            return new LinkedHashMap<>();
+        }
+    }
+
+    /**
+     * 写入身份映射文件。
+     * Phase 9 #2 — 统一身份映射。
+     */
+    public void writeIdentityMappings(Map<String, com.memsys.identity.model.UserIdentity> mappings) {
+        writeJsonFile("identity_mappings.json", mappings);
     }
 
     // ========== 通用操作 ==========
