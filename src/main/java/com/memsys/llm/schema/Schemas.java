@@ -12,12 +12,6 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
-/**
- * Centralized JSON Schemas for OpenAI Structured Outputs (json_schema).
- * <p>
- * Important: For OpenAI, the root element must be a {@link JsonObjectSchema}.
- * For list outputs, we wrap arrays into an object: { "items": [...] }.
- */
 public final class Schemas {
 
     private Schemas() {
@@ -36,7 +30,7 @@ public final class Schemas {
                 .build());
         props.put("memory_type", JsonEnumSchema.builder()
                 .description("Memory type")
-                .enumValues(List.of("model_set_context", "user_insight"))
+                .enumValues(List.of("user_insight"))
                 .build());
         props.put("source", JsonEnumSchema.builder()
                 .description("Memory source")
@@ -46,21 +40,6 @@ public final class Schemas {
         return JsonSchema.builder()
                 .name("ExplicitMemoryResult")
                 .rootElement(strictObject(props))
-                .build();
-    }
-
-    public static JsonSchema conversationSummariesResult() {
-        Map<String, JsonSchemaElement> itemProps = new LinkedHashMap<>();
-        itemProps.put("slot_name", JsonStringSchema.builder()
-                .description("Slot name for conversation summary, e.g. conversation_summary_YYYY_MM")
-                .build());
-        itemProps.put("content", JsonStringSchema.builder()
-                .description("Summary content")
-                .build());
-
-        return JsonSchema.builder()
-                .name("ConversationSummariesResult")
-                .rootElement(itemsWrapper(itemProps, "List of conversation summaries"))
                 .build();
     }
 
@@ -83,22 +62,89 @@ public final class Schemas {
                 .build();
     }
 
-    public static JsonSchema topicsResult() {
-        Map<String, JsonSchemaElement> itemProps = new LinkedHashMap<>();
-        itemProps.put("slot_name", JsonStringSchema.builder()
-                .description("Topic slot name, should be stable and concise")
+    public static JsonSchema skillGenerationResult() {
+        Map<String, JsonSchemaElement> props = new LinkedHashMap<>();
+        props.put("should_generate", JsonBooleanSchema.builder()
+                .description("Whether a reusable skill/methodology was identified in the conversation")
                 .build());
-        itemProps.put("content", JsonStringSchema.builder()
-                .description("Topic description")
+        props.put("skill_name", JsonStringSchema.builder()
+                .description("Short snake_case name for the skill, e.g. code_review_checklist")
+                .build());
+        props.put("skill_content", JsonStringSchema.builder()
+                .description("Markdown content describing the skill/methodology")
                 .build());
 
         return JsonSchema.builder()
-                .name("TopicsResult")
-                .rootElement(itemsWrapper(itemProps, "List of notable topics/highlights"))
+                .name("SkillGenerationResult")
+                .rootElement(strictObject(props))
                 .build();
     }
 
-    private static JsonObjectSchema itemsWrapper(Map<String, JsonSchemaElement> itemProps, String description) {
+    public static JsonSchema examplesResult() {
+        Map<String, JsonSchemaElement> tagSchema = new LinkedHashMap<>();
+        // tags is an array of strings inside each item
+
+        Map<String, JsonSchemaElement> itemProps = new LinkedHashMap<>();
+        itemProps.put("problem", JsonStringSchema.builder()
+                .description("The problem or question that was addressed")
+                .build());
+        itemProps.put("solution", JsonStringSchema.builder()
+                .description("The solution or approach that was used")
+                .build());
+        itemProps.put("tags", JsonArraySchema.builder()
+                .description("Tags categorizing this example")
+                .items(JsonStringSchema.builder().description("tag").build())
+                .build());
+
+        return JsonSchema.builder()
+                .name("ExamplesResult")
+                .rootElement(itemsWrapper(itemProps, "List of problem/solution examples"))
+                .build();
+    }
+
+    public static JsonSchema scheduledTaskResult() {
+        Map<String, JsonSchemaElement> props = new LinkedHashMap<>();
+        props.put("has_task", JsonBooleanSchema.builder()
+                .description("Whether user message should create a scheduled task")
+                .build());
+        props.put("task_title", JsonStringSchema.builder()
+                .description("Short task title")
+                .build());
+        props.put("task_detail", JsonStringSchema.builder()
+                .description("Task detail, can be empty")
+                .build());
+        props.put("due_at_iso", JsonStringSchema.builder()
+                .description("Absolute due datetime in local timezone, ISO-8601 format, e.g. 2026-03-21T09:00:00")
+                .build());
+
+        return JsonSchema.builder()
+                .name("ScheduledTaskResult")
+                .rootElement(strictObject(props))
+                .build();
+    }
+
+    public static JsonSchema memoryReflectionResult() {
+        Map<String, JsonSchemaElement> props = new LinkedHashMap<>();
+        props.put("needs_memory", JsonBooleanSchema.builder()
+                .description("Whether this user message requires long-term memory to answer well")
+                .build());
+        props.put("reason", JsonStringSchema.builder()
+                .description("Brief explanation of why memory is or is not needed for this message")
+                .build());
+        props.put("evidence_purposes", JsonArraySchema.builder()
+                .description("List of evidence purposes if memory is needed: personalization, continuity, constraint, experience, followup")
+                .items(JsonStringSchema.builder().description("evidence purpose").build())
+                .build());
+
+        return JsonSchema.builder()
+                .name("MemoryReflectionResult")
+                .rootElement(strictObject(props))
+                .build();
+    }
+
+    // ========== 工具方法 ==========
+
+    static JsonObjectSchema itemsWrapper(Map<String, JsonSchemaElement> itemProps, String description) {
         JsonObjectSchema itemSchema = strictObject(itemProps);
         JsonArraySchema arraySchema = JsonArraySchema.builder()
                 .description(description)
@@ -116,10 +162,7 @@ public final class Schemas {
                 .build();
     }
 
-    /**
-     * Builds a strict object schema: all fields required + additionalProperties=false.
-     */
-    private static JsonObjectSchema strictObject(Map<String, JsonSchemaElement> props) {
+    static JsonObjectSchema strictObject(Map<String, JsonSchemaElement> props) {
         return JsonObjectSchema.builder()
                 .properties(props)
                 .required(List.copyOf(props.keySet()))
@@ -127,5 +170,3 @@ public final class Schemas {
                 .build();
     }
 }
-
-
