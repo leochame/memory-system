@@ -22,6 +22,9 @@ public class FeishuInboundParser {
     }
 
     public Optional<IncomingImMessage> parseMessageEvent(Map<String, Object> payload) {
+        if (payload == null || payload.isEmpty()) {
+            return Optional.empty();
+        }
         Map<String, Object> header = asMap(payload.get("header"));
         String eventType = trim(header.get("event_type"));
         if (!"im.message.receive_v1".equals(eventType)) {
@@ -57,6 +60,9 @@ public class FeishuInboundParser {
         }
         if (userId.isBlank()) {
             userId = trim(senderId.get("union_id"));
+        }
+        if (userId.isBlank()) {
+            return Optional.empty();
         }
 
         long timestampMs = parseTimestampMs(message.get("create_time"));
@@ -102,6 +108,9 @@ public class FeishuInboundParser {
         if (userId.isBlank()) {
             userId = getFirstNonBlank(event, "union_id", "unionId");
         }
+        if (userId.isBlank()) {
+            return Optional.empty();
+        }
 
         String messageId = getFirstNonBlank(event, "open_message_id", "openMessageId");
         long timestampMs = System.currentTimeMillis();
@@ -134,7 +143,7 @@ public class FeishuInboundParser {
     }
 
     private String extractPostText(JsonNode root) {
-        JsonNode lines = root.path("zh_cn").path("content");
+        JsonNode lines = extractPostContentLines(root);
         if (!lines.isArray()) {
             return "";
         }
@@ -159,6 +168,25 @@ public class FeishuInboundParser {
             }
         }
         return builder.toString().trim();
+    }
+
+    private JsonNode extractPostContentLines(JsonNode root) {
+        if (root == null || root.isMissingNode() || root.isNull()) {
+            return null;
+        }
+        JsonNode zhCn = root.path("zh_cn").path("content");
+        if (zhCn.isArray()) {
+            return zhCn;
+        }
+        var fields = root.fields();
+        while (fields.hasNext()) {
+            Map.Entry<String, JsonNode> entry = fields.next();
+            JsonNode content = entry.getValue() == null ? null : entry.getValue().path("content");
+            if (content != null && content.isArray()) {
+                return content;
+            }
+        }
+        return null;
     }
 
     private long parseTimestampMs(Object raw) {

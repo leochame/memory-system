@@ -63,8 +63,18 @@ public class CreateTaskTool extends BaseTool {
                 )
                 .addParameter(
                         "execute_timeout_seconds",
-                        JsonSchemaProperty.STRING,
+                        JsonSchemaProperty.INTEGER,
                         JsonSchemaProperty.description("可选。命令执行超时秒数（整数），未传则使用系统默认值。")
+                )
+                .addParameter(
+                        "recurrence_type",
+                        JsonSchemaProperty.STRING,
+                        JsonSchemaProperty.description("可选。重复类型：none/daily/weekly。默认 none。")
+                )
+                .addParameter(
+                        "recurrence_interval",
+                        JsonSchemaProperty.INTEGER,
+                        JsonSchemaProperty.description("可选。重复间隔（整数）。daily=天数间隔，weekly=周数间隔，默认 1。")
                 )
                 .addParameter(
                         "source_platform",
@@ -93,6 +103,8 @@ public class CreateTaskTool extends BaseTool {
         String dueAtIso = stringArg(request, "due_at_iso");
         String executeCommand = stringArg(request, "execute_command");
         Integer executeTimeoutSeconds = intArg(args, "execute_timeout_seconds");
+        String recurrenceType = stringArg(request, "recurrence_type");
+        Integer recurrenceInterval = intArg(args, "recurrence_interval");
 
         ToolRuntimeContext.TaskSourceContext context = ToolRuntimeContext.taskSourceContext();
         String sourcePlatform = firstNonBlank(stringArg(request, "source_platform"), context.sourcePlatform());
@@ -100,7 +112,8 @@ public class CreateTaskTool extends BaseTool {
         String sourceSenderId = firstNonBlank(stringArg(request, "source_sender_id"), context.sourceSenderId());
 
         Optional<ScheduledTask> created;
-        boolean directMode = !title.isBlank() || !dueAtIso.isBlank() || !executeCommand.isBlank();
+        // 仅当显式提供任务核心字段时才走直传模式，避免 execute_command 单独出现时误跳过 user_message 解析。
+        boolean directMode = !title.isBlank() || !dueAtIso.isBlank();
         if (directMode) {
             created = scheduledTaskService.createTask(
                     title,
@@ -108,6 +121,8 @@ public class CreateTaskTool extends BaseTool {
                     dueAtIso,
                     executeCommand,
                     executeTimeoutSeconds,
+                    recurrenceType,
+                    recurrenceInterval,
                     userMessage,
                     sourcePlatform,
                     sourceConversationId,

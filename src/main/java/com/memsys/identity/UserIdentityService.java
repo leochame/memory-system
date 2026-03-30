@@ -41,7 +41,7 @@ public class UserIdentityService {
     /** 内存缓存：unifiedId -> UserIdentity */
     private final Map<String, UserIdentity> identities = new LinkedHashMap<>();
 
-    private boolean loaded = false;
+    private volatile boolean loaded = false;
 
     public UserIdentityService(MemoryStorage storage) {
         this.storage = storage;
@@ -55,7 +55,7 @@ public class UserIdentityService {
      * @param senderId 平台内用户 ID
      * @return 统一身份 ID
      */
-    public String resolveUnifiedId(String platform, String senderId) {
+    public synchronized String resolveUnifiedId(String platform, String senderId) {
         ensureLoaded();
 
         String normalizedPlatform = normalize(platform);
@@ -88,7 +88,7 @@ public class UserIdentityService {
      * @param senderId  要绑定的平台用户 ID
      * @return true 绑定成功，false 统一 ID 不存在
      */
-    public boolean bindPlatformToIdentity(String unifiedId, String platform, String senderId) {
+    public synchronized boolean bindPlatformToIdentity(String unifiedId, String platform, String senderId) {
         ensureLoaded();
 
         UserIdentity identity = identities.get(unifiedId);
@@ -99,6 +99,10 @@ public class UserIdentityService {
 
         String normalizedPlatform = normalize(platform);
         String normalizedSenderId = normalize(senderId);
+        if (normalizedPlatform.isBlank() || normalizedSenderId.isBlank()) {
+            log.warn("Cannot bind platform identity with blank platform/senderId");
+            return false;
+        }
         String key = buildKey(normalizedPlatform, normalizedSenderId);
 
         // 检查是否已绑定到其他身份
@@ -109,7 +113,7 @@ public class UserIdentityService {
             // 从旧身份中移除绑定
             UserIdentity oldIdentity = identities.get(existingBinding);
             if (oldIdentity != null) {
-                oldIdentity.getPlatformBindings().remove(normalizedPlatform);
+                safeBindings(oldIdentity).remove(normalizedPlatform);
             }
         }
 
@@ -124,7 +128,7 @@ public class UserIdentityService {
     /**
      * 获取所有已知身份列表。
      */
-    public List<UserIdentity> listAllIdentities() {
+    public synchronized List<UserIdentity> listAllIdentities() {
         ensureLoaded();
         return List.copyOf(identities.values());
     }
@@ -132,9 +136,34 @@ public class UserIdentityService {
     /**
      * 根据统一 ID 获取身份。
      */
-    public Optional<UserIdentity> getIdentity(String unifiedId) {
+    public synchronized Optional<UserIdentity> getIdentity(String unifiedId) {
         ensureLoaded();
         return Optional.ofNullable(identities.get(unifiedId));
+    }
+
+    public synchronized void recordConversationChannel(String unifiedId, String platform, String conversationId) {
+        ensureLoaded();
+        String normalizedUnifiedId = normalize(unifiedId);
+        String normalizedPlatform = normalize(platform);
+        String normalizedConversationId = safeTrim(conversationId);
+        if (normalizedUnifiedId.isBlank() || normalizedPlatform.isBlank() || normalizedConversationId.isBlank()) {
+            return;
+        }
+        UserIdentity identity = identities.get(normalizedUnifiedId);
+        if (identity == null) {
+            return;
+        }
+        identity.bindConversation(normalizedPlatform, normalizedConversationId);
+        persistMappings();
+    }
+
+    public synchronized String getConversationChannel(String unifiedId, String platform) {
+        ensureLoaded();
+        UserIdentity identity = identities.get(normalize(unifiedId));
+        if (identity == null) {
+            return "";
+        }
+        return safeTrim(identity.getConversationId(platform));
     }
 
     // ========== 内部方法 ==========
@@ -165,28 +194,36 @@ public class UserIdentityService {
 
     private void ensureLoaded() {
         if (!loaded) {
-            loadMappings();
-            loaded = true;
+            loaded = loadMappings();
         }
     }
 
-    private void loadMappings() {
-        Map<String, UserIdentity> stored = storage.readIdentityMappings();
-        identities.clear();
-        reverseIndex.clear();
-        identities.putAll(stored);
+    private boolean loadMappings() {
+        try {
+            Map<String, UserIdentity> stored = storage.readIdentityMappingsOrThrow();
+            identities.clear();
+            reverseIndex.clear();
+            identities.putAll(stored);
 
-        // 重建反向索引
-        for (Map.Entry<String, UserIdentity> entry : stored.entrySet()) {
-            UserIdentity identity = entry.getValue();
-            for (Map.Entry<String, String> binding : identity.getPlatformBindings().entrySet()) {
-                String key = buildKey(binding.getKey(), binding.getValue());
-                reverseIndex.put(key, identity.getUnifiedId());
+            // 重建反向索引
+            for (Map.Entry<String, UserIdentity> entry : stored.entrySet()) {
+                UserIdentity identity = entry.getValue();
+                if (identity == null) {
+                    continue;
+                }
+                for (Map.Entry<String, String> binding : safeBindings(identity).entrySet()) {
+                    String key = buildKey(binding.getKey(), binding.getValue());
+                    reverseIndex.put(key, identity.getUnifiedId());
+                }
             }
-        }
 
-        log.info("Loaded {} identity mappings with {} platform bindings",
-                identities.size(), reverseIndex.size());
+            log.info("Loaded {} identity mappings with {} platform bindings",
+                    identities.size(), reverseIndex.size());
+            return true;
+        } catch (Exception e) {
+            log.warn("Failed to load identity mappings", e);
+            return false;
+        }
     }
 
     private void persistMappings() {
@@ -199,5 +236,16 @@ public class UserIdentityService {
 
     private String normalize(String value) {
         return value == null ? "" : value.trim().toLowerCase();
+    }
+
+    private String safeTrim(String value) {
+        return value == null ? "" : value.trim();
+    }
+
+    private Map<String, String> safeBindings(UserIdentity identity) {
+        if (identity.getPlatformBindings() == null) {
+            identity.setPlatformBindings(new LinkedHashMap<>());
+        }
+        return identity.getPlatformBindings();
     }
 }

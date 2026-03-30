@@ -14,6 +14,9 @@ import java.util.Optional;
 public class TelegramInboundParser {
 
     public Optional<IncomingImMessage> parse(Map<String, Object> updateBody) {
+        if (updateBody == null || updateBody.isEmpty()) {
+            return Optional.empty();
+        }
         Map<String, Object> message = asMap(updateBody.get("message"));
         if (message.isEmpty()) {
             return Optional.empty();
@@ -33,6 +36,9 @@ public class TelegramInboundParser {
         }
 
         String senderId = trim(from.get("id"));
+        if (senderId.isBlank()) {
+            return Optional.empty();
+        }
         String messageId = trim(message.get("message_id"));
         long timestampMs = parseUnixSecondsToMillis(message.get("date"));
 
@@ -81,4 +87,3 @@ public class TelegramInboundParser {
         }
     }
 }
-

@@ -15,10 +15,18 @@ public final class ToolRuntimeContext {
     public static Scope bindTaskSourceContext(String sourcePlatform,
                                               String sourceConversationId,
                                               String sourceSenderId) {
+        return bindTaskSourceContext(sourcePlatform, sourceConversationId, sourceSenderId, false);
+    }
+
+    public static Scope bindTaskSourceContext(String sourcePlatform,
+                                              String sourceConversationId,
+                                              String sourceSenderId,
+                                              boolean commandExecutionAllowed) {
         TASK_SOURCE_CONTEXT.set(new TaskSourceContext(
                 safeTrim(sourcePlatform),
                 safeTrim(sourceConversationId),
-                safeTrim(sourceSenderId)
+                safeTrim(sourceSenderId),
+                commandExecutionAllowed
         ));
         return new Scope();
     }
@@ -34,10 +42,11 @@ public final class ToolRuntimeContext {
     public record TaskSourceContext(
             String sourcePlatform,
             String sourceConversationId,
-            String sourceSenderId
+            String sourceSenderId,
+            boolean commandExecutionAllowed
     ) {
         static TaskSourceContext empty() {
-            return new TaskSourceContext("", "", "");
+            return new TaskSourceContext("", "", "", false);
         }
     }
 

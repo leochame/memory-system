@@ -49,8 +49,9 @@ public class MemoryAsyncService {
                 new ArrayBlockingQueue<>(capacity),
                 new NamedThreadFactory("memory-async-"),
                 (r, ex) -> {
-                    // 不要 CallerRuns：那会把阻塞传播回主线程；这里直接丢弃并记录。
+                    // 不要 CallerRuns：那会把阻塞传播回主线程；这里记录并抛出拒绝异常。
                     log.warn("Memory async queue full (capacity={}, queued={}). Dropping task.", capacity, ex.getQueue().size());
+                    throw new RejectedExecutionException("Memory async queue full");
                 }
         );
         this.executor.prestartAllCoreThreads();
@@ -142,5 +143,4 @@ public class MemoryAsyncService {
         }
     }
 }
-
 

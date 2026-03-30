@@ -33,6 +33,6 @@ public record ReflectionResult(
      * 反思失败时的默认结果：需要记忆，原因为"反思阶段失败，默认加载记忆"。
      */
     public static ReflectionResult fallback() {
-        return new ReflectionResult(true, "reflection_failed_fallback", List.of());
+        return new ReflectionResult(true, "反思阶段异常，默认加载长期记忆以保证回答稳定性。", List.of("continuity"));
     }
 }

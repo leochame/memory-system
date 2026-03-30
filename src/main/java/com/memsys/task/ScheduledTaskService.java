@@ -15,6 +15,7 @@ import java.time.Clock;
 import java.time.LocalDateTime;
 import java.time.OffsetDateTime;
 import java.time.ZoneId;
+import java.time.temporal.ChronoUnit;
 import java.time.format.DateTimeParseException;
 import java.util.*;
 import java.util.concurrent.TimeUnit;
@@ -89,10 +90,16 @@ public class ScheduledTaskService {
         String title = safeTrim(extraction.get("task_title"));
         String detail = safeTrim(extraction.get("task_detail"));
         String dueAtIso = safeTrim(extraction.get("due_at_iso"));
+        String recurrence = normalizeRecurrenceType(safeTrim(extraction.get("recurrence_type")));
+        int recurrenceStep = normalizeRecurrenceInterval(recurrence, asInteger(extraction.get("recurrence_interval")));
         LocalDateTime dueAt = parseDueAt(dueAtIso, zone);
 
         if (title.isBlank() || dueAt == null) {
             log.warn("Scheduled task extraction missing fields: {}", extraction);
+            return Optional.empty();
+        }
+        if (recurrence == null) {
+            log.warn("Scheduled task extraction has invalid recurrence fields: {}", extraction);
             return Optional.empty();
         }
         if (dueAt.isBefore(now.minusMinutes(1))) {
@@ -104,7 +111,12 @@ public class ScheduledTaskService {
         boolean duplicated = tasks.stream()
                 .anyMatch(task -> ScheduledTask.STATUS_PENDING.equalsIgnoreCase(task.getStatus())
                         && normalized(task.getTitle()).equals(normalized(title))
-                        && Objects.equals(task.getDueAt(), dueAt));
+                        && Objects.equals(task.getDueAt(), dueAt)
+                        && Objects.equals(normalizeRecurrenceType(task.getRecurrenceType()), recurrence)
+                        && normalizeRecurrenceInterval(
+                                normalizeRecurrenceType(task.getRecurrenceType()),
+                                task.getRecurrenceInterval()
+                        ) == recurrenceStep);
         if (duplicated) {
             return Optional.empty();
         }
@@ -120,6 +132,8 @@ public class ScheduledTaskService {
         task.setSourcePlatform(safeTrim(sourcePlatform).toLowerCase(Locale.ROOT));
         task.setSourceConversationId(safeTrim(sourceConversationId));
         task.setSourceSenderId(safeTrim(sourceSenderId));
+        task.setRecurrenceType(recurrence);
+        task.setRecurrenceInterval(recurrenceStep);
 
         tasks.add(task);
         storage.writeScheduledTasks(tasks);
@@ -136,7 +150,8 @@ public class ScheduledTaskService {
             String sourceConversationId,
             String sourceSenderId
     ) {
-        return createTask(title, detail, dueAtIso, executeCommand, null, sourceMessage, sourcePlatform, sourceConversationId, sourceSenderId);
+        return createTask(title, detail, dueAtIso, executeCommand, null, null, null,
+                sourceMessage, sourcePlatform, sourceConversationId, sourceSenderId);
     }
 
     public synchronized Optional<ScheduledTask> createTask(
@@ -150,14 +165,36 @@ public class ScheduledTaskService {
             String sourceConversationId,
             String sourceSenderId
     ) {
+        return createTask(title, detail, dueAtIso, executeCommand, executeTimeoutSeconds, null, null,
+                sourceMessage, sourcePlatform, sourceConversationId, sourceSenderId);
+    }
+
+    public synchronized Optional<ScheduledTask> createTask(
+            String title,
+            String detail,
+            String dueAtIso,
+            String executeCommand,
+            Integer executeTimeoutSeconds,
+            String recurrenceType,
+            Integer recurrenceInterval,
+            String sourceMessage,
+            String sourcePlatform,
+            String sourceConversationId,
+            String sourceSenderId
+    ) {
         String cleanTitle = safeTrim(title);
         String cleanDetail = safeTrim(detail);
         String cleanCommand = safeTrim(executeCommand);
+        String recurrence = normalizeRecurrenceType(recurrenceType);
+        int recurrenceStep = normalizeRecurrenceInterval(recurrence, recurrenceInterval);
         ZoneId zone = clock.getZone();
         LocalDateTime now = LocalDateTime.now(clock);
         LocalDateTime dueAt = parseDueAt(dueAtIso, zone);
 
         if (cleanTitle.isBlank() || dueAt == null) {
+            return Optional.empty();
+        }
+        if (recurrence == null) {
             return Optional.empty();
         }
         if (dueAt.isBefore(now.minusMinutes(1))) {
@@ -169,7 +206,12 @@ public class ScheduledTaskService {
                 .anyMatch(task -> ScheduledTask.STATUS_PENDING.equalsIgnoreCase(task.getStatus())
                         && normalized(task.getTitle()).equals(normalized(cleanTitle))
                         && Objects.equals(task.getDueAt(), dueAt)
-                        && normalized(task.getExecuteCommand()).equals(normalized(cleanCommand)));
+                        && normalized(task.getExecuteCommand()).equals(normalized(cleanCommand))
+                        && Objects.equals(normalizeRecurrenceType(task.getRecurrenceType()), recurrence)
+                        && normalizeRecurrenceInterval(
+                                normalizeRecurrenceType(task.getRecurrenceType()),
+                                task.getRecurrenceInterval()
+                        ) == recurrenceStep);
         if (duplicated) {
             return Optional.empty();
         }
@@ -186,6 +228,8 @@ public class ScheduledTaskService {
         task.setSourceConversationId(safeTrim(sourceConversationId));
         task.setSourceSenderId(safeTrim(sourceSenderId));
         task.setExecuteCommand(cleanCommand);
+        task.setRecurrenceType(recurrence);
+        task.setRecurrenceInterval(recurrenceStep);
         if (executeTimeoutSeconds != null && executeTimeoutSeconds > 0) {
             task.setExecuteTimeoutSeconds(executeTimeoutSeconds);
         }
@@ -203,16 +247,36 @@ public class ScheduledTaskService {
 
         LocalDateTime now = LocalDateTime.now(clock);
         List<ScheduledTask> triggered = new ArrayList<>();
+        Map<ScheduledTask, LocalDateTime> triggeredDueAt = new IdentityHashMap<>();
+        Map<ScheduledTask, LocalDateTime> triggeredNextDueAt = new IdentityHashMap<>();
         for (ScheduledTask task : tasks) {
             if (!ScheduledTask.STATUS_PENDING.equalsIgnoreCase(task.getStatus())) {
                 continue;
             }
             LocalDateTime dueAt = task.getDueAt();
             if (dueAt != null && !dueAt.isAfter(now)) {
-                task.setStatus(ScheduledTask.STATUS_TRIGGERED);
+                LocalDateTime occurredDueAt = dueAt;
                 task.setTriggeredAt(now);
                 executeTaskCommand(task, now);
+                if (isRecurring(task)) {
+                    LocalDateTime nextDueAt = nextDueAtAfter(
+                            dueAt,
+                            task.getRecurrenceType(),
+                            task.getRecurrenceInterval(),
+                            now
+                    );
+                    if (nextDueAt != null) {
+                        task.setDueAt(nextDueAt);
+                        task.setStatus(ScheduledTask.STATUS_PENDING);
+                        triggeredNextDueAt.put(task, nextDueAt);
+                    } else {
+                        task.setStatus(ScheduledTask.STATUS_TRIGGERED);
+                    }
+                } else {
+                    task.setStatus(ScheduledTask.STATUS_TRIGGERED);
+                }
                 triggered.add(task);
+                triggeredDueAt.put(task, occurredDueAt);
             }
         }
 
@@ -227,7 +291,10 @@ public class ScheduledTaskService {
             notification.put("task_id", task.getId());
             notification.put("task_title", task.getTitle());
             notification.put("task_detail", task.getDetail());
-            notification.put("due_at", task.getDueAt() == null ? null : task.getDueAt().toString());
+            LocalDateTime occurredDueAt = triggeredDueAt.get(task);
+            notification.put("due_at", occurredDueAt == null ? null : occurredDueAt.toString());
+            LocalDateTime nextDueAt = triggeredNextDueAt.get(task);
+            notification.put("next_due_at", nextDueAt == null ? null : nextDueAt.toString());
             notification.put("triggered_at", now.toString());
             notification.put("execute_command", task.getExecuteCommand());
             notification.put("execution_status", task.getExecutionStatus());
@@ -314,11 +381,101 @@ public class ScheduledTaskService {
         return text == null ? "" : text.trim().toLowerCase(Locale.ROOT);
     }
 
+    private boolean isRecurring(ScheduledTask task) {
+        String type = normalizeRecurrenceType(task == null ? null : task.getRecurrenceType());
+        return ScheduledTask.RECURRENCE_DAILY.equals(type) || ScheduledTask.RECURRENCE_WEEKLY.equals(type);
+    }
+
+    private String normalizeRecurrenceType(String recurrenceType) {
+        String type = normalized(recurrenceType);
+        if (type.isBlank() || ScheduledTask.RECURRENCE_NONE.equals(type)) {
+            return ScheduledTask.RECURRENCE_NONE;
+        }
+        if (ScheduledTask.RECURRENCE_DAILY.equals(type) || ScheduledTask.RECURRENCE_WEEKLY.equals(type)) {
+            return type;
+        }
+        return null;
+    }
+
+    private int normalizeRecurrenceInterval(String recurrenceType, Integer recurrenceInterval) {
+        if (!ScheduledTask.RECURRENCE_DAILY.equals(recurrenceType)
+                && !ScheduledTask.RECURRENCE_WEEKLY.equals(recurrenceType)) {
+            return 0;
+        }
+        if (recurrenceInterval == null || recurrenceInterval <= 0) {
+            return 1;
+        }
+        return recurrenceInterval;
+    }
+
+    private LocalDateTime nextDueAt(LocalDateTime currentDueAt, String recurrenceType, Integer recurrenceInterval) {
+        if (currentDueAt == null) {
+            return null;
+        }
+        int step = recurrenceInterval == null || recurrenceInterval <= 0 ? 1 : recurrenceInterval;
+        String type = normalizeRecurrenceType(recurrenceType);
+        if (ScheduledTask.RECURRENCE_DAILY.equals(type)) {
+            return currentDueAt.plusDays(step);
+        }
+        if (ScheduledTask.RECURRENCE_WEEKLY.equals(type)) {
+            return currentDueAt.plusWeeks(step);
+        }
+        return null;
+    }
+
+    private LocalDateTime nextDueAtAfter(
+            LocalDateTime currentDueAt,
+            String recurrenceType,
+            Integer recurrenceInterval,
+            LocalDateTime threshold
+    ) {
+        LocalDateTime next = nextDueAt(currentDueAt, recurrenceType, recurrenceInterval);
+        if (next == null || threshold == null) {
+            return next;
+        }
+        if (next.isAfter(threshold)) {
+            return next;
+        }
+
+        int step = recurrenceInterval == null || recurrenceInterval <= 0 ? 1 : recurrenceInterval;
+        String type = normalizeRecurrenceType(recurrenceType);
+        if (ScheduledTask.RECURRENCE_DAILY.equals(type)) {
+            long wholeSteps = ChronoUnit.DAYS.between(next, threshold) / step;
+            return next.plusDays((wholeSteps + 1) * (long) step);
+        }
+        if (ScheduledTask.RECURRENCE_WEEKLY.equals(type)) {
+            long wholeSteps = ChronoUnit.WEEKS.between(next, threshold) / step;
+            return next.plusWeeks((wholeSteps + 1) * (long) step);
+        }
+        log.warn("Unable to advance recurring due time. dueAt={}, recurrenceType={}, recurrenceInterval={}",
+                currentDueAt, recurrenceType, recurrenceInterval);
+        return null;
+    }
+
     private String safeTrim(Object raw) {
         return raw == null ? "" : raw.toString().trim();
     }
 
+    private Integer asInteger(Object raw) {
+        if (raw == null) {
+            return null;
+        }
+        if (raw instanceof Number number) {
+            return number.intValue();
+        }
+        try {
+            return Integer.parseInt(String.valueOf(raw).trim());
+        } catch (Exception ignored) {
+            return null;
+        }
+    }
+
     private void executeTaskCommand(ScheduledTask task, LocalDateTime now) {
+        // Clear last run artifacts so recurring executions never leak stale values.
+        task.setExecutionExitCode(null);
+        task.setExecutionOutput(null);
+        task.setExecutedAt(null);
+
         String command = safeTrim(task.getExecuteCommand());
         if (command.isBlank()) {
             task.setExecutionStatus("skipped");
@@ -330,24 +487,24 @@ public class ScheduledTaskService {
                 : executionTimeoutSeconds;
         List<String> processCommand = List.of(executionShell, "-lc", command);
         try {
-            Process process = new ProcessBuilder(processCommand)
-                    .redirectErrorStream(true)
-                    .start();
-            boolean finished = process.waitFor(timeout, TimeUnit.SECONDS);
-            if (!finished) {
-                process.destroyForcibly();
+            ProcessExecutionResult processResult = executeProcessAndCapture(processCommand, timeout);
+            if (!processResult.finished()) {
                 task.setExecutionStatus("timeout");
                 task.setExecutionOutput("Command timed out after " + timeout + " seconds.");
                 task.setExecutedAt(now);
                 return;
             }
-
-            String output = readProcessOutput(process.getInputStream());
-            int exitCode = process.exitValue();
+            int exitCode = processResult.exitCode() == null ? -1 : processResult.exitCode();
             task.setExecutionStatus(exitCode == 0 ? "success" : "failed");
             task.setExecutionExitCode(exitCode);
-            task.setExecutionOutput(truncate(output, executionMaxOutputChars));
+            task.setExecutionOutput(truncate(processResult.output(), executionMaxOutputChars));
             task.setExecutedAt(now);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            task.setExecutionStatus("error");
+            task.setExecutionOutput("Command execution interrupted.");
+            task.setExecutedAt(now);
+            log.warn("Task command execution interrupted. taskId={}, command={}", task.getId(), command, e);
         } catch (Exception e) {
             task.setExecutionStatus("error");
             task.setExecutionOutput("Command execution failed: " + e.getMessage());
@@ -356,11 +513,39 @@ public class ScheduledTaskService {
         }
     }
 
-    private String readProcessOutput(InputStream inputStream) throws Exception {
-        try (inputStream; ByteArrayOutputStream output = new ByteArrayOutputStream()) {
-            inputStream.transferTo(output);
-            return output.toString(StandardCharsets.UTF_8);
+    private ProcessExecutionResult executeProcessAndCapture(List<String> processCommand, int timeoutSeconds)
+            throws Exception {
+        Process process = new ProcessBuilder(processCommand)
+                .redirectErrorStream(true)
+                .start();
+        ByteArrayOutputStream output = new ByteArrayOutputStream();
+        Thread outputReader = startOutputReader(process.getInputStream(), output, "scheduled-task-output-reader");
+
+        boolean finished = process.waitFor(timeoutSeconds, TimeUnit.SECONDS);
+        if (!finished) {
+            process.destroyForcibly();
+            process.waitFor(2, TimeUnit.SECONDS);
         }
+        outputReader.join(2000);
+
+        Integer exitCode = finished ? process.exitValue() : null;
+        return new ProcessExecutionResult(finished, exitCode, output.toString(StandardCharsets.UTF_8));
+    }
+
+    private Thread startOutputReader(InputStream inputStream, ByteArrayOutputStream output, String threadName) {
+        Thread reader = new Thread(() -> {
+            try (inputStream; output) {
+                inputStream.transferTo(output);
+            } catch (Exception ignored) {
+                // Ignore reader exceptions; process status will determine final result.
+            }
+        }, threadName);
+        reader.setDaemon(true);
+        reader.start();
+        return reader;
+    }
+
+    private record ProcessExecutionResult(boolean finished, Integer exitCode, String output) {
     }
 
     private String truncate(String text, int maxChars) {

@@ -3,6 +3,8 @@
 本文档用于快速完成两个 IM 渠道的联调：
 - 接收消息后执行任务（调用 `ConversationCli.processUserMessage()`）
 - 主动发送消息（`POST /im/send`）
+- 通过 IM API 对话（`POST /im/chat`）并返回可收起过程
+- 通过 SSE 获取流式过程（`POST /im/chat/stream`）
 - 用户提出提醒/日程需求时，由模型按需调用 `create_task` 工具创建任务，并在到点后主动推送提醒
 - 接收消息后可由模型调用 `run_python_script` 执行 `scripts/` 下 Python 脚本
 
@@ -161,6 +163,35 @@ curl -X POST http://localhost:8080/im/send \
     "platform": "feishu",
     "conversationId": "oc_xxx",
     "text": "hello from memory-box"
+  }'
+```
+
+IM 对话（返回 reply + process_steps，默认 process_collapsed=true）：
+
+```bash
+curl -X POST http://localhost:8080/im/chat \
+  -H "Content-Type: application/json" \
+  -d '{
+    "platform": "feishu",
+    "conversationId": "oc_xxx",
+    "senderId": "ou_xxx",
+    "text": "请帮我整理一下今天要做的事",
+    "temporary": false
+  }'
+```
+
+IM SSE 对话（事件名：`process`、`final`、`done`）：
+
+```bash
+curl -N -X POST http://localhost:8080/im/chat/stream \
+  -H "Content-Type: application/json" \
+  -H "Accept: text/event-stream" \
+  -d '{
+    "platform": "feishu",
+    "conversationId": "oc_xxx",
+    "senderId": "ou_xxx",
+    "text": "请帮我整理一下今天要做的事",
+    "temporary": false
   }'
 ```
 

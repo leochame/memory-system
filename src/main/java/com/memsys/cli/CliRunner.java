@@ -7,8 +7,11 @@ import com.memsys.identity.model.UserIdentity;
 import com.memsys.memory.ConversationSummaryService;
 import com.memsys.memory.MemoryExtractor;
 import com.memsys.memory.MemoryManager;
+import com.memsys.memory.MemoryScopeContext;
+import com.memsys.memory.MemoryTraceInsightService;
 import com.memsys.memory.MemoryWriteService;
 import com.memsys.memory.ProactiveReminderService;
+import com.memsys.memory.WeeklyReviewService;
 import com.memsys.memory.storage.MemoryStorage;
 import com.memsys.llm.LlmExtractionService;
 import com.memsys.llm.LlmDtos.ExampleItem;
@@ -48,6 +51,7 @@ import java.time.format.DateTimeFormatter;
 import java.util.*;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutionException;
+import java.util.concurrent.LinkedBlockingQueue;
 
 /**
  * CLI 主循环 + 命令路由 + 展示逻辑。
@@ -104,6 +108,8 @@ public class CliRunner implements CommandLineRunner {
     private final ScheduledTaskService scheduledTaskService;
     private final ConversationSummaryService conversationSummaryService;
     private final ProactiveReminderService proactiveReminderService;
+    private final WeeklyReviewService weeklyReviewService;
+    private final MemoryTraceInsightService memoryTraceInsightService;
     private final UserIdentityService userIdentityService;
 
     @Value("${memory.max-slots:100}")
@@ -128,6 +134,8 @@ public class CliRunner implements CommandLineRunner {
     private String appName;
 
     private boolean temporaryMode;
+    private String activeScope = MemoryScopeContext.DEFAULT_SCOPE;
+    private String cliUnifiedId = "user_default";
     private final List<String> startupNotes = new ArrayList<>();
     private final List<String> startupWarnings = new ArrayList<>();
 
@@ -143,6 +151,8 @@ public class CliRunner implements CommandLineRunner {
             ScheduledTaskService scheduledTaskService,
             ConversationSummaryService conversationSummaryService,
             ProactiveReminderService proactiveReminderService,
+            WeeklyReviewService weeklyReviewService,
+            MemoryTraceInsightService memoryTraceInsightService,
             UserIdentityService userIdentityService
     ) {
         this.conversationCli = conversationCli;
@@ -156,6 +166,8 @@ public class CliRunner implements CommandLineRunner {
         this.scheduledTaskService = scheduledTaskService;
         this.conversationSummaryService = conversationSummaryService;
         this.proactiveReminderService = proactiveReminderService;
+        this.weeklyReviewService = weeklyReviewService;
+        this.memoryTraceInsightService = memoryTraceInsightService;
         this.userIdentityService = userIdentityService;
     }
 
@@ -164,6 +176,8 @@ public class CliRunner implements CommandLineRunner {
         startupNotes.clear();
         startupWarnings.clear();
         this.temporaryMode = false;
+        this.cliUnifiedId = userIdentityService.resolveUnifiedId("cli", "default");
+        this.activeScope = MemoryScopeContext.personalScope(cliUnifiedId);
         for (String arg : args) {
             if ("--temporary".equals(arg) || "temp".equals(arg)) {
                 this.temporaryMode = true;
@@ -172,10 +186,12 @@ public class CliRunner implements CommandLineRunner {
         }
 
         if (temporaryMode) {
-            conversationCli.setTemporaryMode(true);
             startupWarnings.add("temporary 模式：不读取/写入长期记忆。");
         } else {
-            loadCliUiSettingsFromMetadata();
+            try (MemoryScopeContext.Scope ignored = MemoryScopeContext.useScope(activeScope)) {
+                loadCliUiSettingsFromMetadata();
+            }
+            startupNotes.add("当前作用域: " + activeScope);
         }
 
         // 启动时索引所有记忆到向量存储
@@ -218,8 +234,10 @@ public class CliRunner implements CommandLineRunner {
                 }
 
                 if (input.startsWith("/")) {
-                    if (!handleCommand(input, lineReader)) {
-                        break;
+                    try (MemoryScopeContext.Scope ignored = MemoryScopeContext.useScope(activeScope)) {
+                        if (!handleCommand(input, lineReader)) {
+                            break;
+                        }
                     }
                     continue;
                 }
@@ -325,13 +343,54 @@ public class CliRunner implements CommandLineRunner {
             }
             case "/examples" -> showExamples();
             case "/example-extract" -> triggerExampleExtraction();
-            case "/memory-debug" -> showMemoryDebug();
+            case "/memory-debug" -> {
+                if (parts.length == 1) {
+                    showMemoryDebug();
+                } else {
+                    try {
+                        int limit = Integer.parseInt(parts[1]);
+                        if (limit <= 0) {
+                            printSystem("用法: /memory-debug 或 /memory-debug <N>（N>0）");
+                            break;
+                        }
+                        showMemoryDebugHistory(limit);
+                    } catch (NumberFormatException e) {
+                        printSystem("用法: /memory-debug 或 /memory-debug <N>（N>0）");
+                    }
+                }
+            }
             case "/memory-timeline" -> showMemoryTimeline();
+            case "/memory-review" -> showMemoryReview();
             case "/memory-report" -> showMemoryReport();
             case "/memory-scenes" -> showMemoryScenes();
+            case "/memory-insights" -> {
+                int limit = 50;
+                if (parts.length >= 2) {
+                    try {
+                        limit = Integer.parseInt(parts[1]);
+                        if (limit <= 0) {
+                            printSystem("用法: /memory-insights [limit>0]");
+                            break;
+                        }
+                    } catch (NumberFormatException e) {
+                        printSystem("用法: /memory-insights [limit>0]");
+                        break;
+                    }
+                }
+                showMemoryInsights(limit);
+            }
             case "/memory-governance" -> showMemoryGovernance();
             case "/proactive-reminders" -> showProactiveReminders();
             case "/identity" -> showIdentityMappings();
+            case "/scope" -> handleScopeCommand(command);
+            case "/team" -> {
+                if (parts.length < 2) {
+                    printSystem("用法: /team <teamId>");
+                } else {
+                    switchToTeamScope(parts[1]);
+                }
+            }
+            case "/weekly-report" -> showWeeklyReport();
             case "/exit", "/quit" -> {
                 printSystem("会话结束。");
                 return false;
@@ -557,6 +616,14 @@ public class CliRunner implements CommandLineRunner {
             if (task.getDetail() != null && !task.getDetail().isBlank()) {
                 sb.append(" | detail=").append(truncate(task.getDetail(), PREVIEW_LIMIT));
             }
+            if (task.getRecurrenceType() != null
+                    && !task.getRecurrenceType().isBlank()
+                    && !ScheduledTask.RECURRENCE_NONE.equalsIgnoreCase(task.getRecurrenceType())) {
+                int interval = task.getRecurrenceInterval() == null || task.getRecurrenceInterval() <= 0
+                        ? 1
+                        : task.getRecurrenceInterval();
+                sb.append(" | recur=").append(task.getRecurrenceType()).append("/").append(interval);
+            }
             if (task.getExecuteCommand() != null && !task.getExecuteCommand().isBlank()) {
                 sb.append("\n   ").append("command=").append(truncate(task.getExecuteCommand(), PREVIEW_LIMIT));
             }
@@ -640,8 +707,10 @@ public class CliRunner implements CommandLineRunner {
         Map<String, Object> metadata = storage.readMetadata();
         Map<String, Object> globalControls = (Map<String, Object>) metadata.get("global_controls");
 
-        boolean useSavedMemories = globalControls == null || (boolean) globalControls.getOrDefault("use_saved_memories", true);
-        boolean useChatHistory = globalControls == null || (boolean) globalControls.getOrDefault("use_chat_history", true);
+        boolean useSavedMemories = globalControls == null
+                || parseBoolean(globalControls.get("use_saved_memories"), true);
+        boolean useChatHistory = globalControls == null
+                || parseBoolean(globalControls.get("use_chat_history"), true);
 
         printSystem("全局控制：\nmemories=" + onOff(useSavedMemories) + "\nhistory=" + onOff(useChatHistory));
     }
@@ -862,6 +931,85 @@ public class CliRunner implements CommandLineRunner {
         printSystem(trace.buildDisplaySummary());
     }
 
+    @SuppressWarnings("unchecked")
+    private void showMemoryDebugHistory(int limit) {
+        List<Map<String, Object>> traces = storage.readMemoryEvidenceTraces(limit);
+        if (traces.isEmpty()) {
+            MemoryEvidenceTrace trace = conversationCli.getLastEvidenceTrace();
+            if (trace == null) {
+                printSystem("暂无记忆反思记录。请先发送一条消息，再使用 /memory-debug 查看。");
+                return;
+            }
+            printSystem(trace.buildDisplaySummary());
+            return;
+        }
+
+        StringBuilder sb = new StringBuilder();
+        sb.append("╔══════════════════════════════════════════╗\n");
+        sb.append("║      🧪 Memory Debug History (最近追踪)   ║\n");
+        sb.append("╚══════════════════════════════════════════╝\n\n");
+        sb.append(String.format("▸ 最近 %d 条 evidence trace（最新在前）\n\n", traces.size()));
+
+        for (int i = traces.size() - 1, rank = 1; i >= 0; i--, rank++) {
+            Map<String, Object> t = traces.get(i);
+            String timestamp = safeString(t.get("timestamp"));
+            if (timestamp.isBlank()) {
+                timestamp = "(unknown)";
+            }
+            String userMessage = truncateForDisplay(safeString(t.get("user_message")), 80);
+
+            Map<String, Object> reflection = t.get("reflection") instanceof Map<?, ?> map
+                    ? (Map<String, Object>) map
+                    : Map.of();
+            String needsMemoryLabel = needsMemoryLabelFromRaw(reflection.get("needs_memory"));
+            String reason = safeString(reflection.get("reason"));
+            if (reason.isBlank()) {
+                reason = "reflection_missing";
+            }
+
+            List<String> retrievedInsights = toStringList(t.get("retrieved_insights"));
+            List<String> retrievedExamples = toStringList(t.get("retrieved_examples"));
+            List<String> loadedSkills = toStringList(t.get("loaded_skills"));
+            List<String> retrievedTasks = toStringList(t.get("retrieved_tasks"));
+            List<String> usedInsights = toStringList(t.get("used_insights"));
+            List<String> usedExamples = toStringList(t.get("used_examples"));
+            List<String> usedSkills = toStringList(t.get("used_skills"));
+            List<String> usedTasks = toStringList(t.get("used_tasks"));
+            String usedSummary = safeString(t.get("used_evidence_summary"));
+
+            sb.append(String.format("── #%d %s ──\n", rank, timestamp));
+            sb.append(String.format("  需要记忆: %s\n", needsMemoryLabel));
+            sb.append(String.format("  判断理由: %s\n", reason));
+            sb.append(String.format("  用户消息: %s\n", userMessage.isBlank() ? "(empty)" : userMessage));
+            sb.append(String.format("  检索: Insights %d | Examples %d | Skills %d | Tasks %d\n",
+                    retrievedInsights.size(), retrievedExamples.size(), loadedSkills.size(), retrievedTasks.size()));
+            sb.append(String.format("  使用: Insights %d | Examples %d | Skills %d | Tasks %d\n",
+                    usedInsights.size(), usedExamples.size(), usedSkills.size(), usedTasks.size()));
+            sb.append(String.format("  覆盖率: Insights %s | Examples %s | Skills %s | Tasks %s\n",
+                    usageCoverage(usedInsights.size(), retrievedInsights.size()),
+                    usageCoverage(usedExamples.size(), retrievedExamples.size()),
+                    usageCoverage(usedSkills.size(), loadedSkills.size()),
+                    usageCoverage(usedTasks.size(), retrievedTasks.size())));
+            if (!usedSummary.isBlank()) {
+                sb.append(String.format("  摘要: %s\n", truncateForDisplay(usedSummary, 120)));
+            }
+            sb.append("\n");
+        }
+
+        printSystem(sb.toString());
+    }
+
+    private List<String> toStringList(Object value) {
+        if (value instanceof List<?> list) {
+            return list.stream()
+                    .map(String::valueOf)
+                    .map(String::trim)
+                    .filter(s -> !s.isBlank() && !"null".equalsIgnoreCase(s))
+                    .toList();
+        }
+        return List.of();
+    }
+
     // ========== 记忆系统展示命令（Phase 8） ==========
 
     private void showMemoryTimeline() {
@@ -904,20 +1052,118 @@ public class CliRunner implements CommandLineRunner {
             sb.append("  (暂无反思记录)\n");
         } else {
             sb.append(String.format("  需要记忆: %s | 理由: %s\n",
-                    trace.reflection().needs_memory() ? "是" : "否",
-                    trace.reflection().reason()));
-            if (trace.memoryLoaded()) {
-                sb.append(String.format("  TopOfMind: %d 条 | RAG: %d 条 | 画像: %s | Example: %s | Skill: %d 个\n",
-                        trace.topOfMindCount(), trace.ragResultCount(),
-                        trace.userInsightUsed() ? "✓" : "✗",
-                        trace.examplesUsed() ? "✓" : "✗",
-                        trace.skillsAvailable()));
-            }
+                    traceNeedsMemoryLabel(trace),
+                    traceReason(trace)));
+            sb.append(String.format("  检索: Insights %d | Examples %d | Skills %d | Tasks %d\n",
+                    trace.retrievedInsights().size(),
+                    trace.retrievedExamples().size(),
+                    trace.loadedSkills().size(),
+                    trace.retrievedTasks().size()));
+            sb.append(String.format("  使用: Insights %d | Examples %d | Skills %d | Tasks %d\n",
+                    trace.usedInsights().size(),
+                    trace.usedExamples().size(),
+                    trace.usedSkills().size(),
+                    trace.usedTasks().size()));
         }
 
         // 3. 当前会话状态
         sb.append("\n── 当前会话 ──\n");
         sb.append(String.format("  累计轮次: %d\n", conversationSummaryService.getCurrentTurnCount()));
+
+        printSystem(sb.toString());
+    }
+
+    private void showMemoryReview() {
+        StringBuilder sb = new StringBuilder();
+        sb.append("╔══════════════════════════════════════════╗\n");
+        sb.append("║       🧭 Memory Review (记忆复盘)         ║\n");
+        sb.append("╚══════════════════════════════════════════╝\n\n");
+
+        // 1) 最近一轮反思与证据
+        sb.append("▸ 最近一轮反思\n");
+        MemoryEvidenceTrace trace = conversationCli.getLastEvidenceTrace();
+        if (trace == null) {
+            sb.append("  (暂无反思记录，先进行一轮对话后再查看)\n");
+        } else {
+            String needsMemoryLabel = traceNeedsMemoryLabel(trace);
+            String needsMemoryText = describeNeedsMemoryLabel(needsMemoryLabel);
+            sb.append(String.format("  记忆需求: %s\n", needsMemoryText));
+            sb.append(String.format("  判断理由: %s\n", traceReason(trace)));
+            sb.append(String.format("  证据检索: Insights %d | Examples %d | Skills %d | Tasks %d\n",
+                    trace.retrievedInsights().size(),
+                    trace.retrievedExamples().size(),
+                    trace.loadedSkills().size(),
+                    trace.retrievedTasks().size()));
+            sb.append(String.format("  证据使用: Insights %d | Examples %d | Skills %d | Tasks %d\n",
+                    trace.usedInsights().size(),
+                    trace.usedExamples().size(),
+                    trace.usedSkills().size(),
+                    trace.usedTasks().size()));
+            sb.append(String.format("  证据摘要: %s\n", trace.usedEvidenceSummary()));
+        }
+        sb.append("\n");
+
+        // 2) 最近摘要与会话压缩状态
+        sb.append("▸ 会话摘要\n");
+        List<Map<String, Object>> summaries = conversationSummaryService.getRecentSummaries(3);
+        if (summaries.isEmpty()) {
+            sb.append("  (暂无摘要；对话达到阈值或发生主题切换后自动生成)\n");
+        } else {
+            Map<String, Object> latest = summaries.get(summaries.size() - 1);
+            int fromTurn = toInt(latest.get("from_turn"));
+            int toTurn = toInt(latest.get("to_turn"));
+            String trigger = String.valueOf(latest.getOrDefault("trigger", "turn_threshold"));
+            String triggerLabel = "topic_shift".equals(trigger) ? "主题切换" : "轮次阈值";
+            String summaryText = String.valueOf(latest.getOrDefault("summary", ""));
+            sb.append(String.format("  最新摘要: 轮次 %d-%d（触发: %s）\n", fromTurn, toTurn, triggerLabel));
+            sb.append("  摘要内容: ").append(truncateForDisplay(summaryText, 120)).append("\n");
+            sb.append(String.format("  摘要总数: %d | Prompt 压缩: 已激活\n", summaries.size()));
+        }
+        sb.append("\n");
+
+        // 3) 治理状态概览
+        sb.append("▸ 记忆治理\n");
+        Map<String, Memory> memories = memoryManager.listAllMemories();
+        long activeCount = memories.values().stream()
+                .filter(m -> m.getStatus() == Memory.MemoryStatus.ACTIVE || m.getStatus() == null)
+                .count();
+        long pendingCount = memories.values().stream()
+                .filter(m -> m.getStatus() == Memory.MemoryStatus.PENDING)
+                .count();
+        long conflictCount = memories.values().stream()
+                .filter(m -> m.getStatus() == Memory.MemoryStatus.CONFLICT)
+                .count();
+        List<Map<String, Object>> pendingQueue = storage.readPendingExplicitMemories();
+        sb.append(String.format("  ACTIVE: %d | PENDING: %d | CONFLICT: %d\n", activeCount, pendingCount, conflictCount));
+        sb.append(String.format("  待处理队列: %d 条（/memory-governance 查看详情）\n", pendingQueue.size()));
+        sb.append("\n");
+
+        // 4) 近期任务状态
+        sb.append("▸ 近期任务\n");
+        List<ScheduledTask> tasks = scheduledTaskService.listTasks(5);
+        if (tasks.isEmpty()) {
+            sb.append("  (暂无任务)\n");
+        } else {
+            long todoCount = tasks.stream()
+                    .filter(task -> ScheduledTask.STATUS_PENDING.equalsIgnoreCase(task.getStatus()))
+                    .count();
+            long triggeredCount = tasks.stream()
+                    .filter(task -> ScheduledTask.STATUS_TRIGGERED.equalsIgnoreCase(task.getStatus()))
+                    .count();
+            long cancelledCount = tasks.stream()
+                    .filter(task -> ScheduledTask.STATUS_CANCELLED.equalsIgnoreCase(task.getStatus()))
+                    .count();
+            sb.append(String.format("  最近 %d 条任务：待执行 %d | 已触发 %d | 已取消 %d\n",
+                    tasks.size(), todoCount, triggeredCount, cancelledCount));
+            ScheduledTask latestTask = tasks.get(tasks.size() - 1);
+            String latestTitle = latestTask.getTitle() == null ? "(untitled)" : latestTask.getTitle();
+            String latestDue = latestTask.getDueAt() == null ? "unknown" : latestTask.getDueAt().toString();
+            sb.append(String.format("  最近任务: %s（%s）\n", truncateForDisplay(latestTitle, 50), latestDue));
+        }
+        sb.append("\n");
+
+        sb.append(String.format("▸ 当前会话轮次: %d\n", conversationSummaryService.getCurrentTurnCount()));
+        sb.append("▸ 建议：结合 /memory-debug、/memory-scenes 进行答辩演示");
 
         printSystem(sb.toString());
     }
@@ -939,8 +1185,10 @@ public class CliRunner implements CommandLineRunner {
         Map<String, Object> metadata = storage.readMetadata();
         @SuppressWarnings("unchecked")
         Map<String, Object> globalControls = (Map<String, Object>) metadata.get("global_controls");
-        boolean useMem = globalControls == null || (boolean) globalControls.getOrDefault("use_saved_memories", true);
-        boolean useHist = globalControls == null || (boolean) globalControls.getOrDefault("use_chat_history", true);
+        boolean useMem = globalControls == null
+                || parseBoolean(globalControls.get("use_saved_memories"), true);
+        boolean useHist = globalControls == null
+                || parseBoolean(globalControls.get("use_chat_history"), true);
         sb.append(String.format("  use_saved_memories: %s | use_chat_history: %s\n\n", useMem ? "ON" : "OFF", useHist ? "ON" : "OFF"));
 
         // L3 用户洞察
@@ -1004,7 +1252,7 @@ public class CliRunner implements CommandLineRunner {
         MemoryEvidenceTrace trace = conversationCli.getLastEvidenceTrace();
         sb.append(String.format("  状态: %s\n", trace != null ? "已运行" : "尚未运行"));
         if (trace != null) {
-            sb.append(String.format("  最近判断: %s\n", trace.reflection().needs_memory() ? "需要记忆" : "不需要记忆"));
+            sb.append(String.format("  最近判断: %s\n", describeNeedsMemoryLabel(traceNeedsMemoryLabel(trace))));
         }
 
         printSystem(sb.toString());
@@ -1209,6 +1457,45 @@ public class CliRunner implements CommandLineRunner {
         printSystem(sb.toString());
     }
 
+    private void showWeeklyReport() {
+        try (MemoryScopeContext.Scope ignored = MemoryScopeContext.useScope(activeScope)) {
+            String report = weeklyReviewService.generateCurrentScopeReview();
+            printSystem(report);
+        } catch (Exception e) {
+            log.warn("Generate weekly report failed", e);
+            printSystem("生成周报失败，请稍后重试。");
+        }
+    }
+
+    private void handleScopeCommand(String command) {
+        String[] parts = command.trim().split("\\s+", 3);
+        if (parts.length == 1) {
+            printSystem("当前作用域: " + activeScope + "\n用法: /scope personal [unifiedId] | /scope team <teamId>");
+            return;
+        }
+        String target = parts[1].toLowerCase(Locale.ROOT);
+        if ("personal".equals(target)) {
+            String unifiedId = parts.length >= 3 ? parts[2] : cliUnifiedId;
+            activeScope = MemoryScopeContext.personalScope(unifiedId);
+            printSystem("已切换到个人作用域: " + activeScope);
+            return;
+        }
+        if ("team".equals(target)) {
+            if (parts.length < 3 || parts[2].isBlank()) {
+                printSystem("用法: /scope team <teamId>");
+                return;
+            }
+            switchToTeamScope(parts[2]);
+            return;
+        }
+        printSystem("未知作用域类型: " + target + "\n用法: /scope personal [unifiedId] | /scope team <teamId>");
+    }
+
+    private void switchToTeamScope(String teamId) {
+        activeScope = MemoryScopeContext.teamScope(teamId);
+        printSystem("已切换到团队作用域: " + activeScope);
+    }
+
     private String truncateForDisplay(String text, int maxLen) {
         if (text == null) return "";
         return text.length() > maxLen ? text.substring(0, maxLen) + "..." : text;
@@ -1297,6 +1584,128 @@ public class CliRunner implements CommandLineRunner {
         sb.append(String.format("  当前累计轮次: %d\n", conversationSummaryService.getCurrentTurnCount()));
 
         printSystem(sb.toString());
+    }
+
+    private void showMemoryInsights(int limit) {
+        try {
+            MemoryTraceInsightService.InsightReport report = memoryTraceInsightService.analyzeRecentTraces(limit);
+            StringBuilder sb = new StringBuilder();
+            sb.append("╔══════════════════════════════════════════╗\n");
+            sb.append("║      🔬 Memory Insights (证据洞察)        ║\n");
+            sb.append("╚══════════════════════════════════════════╝\n\n");
+
+            sb.append(String.format("▸ 样本窗口: 最近 %d 条，实际 %d 条\n",
+                    report.requestedLimit(), report.sampleSize()));
+            sb.append(String.format("▸ 反思命中: needs_memory %.1f%% | memory_loaded %.1f%% | unknown %.1f%%\n\n",
+                    report.needsMemoryRate() * 100.0d,
+                    report.memoryLoadedRate() * 100.0d,
+                    report.unknownNeedsMemoryRate() * 100.0d));
+
+            sb.append("▸ 证据使用率（used / retrieved）\n");
+            appendEvidenceRate(sb, "insights", report.insightStat());
+            appendEvidenceRate(sb, "examples", report.exampleStat());
+            appendEvidenceRate(sb, "skills", report.skillStat());
+            appendEvidenceRate(sb, "tasks", report.taskStat());
+            sb.append("\n");
+
+            appendTrendSection(sb, report.trendSummary());
+            sb.append("\n");
+
+            appendTopList(sb, "高频 skill", report.topUsedSkills());
+            appendTopList(sb, "高频用途", report.topPurposes());
+            appendTopList(sb, "高频理由", report.topReasons());
+            sb.append("\n");
+
+            appendPurposeInsights(sb, report.topPurposeInsights());
+            sb.append("\n");
+
+            sb.append("▸ 优化建议\n");
+            for (String suggestion : report.suggestions()) {
+                sb.append("  - ").append(suggestion).append("\n");
+            }
+            sb.append("\n");
+            sb.append("提示: 可结合 /memory-debug 与 /memory-review 定位单轮证据链路。");
+
+            printSystem(sb.toString());
+        } catch (Exception e) {
+            log.warn("Build memory insights report failed", e);
+            printSystem("生成 memory insights 失败，请稍后重试。");
+        }
+    }
+
+    private void appendEvidenceRate(StringBuilder sb,
+                                    String label,
+                                    MemoryTraceInsightService.EvidenceStat stat) {
+        if (stat == null) {
+            sb.append(String.format("  - %s: 0/0 (0.0%%)\n", label));
+            return;
+        }
+        sb.append(String.format("  - %s: %d/%d (%.1f%%)\n",
+                label, stat.used(), stat.retrieved(), stat.usageRate() * 100.0d));
+    }
+
+    private void appendTrendSection(StringBuilder sb, MemoryTraceInsightService.TrendSummary trendSummary) {
+        sb.append("▸ 趋势对比（前半窗口 -> 后半窗口）\n");
+        if (trendSummary == null || !trendSummary.available()) {
+            sb.append("  - 样本不足（至少 6 条）\n");
+            return;
+        }
+
+        sb.append(String.format("  - 窗口规模: 前 %d 条 | 后 %d 条\n",
+                trendSummary.previousWindowSize(), trendSummary.recentWindowSize()));
+        appendTrendLine(sb, "memory_loaded", trendSummary.memoryLoadedTrend());
+        appendTrendLine(sb, "insights_usage", trendSummary.insightUsageTrend());
+        appendTrendLine(sb, "examples_usage", trendSummary.exampleUsageTrend());
+        appendTrendLine(sb, "skills_usage", trendSummary.skillUsageTrend());
+        appendTrendLine(sb, "tasks_usage", trendSummary.taskUsageTrend());
+    }
+
+    private void appendTrendLine(StringBuilder sb, String label, MemoryTraceInsightService.TrendStat trend) {
+        if (trend == null) {
+            sb.append(String.format("  - %s: n/a\n", label));
+            return;
+        }
+        sb.append(String.format("  - %s: %.1f%% -> %.1f%% (%s)\n",
+                label,
+                trend.previousRate() * 100.0d,
+                trend.recentRate() * 100.0d,
+                formatTrendDelta(trend.delta())));
+    }
+
+    private String formatTrendDelta(double delta) {
+        if (Math.abs(delta) < 1e-6) {
+            return "0.0pp";
+        }
+        return String.format("%+.1fpp", delta * 100.0d);
+    }
+
+    private void appendTopList(StringBuilder sb, String title, List<String> values) {
+        sb.append("▸ ").append(title).append("\n");
+        if (values == null || values.isEmpty()) {
+            sb.append("  - (暂无)\n");
+            return;
+        }
+        for (String value : values) {
+            sb.append("  - ").append(value).append("\n");
+        }
+    }
+
+    private void appendPurposeInsights(StringBuilder sb, List<MemoryTraceInsightService.PurposeInsight> insights) {
+        sb.append("▸ 用途诊断（按 evidence_purpose）\n");
+        if (insights == null || insights.isEmpty()) {
+            sb.append("  - (暂无)\n");
+            return;
+        }
+        for (MemoryTraceInsightService.PurposeInsight insight : insights) {
+            sb.append(String.format("  - %s (样本 %d): loaded %.1f%% | I %.1f%% | E %.1f%% | S %.1f%% | T %.1f%%\n",
+                    insight.purpose(),
+                    insight.sampleSize(),
+                    insight.memoryLoadedRate() * 100.0d,
+                    insight.insightUsageRate() * 100.0d,
+                    insight.exampleUsageRate() * 100.0d,
+                    insight.skillUsageRate() * 100.0d,
+                    insight.taskUsageRate() * 100.0d));
+        }
     }
 
     @SuppressWarnings("unchecked")
@@ -1433,6 +1842,74 @@ public class CliRunner implements CommandLineRunner {
         return value ? "on" : "off";
     }
 
+    private String usageCoverage(int used, int retrieved) {
+        if (retrieved <= 0) {
+            return "n/a";
+        }
+        return String.format(Locale.ROOT, "%.1f%%", used * 100.0d / retrieved);
+    }
+
+    private String traceNeedsMemoryLabel(MemoryEvidenceTrace trace) {
+        if (trace == null || trace.reflection() == null) {
+            return "unknown";
+        }
+        return trace.reflection().needs_memory() ? "是" : "否";
+    }
+
+    static String describeNeedsMemoryLabel(String needsMemoryLabel) {
+        if ("是".equals(needsMemoryLabel)) {
+            return "需要记忆";
+        }
+        if ("否".equals(needsMemoryLabel)) {
+            return "不需要记忆";
+        }
+        return "未知";
+    }
+
+    static String needsMemoryLabelFromRaw(Object rawValue) {
+        if (rawValue == null) {
+            return "unknown";
+        }
+        if (rawValue instanceof Boolean bool) {
+            return bool ? "是" : "否";
+        }
+        String text = String.valueOf(rawValue).trim();
+        if (text.isBlank()) {
+            return "unknown";
+        }
+        if ("true".equalsIgnoreCase(text) || "on".equalsIgnoreCase(text) || "1".equals(text)) {
+            return "是";
+        }
+        if ("false".equalsIgnoreCase(text) || "off".equalsIgnoreCase(text) || "0".equals(text)) {
+            return "否";
+        }
+        return "unknown";
+    }
+
+    private String traceReason(MemoryEvidenceTrace trace) {
+        if (trace == null || trace.reflection() == null || trace.reflection().reason() == null || trace.reflection().reason().isBlank()) {
+            return "reflection_missing";
+        }
+        return trace.reflection().reason();
+    }
+
+    private boolean parseBoolean(Object value, boolean defaultValue) {
+        if (value == null) {
+            return defaultValue;
+        }
+        if (value instanceof Boolean bool) {
+            return bool;
+        }
+        String text = String.valueOf(value).trim();
+        if ("true".equalsIgnoreCase(text) || "on".equalsIgnoreCase(text) || "1".equals(text)) {
+            return true;
+        }
+        if ("false".equalsIgnoreCase(text) || "off".equalsIgnoreCase(text) || "0".equals(text)) {
+            return false;
+        }
+        return defaultValue;
+    }
+
     private Boolean parseOnOff(String value) {
         if (value == null) {
             return null;
@@ -1502,8 +1979,10 @@ public class CliRunner implements CommandLineRunner {
         Set<String> words = new LinkedHashSet<>(COMPLETABLE_COMMANDS);
         words.addAll(List.of("memories", "history", "on", "off", "true", "false"));
         words.addAll(SUPPORTED_THEMES);
-        words.addAll(skillService.listSkillNames());
-        words.addAll(memoryManager.listAllMemories().keySet());
+        try (MemoryScopeContext.Scope ignored = MemoryScopeContext.useScope(activeScope)) {
+            words.addAll(skillService.listSkillNames());
+            words.addAll(memoryManager.listAllMemories().keySet());
+        }
         return new ArrayList<>(words);
     }
 
@@ -1548,6 +2027,7 @@ public class CliRunner implements CommandLineRunner {
         String status = "model " + model
                 + " · mode " + mode
                 + " · rag " + rag
+                + " · scope " + activeScope
                 + " · theme " + theme
                 + " · skills " + countSkills()
                 + " · memories " + countMemories()
@@ -1555,7 +2035,7 @@ public class CliRunner implements CommandLineRunner {
                 + " · " + now;
         System.out.println(style("┈ " + status, ANSI_DIM));
         if (showFooter) {
-            System.out.println(style("/help /theme /footer /statusline /shortcuts /skills /memories /tasks /what-you-know /exit", ANSI_DIM));
+            System.out.println(style("/help /scope /team /weekly-report /memory-insights /theme /footer /shortcuts /skills /memories /tasks /memory-review /exit", ANSI_DIM));
         }
     }
 
@@ -1594,16 +2074,43 @@ public class CliRunner implements CommandLineRunner {
     }
 
     private String processWithSpinner(String input) throws Exception {
-        CompletableFuture<String> future = CompletableFuture.supplyAsync(() -> conversationCli.processUserMessage(input));
+        final String scopeSnapshot = activeScope;
+        final String senderSnapshot = currentCliSourceSenderId(scopeSnapshot);
+        final LinkedBlockingQueue<ConversationProgressEvent> progressQueue = new LinkedBlockingQueue<>();
+        final List<ConversationProgressEvent> progressEvents = new ArrayList<>();
+        CompletableFuture<String> future = CompletableFuture.supplyAsync(() -> {
+            try (MemoryScopeContext.Scope ignored = MemoryScopeContext.useScope(scopeSnapshot)) {
+                return temporaryMode
+                        ? conversationCli.processUserMessageTemporary(
+                        input, "cli", scopeSnapshot, senderSnapshot, progressQueue::offer)
+                        : conversationCli.processUserMessage(
+                        input, "cli", scopeSnapshot, senderSnapshot, progressQueue::offer);
+            }
+        });
         int frame = 0;
         long startedAt = System.nanoTime();
+        int renderedProcessLines = 0;
         try {
             while (!future.isDone()) {
+                ConversationProgressEvent event;
+                while ((event = progressQueue.poll()) != null) {
+                    progressEvents.add(event);
+                    String processLine = "· " + (event.message() == null || event.message().isBlank()
+                            ? "处理中..."
+                            : event.message());
+                    System.out.print("\r" + ANSI_CLEAR_LINE);
+                    System.out.println(style(processLine, ANSI_DIM));
+                    renderedProcessLines++;
+                }
+
                 long elapsedSeconds = Duration.ofNanos(System.nanoTime() - startedAt).toSeconds();
                 int phraseIndex = (int) ((elapsedSeconds / SPINNER_PHRASE_ROTATE_SECONDS) % THINKING_PHRASES.length);
+                String stageHint = progressEvents.isEmpty()
+                        ? THINKING_PHRASES[phraseIndex]
+                        : progressEvents.get(progressEvents.size() - 1).message();
                 String spinnerText = THINKING_FRAMES[frame]
                         + " "
-                        + THINKING_PHRASES[phraseIndex]
+                        + stageHint
                         + " ("
                         + elapsedSeconds
                         + "s)";
@@ -1612,8 +2119,25 @@ public class CliRunner implements CommandLineRunner {
                 frame = (frame + 1) % THINKING_FRAMES.length;
                 Thread.sleep(90);
             }
+            ConversationProgressEvent remain;
+            while ((remain = progressQueue.poll()) != null) {
+                progressEvents.add(remain);
+                String processLine = "· " + (remain.message() == null || remain.message().isBlank()
+                        ? "处理中..."
+                        : remain.message());
+                System.out.print("\r" + ANSI_CLEAR_LINE);
+                System.out.println(style(processLine, ANSI_DIM));
+                renderedProcessLines++;
+            }
             System.out.print("\r" + ANSI_CLEAR_LINE);
             System.out.flush();
+            clearRenderedProcessLines(renderedProcessLines);
+            if (!progressEvents.isEmpty()) {
+                long totalMs = Duration.ofNanos(System.nanoTime() - startedAt).toMillis();
+                String collapsed = "过程已收起 · " + progressEvents.size() + " 步 · " + formatDurationSeconds(totalMs)
+                        + "s · 可用 /memory-debug 查看证据详情";
+                System.out.println(style(collapsed, ANSI_DIM));
+            }
             return future.get();
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
@@ -1629,9 +2153,27 @@ public class CliRunner implements CommandLineRunner {
         }
     }
 
+    private void clearRenderedProcessLines(int lines) {
+        if (lines <= 0) {
+            return;
+        }
+        for (int i = 0; i < lines; i++) {
+            System.out.print("\u001B[1A\r" + ANSI_CLEAR_LINE);
+        }
+        System.out.print("\r" + ANSI_CLEAR_LINE);
+        System.out.flush();
+    }
+
+    private String formatDurationSeconds(long durationMs) {
+        double seconds = Math.max(0, durationMs) / 1000.0d;
+        return String.format(Locale.ROOT, "%.1f", seconds);
+    }
+
     private int countSkills() {
         try {
-            return skillService.listSkillNames().size();
+            try (MemoryScopeContext.Scope ignored = MemoryScopeContext.useScope(activeScope)) {
+                return skillService.listSkillNames().size();
+            }
         } catch (Exception e) {
             log.debug("Failed to count skills for status bar", e);
             return 0;
@@ -1640,11 +2182,29 @@ public class CliRunner implements CommandLineRunner {
 
     private int countMemories() {
         try {
-            return memoryManager.listAllMemories().size();
+            try (MemoryScopeContext.Scope ignored = MemoryScopeContext.useScope(activeScope)) {
+                return memoryManager.listAllMemories().size();
+            }
         } catch (Exception e) {
             log.debug("Failed to count memories for status bar", e);
             return 0;
         }
+    }
+
+    private String currentCliSourceSenderId(String scope) {
+        if (scope == null || scope.isBlank()) {
+            return cliUnifiedId;
+        }
+        int idx = scope.indexOf(':');
+        if (idx < 0 || idx >= scope.length() - 1) {
+            return cliUnifiedId;
+        }
+        String kind = scope.substring(0, idx);
+        String value = scope.substring(idx + 1);
+        if ("team".equalsIgnoreCase(kind)) {
+            return "team:" + value;
+        }
+        return value;
     }
 
     private ThemePalette themePalette() {
@@ -1741,13 +2301,18 @@ public class CliRunner implements CommandLineRunner {
         commands.put("/skill-delete", "删除技能");
         commands.put("/examples", "查看 example 文档数量");
         commands.put("/example-extract", "提取并索引 examples");
-        commands.put("/memory-debug", "展示最近一轮记忆反思与证据使用");
+        commands.put("/memory-debug", "展示最近一轮（或最近 N 轮）记忆反思与证据使用");
         commands.put("/memory-timeline", "记忆系统时间线视图");
+        commands.put("/memory-review", "一页式记忆复盘（反思/摘要/治理/任务）");
         commands.put("/memory-report", "记忆系统综合状态报告");
         commands.put("/memory-scenes", "按话题/场景分组展示记忆摘要");
+        commands.put("/memory-insights", "基于 trace 生成证据质量洞察与优化建议");
         commands.put("/memory-governance", "记忆治理状态（冲突、待审核、归档）");
         commands.put("/proactive-reminders", "查看主动提醒历史");
         commands.put("/identity", "查看统一身份映射");
+        commands.put("/scope", "切换记忆作用域（个人/团队）");
+        commands.put("/team", "快速切换到团队作用域");
+        commands.put("/weekly-report", "生成本作用域每周复盘");
         commands.put("/exit", "退出会话");
         commands.put("/quit", "退出会话");
         return Collections.unmodifiableMap(commands);

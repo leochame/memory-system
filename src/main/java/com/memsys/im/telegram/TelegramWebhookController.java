@@ -12,6 +12,7 @@ import org.springframework.web.bind.annotation.*;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Optional;
+import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * Telegram webhook 入口。
@@ -20,6 +21,9 @@ import java.util.Optional;
 @RestController
 @ConditionalOnProperty(name = "im.telegram.enabled", havingValue = "true")
 public class TelegramWebhookController {
+    private static final long DEDUP_WINDOW_MILLIS = 5 * 60 * 1000L;
+    private static final int DEDUP_MAX_SIZE = 10_000;
+    private static final ConcurrentHashMap<String, Long> RECENT_MESSAGE_KEYS = new ConcurrentHashMap<>();
 
     private final TelegramInboundParser inboundParser;
     private final ImRuntimeService imRuntimeService;
@@ -53,11 +57,16 @@ public class TelegramWebhookController {
                 return ResponseEntity.ok(Map.of("ok", true, "ignored", true));
             }
 
-            String reply = imRuntimeService.handleIncomingAndReply(incoming.get());
+            IncomingImMessage in = incoming.get();
+            if (!shouldProcess(in)) {
+                return ResponseEntity.ok(Map.of("ok", true, "ignored", true, "duplicate", true));
+            }
+
+            String reply = imRuntimeService.handleIncomingAndReply(in);
             Map<String, Object> result = new LinkedHashMap<>();
             result.put("ok", true);
             result.put("platform", "telegram");
-            result.put("conversation_id", incoming.get().conversationId());
+            result.put("conversation_id", in.conversationId());
             result.put("reply_len", reply == null ? 0 : reply.length());
             return ResponseEntity.ok(result);
         } catch (Exception e) {
@@ -72,5 +81,22 @@ public class TelegramWebhookController {
     private String trim(String value) {
         return value == null ? "" : value.trim();
     }
-}
 
+    private boolean shouldProcess(IncomingImMessage incoming) {
+        String messageId = incoming == null ? "" : trim(incoming.messageId());
+        if (messageId.isBlank()) {
+            return true;
+        }
+        cleanupDedupCache(System.currentTimeMillis());
+        String key = "telegram:" + incoming.conversationId() + ":" + messageId;
+        return RECENT_MESSAGE_KEYS.putIfAbsent(key, System.currentTimeMillis()) == null;
+    }
+
+    private void cleanupDedupCache(long now) {
+        RECENT_MESSAGE_KEYS.entrySet().removeIf(entry -> now - entry.getValue() > DEDUP_WINDOW_MILLIS);
+        if (RECENT_MESSAGE_KEYS.size() <= DEDUP_MAX_SIZE) {
+            return;
+        }
+        RECENT_MESSAGE_KEYS.clear();
+    }
+}

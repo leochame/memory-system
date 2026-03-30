@@ -23,7 +23,9 @@ import org.springframework.stereotype.Component;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.Function;
 
 /**
@@ -36,6 +38,7 @@ public class LlmClient {
     private static final Logger llmIoLog = LoggerFactory.getLogger("com.memsys.llm.io");
     private static final int LOG_TEXT_LIMIT = 8_000;
     private static final String GENERIC_ERROR_MESSAGE = "抱歉，我遇到了一些问题，请稍后再试。";
+    private static final double DEFAULT_TEMPERATURE = 0.7d;
 
     private final ChatModelGateway modelGateway;
     private final int maxToolRounds;
@@ -52,14 +55,7 @@ public class LlmClient {
             @Value("${llm.retry.max-attempts:2}") int maxRetryAttempts,
             @Value("${llm.retry.backoff-ms:300}") long retryBackoffMillis
     ) {
-        this(new OpenAiChatModelGateway(
-                OpenAiChatModel.builder()
-                        .apiKey(apiKey)
-                        .baseUrl(baseUrl)
-                        .modelName(modelName)
-                        .strictJsonSchema(true)
-                        .build()
-        ), maxToolRounds, maxRetryAttempts, retryBackoffMillis);
+        this(new OpenAiChatModelGateway(apiKey, baseUrl, modelName), maxToolRounds, maxRetryAttempts, retryBackoffMillis);
         log.info("LLM client initialized with model: {}", modelName);
     }
 
@@ -89,7 +85,7 @@ public class LlmClient {
 
         try {
             logLlmInput("chat", finalMessages, List.of(), null);
-            String response = callWithRetry("chat", () -> modelGateway.generateText(finalMessages));
+            String response = callWithRetry("chat", () -> generateText(finalMessages, temperature));
             logLlmOutput("chat", response);
             return response;
         } catch (Exception e) {
@@ -121,7 +117,7 @@ public class LlmClient {
                 logLlmInput("chatWithTools", conversation, toolSpecifications, round);
                 AiMessage aiMessage = callWithRetry(
                         "chatWithTools",
-                        () -> modelGateway.generateWithTools(conversation, toolSpecifications)
+                        () -> generateWithTools(conversation, toolSpecifications, temperature)
                 );
                 if (aiMessage == null) {
                     log.warn("LLM returned null AiMessage during tool chat");
@@ -178,6 +174,24 @@ public class LlmClient {
 
         logLlmOutput("chatWithTools", "[fallback generic error]");
         return GENERIC_ERROR_MESSAGE;
+    }
+
+    private String generateText(List<ChatMessage> messages, double temperature) {
+        if (modelGateway instanceof TemperatureAwareChatModelGateway temperatureAware) {
+            return temperatureAware.generateText(messages, temperature);
+        }
+        return modelGateway.generateText(messages);
+    }
+
+    private AiMessage generateWithTools(
+            List<ChatMessage> messages,
+            List<ToolSpecification> toolSpecifications,
+            double temperature
+    ) {
+        if (modelGateway instanceof TemperatureAwareChatModelGateway temperatureAware) {
+            return temperatureAware.generateWithTools(messages, toolSpecifications, temperature);
+        }
+        return modelGateway.generateWithTools(messages, toolSpecifications);
     }
 
     /**
@@ -412,9 +426,17 @@ public class LlmClient {
 
     private <T> T callWithRetry(String channel, ThrowingSupplier<T> supplier) throws Exception {
         Exception lastError = null;
+        long callStartNs = System.nanoTime();
+        long accumulatedBackoffMs = 0L;
         for (int attempt = 1; attempt <= maxRetryAttempts; attempt++) {
             try {
-                return supplier.get();
+                T result = supplier.get();
+                if (attempt > 1) {
+                    long totalElapsedMs = Math.max(0L, (System.nanoTime() - callStartNs) / 1_000_000L);
+                    log.info("LLM {} recovered after retry: attempts={}, retry_backoff_ms={}, total_elapsed_ms={}",
+                            channel, attempt, accumulatedBackoffMs, totalElapsedMs);
+                }
+                return result;
             } catch (Exception e) {
                 lastError = e;
                 if (!isRetriable(e) || attempt >= maxRetryAttempts) {
@@ -422,6 +444,7 @@ public class LlmClient {
                 }
 
                 long backoff = retryBackoffMillis * attempt;
+                accumulatedBackoffMs += Math.max(0L, backoff);
                 log.warn("LLM {} attempt {}/{} failed with retriable error: {}. Retrying in {} ms.",
                         channel, attempt, maxRetryAttempts, e.toString(), backoff);
                 if (backoff > 0) {
@@ -478,27 +501,91 @@ public class LlmClient {
         String generateStructured(ChatRequest request);
     }
 
-    private static final class OpenAiChatModelGateway implements ChatModelGateway {
+    interface TemperatureAwareChatModelGateway extends ChatModelGateway {
+        String generateText(List<ChatMessage> messages, double temperature);
 
-        private final OpenAiChatModel model;
+        AiMessage generateWithTools(List<ChatMessage> messages, List<ToolSpecification> toolSpecifications, double temperature);
+    }
 
-        private OpenAiChatModelGateway(OpenAiChatModel model) {
-            this.model = model;
+    private static final class OpenAiChatModelGateway implements TemperatureAwareChatModelGateway {
+
+        private final String apiKey;
+        private final String baseUrl;
+        private final String modelName;
+        private final OpenAiChatModel defaultModel;
+        private final Map<String, OpenAiChatModel> temperatureModels = new ConcurrentHashMap<>();
+
+        private OpenAiChatModelGateway(String apiKey, String baseUrl, String modelName) {
+            this.apiKey = apiKey;
+            this.baseUrl = baseUrl;
+            this.modelName = modelName;
+            this.defaultModel = createModel(null);
         }
 
         @Override
         public String generateText(List<ChatMessage> messages) {
-            return model.generate(messages).content().text();
+            return generateText(messages, DEFAULT_TEMPERATURE);
+        }
+
+        @Override
+        public String generateText(List<ChatMessage> messages, double temperature) {
+            return modelForTemperature(temperature).generate(messages).content().text();
         }
 
         @Override
         public AiMessage generateWithTools(List<ChatMessage> messages, List<ToolSpecification> toolSpecifications) {
-            return model.generate(messages, toolSpecifications).content();
+            return generateWithTools(messages, toolSpecifications, DEFAULT_TEMPERATURE);
+        }
+
+        @Override
+        public AiMessage generateWithTools(
+                List<ChatMessage> messages,
+                List<ToolSpecification> toolSpecifications,
+                double temperature
+        ) {
+            return modelForTemperature(temperature).generate(messages, toolSpecifications).content();
         }
 
         @Override
         public String generateStructured(ChatRequest request) {
-            return model.chat(request).aiMessage().text();
+            return defaultModel.chat(request).aiMessage().text();
+        }
+
+        private OpenAiChatModel modelForTemperature(double temperature) {
+            if (Double.isNaN(temperature) || Double.isInfinite(temperature)) {
+                return defaultModel;
+            }
+            String key = String.format(Locale.ROOT, "%.3f", temperature);
+            return temperatureModels.computeIfAbsent(key, ignored -> createModel(temperature));
+        }
+
+        private OpenAiChatModel createModel(Double temperature) {
+            var builder = OpenAiChatModel.builder()
+                    .apiKey(apiKey)
+                    .baseUrl(baseUrl)
+                    .modelName(modelName)
+                    .strictJsonSchema(true);
+            if (temperature != null) {
+                applyTemperature(builder, temperature);
+            }
+            return builder.build();
+        }
+
+        private void applyTemperature(Object builder, double temperature) {
+            try {
+                builder.getClass().getMethod("temperature", Double.class).invoke(builder, temperature);
+                return;
+            } catch (NoSuchMethodException ignored) {
+                // Try primitive signature.
+            } catch (Exception e) {
+                log.debug("Failed to set LLM temperature via boxed signature", e);
+                return;
+            }
+            try {
+                builder.getClass().getMethod("temperature", double.class).invoke(builder, temperature);
+            } catch (Exception e) {
+                log.debug("Failed to set LLM temperature via primitive signature", e);
+            }
         }
     }
 }

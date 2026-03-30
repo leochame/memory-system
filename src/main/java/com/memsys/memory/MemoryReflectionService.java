@@ -7,6 +7,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 
 import java.util.List;
+import java.util.Locale;
 
 /**
  * Memory Reflection Service — Phase 7 核心组件。
@@ -49,11 +50,7 @@ public class MemoryReflectionService {
                 return ReflectionResult.fallback();
             }
 
-            ReflectionResult reflectionResult = new ReflectionResult(
-                    result.needs_memory(),
-                    result.reason() != null ? result.reason() : "",
-                    result.evidence_purposes() != null ? result.evidence_purposes() : List.of()
-            );
+            ReflectionResult reflectionResult = normalizeResult(result);
 
             log.info("Memory reflection: needs_memory={}, reason={}, purposes={}",
                     reflectionResult.needs_memory(),
@@ -66,6 +63,37 @@ public class MemoryReflectionService {
             log.warn("Memory reflection failed, using fallback", e);
             return ReflectionResult.fallback();
         }
+    }
+
+    private ReflectionResult normalizeResult(MemoryReflectionResult raw) {
+        boolean needsMemory = raw.needs_memory();
+        String reason = normalizeReason(raw.reason(), needsMemory);
+        List<String> purposes = normalizePurposes(raw.evidence_purposes(), needsMemory);
+        return new ReflectionResult(needsMemory, reason, purposes);
+    }
+
+    private String normalizeReason(String reason, boolean needsMemory) {
+        String normalized = reason == null ? "" : reason.trim();
+        if (!normalized.isBlank()) {
+            return normalized;
+        }
+        return needsMemory ? "需要调用长期记忆以保证回答质量。" : "当前问题可直接回答，无需调用长期记忆。";
+    }
+
+    private List<String> normalizePurposes(List<String> purposes, boolean needsMemory) {
+        if (!needsMemory) {
+            return List.of();
+        }
+        List<String> normalized = purposes == null ? List.of() : purposes.stream()
+                .map(p -> p == null ? "" : p.trim().toLowerCase(Locale.ROOT))
+                .filter(p -> !p.isBlank() && ReflectionResult.KNOWN_PURPOSES.contains(p))
+                .distinct()
+                .toList();
+        if (normalized.isEmpty()) {
+            // needs_memory=true 但没有有效用途时提供稳定回退，避免后续证据链路失焦。
+            return List.of("continuity");
+        }
+        return normalized;
     }
 
     private String buildReflectionPrompt(String userMessage, String recentContext) {

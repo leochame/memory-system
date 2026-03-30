@@ -1,5 +1,6 @@
 package com.memsys.prompt;
 
+import com.memsys.memory.model.ReflectionResult;
 import com.memsys.rag.RagService;
 import org.junit.jupiter.api.Test;
 
@@ -16,9 +17,10 @@ class SystemPromptBuilderTest {
     void buildSystemPromptKeepsSectionOrderAndToolGuidance() {
         String prompt = builder.buildSystemPrompt(
                 "agent guide content",
-                Map.of("timezone", "Asia/Shanghai"),
-                Map.of("tone", "concise"),
-                List.of(Map.of("timestamp", "2026-03-18 19:00:00", "message", "你好")),
+                Map.<String, Object>of("timezone", "Asia/Shanghai"),
+                Map.<String, Object>of("tone", "concise"),
+                new ReflectionResult(true, "需要结合用户历史偏好", List.of("personalization", "continuity")),
+                List.of(Map.<String, Object>of("timestamp", "2026-03-18 19:00:00", "message", "你好")),
                 "用户偏好简洁直接。",
                 List.of("debugging"),
                 true,
@@ -27,8 +29,10 @@ class SystemPromptBuilderTest {
                 true,
                 true,
                 true,
+                List.of("[到期] 例会 @ 2026-03-29 20:00"),
                 "**Problem**: P\n**Solution**: S\n",
-                List.of(new RagService.RelevantMemory("home_city", "用户住在上海", 0.91, Map.of()))
+                List.of(new RagService.RelevantMemory("home_city", "用户住在上海", 0.91, Map.of())),
+                null
         );
 
         assertSectionOrder(prompt,
@@ -48,6 +52,12 @@ class SystemPromptBuilderTest {
         assertThat(prompt).contains("run_shell_command(command, cwd)");
         assertThat(prompt).contains("run_python_script(script, args_json)");
         assertThat(prompt).contains("create_task(...)");
+        assertThat(prompt).contains("## 3.5 记忆反思决策");
+        assertThat(prompt).contains("needs_memory: true");
+        assertThat(prompt).contains("reason: 需要结合用户历史偏好");
+        assertThat(prompt).contains("evidence_purposes: personalization, continuity");
+        assertThat(prompt).contains("## 9. 相关任务上下文（Retrieved Tasks）");
+        assertThat(prompt).contains("[到期] 例会 @ 2026-03-29 20:00");
         assertThat(prompt).doesNotContain("Agent.md");
     }
 
@@ -57,17 +67,20 @@ class SystemPromptBuilderTest {
                 "",
                 null,
                 null,
-                List.of(),
                 null,
-                List.of(),
-                false,
-                false,
-                false,
-                false,
-                false,
-                false,
+                List.<Map<String, Object>>of(),
                 null,
-                List.of()
+                List.<String>of(),
+                false,
+                false,
+                false,
+                false,
+                false,
+                false,
+                List.<String>of(),
+                null,
+                List.<RagService.RelevantMemory>of(),
+                null
         );
 
         assertThat(prompt).contains("当前没有可加载的 skill");

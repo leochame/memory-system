@@ -1,6 +1,7 @@
 package com.memsys.task;
 
 import com.memsys.im.ImRuntimeService;
+import com.memsys.memory.storage.MemoryStorage;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
@@ -15,6 +16,8 @@ class ScheduledTaskReminderJobTest {
     void triggerDueTasksShouldPushImNotificationsAndRequeueUnsent() {
         ScheduledTaskService taskService = mock(ScheduledTaskService.class);
         ImRuntimeService imRuntimeService = mock(ImRuntimeService.class);
+        MemoryStorage memoryStorage = mock(MemoryStorage.class);
+        when(memoryStorage.listKnownScopes()).thenReturn(List.of("personal:user_default"));
 
         when(taskService.triggerDueTasks()).thenReturn(1);
         when(taskService.drainPendingNotifications()).thenReturn(List.of(
@@ -29,7 +32,7 @@ class ScheduledTaskReminderJobTest {
                 )
         ));
 
-        ScheduledTaskReminderJob job = new ScheduledTaskReminderJob(taskService, imRuntimeService, true);
+        ScheduledTaskReminderJob job = new ScheduledTaskReminderJob(taskService, imRuntimeService, memoryStorage, true);
         job.triggerDueTasks();
 
         verify(imRuntimeService, times(1)).sendText(eq("telegram"), eq("chat-1"), anyString());
@@ -44,6 +47,8 @@ class ScheduledTaskReminderJobTest {
     void triggerDueTasksShouldRequeueWhenImReminderDisabled() {
         ScheduledTaskService taskService = mock(ScheduledTaskService.class);
         ImRuntimeService imRuntimeService = mock(ImRuntimeService.class);
+        MemoryStorage memoryStorage = mock(MemoryStorage.class);
+        when(memoryStorage.listKnownScopes()).thenReturn(List.of("personal:user_default"));
 
         when(taskService.triggerDueTasks()).thenReturn(1);
         when(taskService.drainPendingNotifications()).thenReturn(List.of(
@@ -54,11 +59,10 @@ class ScheduledTaskReminderJobTest {
                 )
         ));
 
-        ScheduledTaskReminderJob job = new ScheduledTaskReminderJob(taskService, imRuntimeService, false);
+        ScheduledTaskReminderJob job = new ScheduledTaskReminderJob(taskService, imRuntimeService, memoryStorage, false);
         job.triggerDueTasks();
 
         verify(imRuntimeService, never()).sendText(anyString(), anyString(), anyString());
         verify(taskService, times(1)).requeueNotifications(argThat(items -> items != null && items.size() == 1));
     }
 }
-

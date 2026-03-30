@@ -3,6 +3,7 @@ package com.memsys.llm;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.memsys.llm.LlmDtos.ExampleItem;
 import com.memsys.llm.LlmDtos.ExamplesResult;
+import com.memsys.llm.LlmDtos.EvalScoreResult;
 import com.memsys.llm.LlmDtos.ExplicitMemoryResult;
 import com.memsys.llm.LlmDtos.MemoryReflectionResult;
 import com.memsys.llm.LlmDtos.ScheduledTaskResult;
@@ -128,7 +129,7 @@ public class LlmExtractionService {
                     ExplicitMemoryResult.class
             );
 
-            if (!parsed.has_memory()) {
+            if (parsed == null || !parsed.has_memory()) {
                 return Map.of("has_memory", false);
             }
 
@@ -289,12 +290,16 @@ public class LlmExtractionService {
                 当前时区: %s
 
                 返回规则：
-                - 如果不需要创建任务：has_task=false，其余字段填空字符串。
-                - 如果需要创建任务：has_task=true，并输出 task_title / task_detail / due_at_iso。
+                - 如果不需要创建任务：has_task=false，其余字段填空字符串，recurrence_type=none，recurrence_interval=0。
+                - 如果需要创建任务：has_task=true，并输出 task_title / task_detail / due_at_iso / recurrence_type / recurrence_interval。
                 - due_at_iso 必须是绝对时间（不能是“周六/明天”这类相对描述），格式必须为 ISO-8601，
                   例如 2026-03-21T09:00:00。
                 - 若用户只给日期未给具体时分，默认时间使用 09:00:00。
                 - task_title 要简洁、可读（不超过 20 个字）。
+                - recurrence_type 只能是 none/daily/weekly：
+                  - 一次性任务用 none，recurrence_interval=0
+                  - “每天/每隔N天”用 daily，recurrence_interval=N（默认 1）
+                  - “每周/每隔N周”用 weekly，recurrence_interval=N（默认 1）
 
                 用户消息：
                 %s
@@ -316,10 +321,58 @@ public class LlmExtractionService {
             result.put("task_title", Optional.ofNullable(parsed.task_title()).orElse(""));
             result.put("task_detail", Optional.ofNullable(parsed.task_detail()).orElse(""));
             result.put("due_at_iso", Optional.ofNullable(parsed.due_at_iso()).orElse(""));
+            result.put("recurrence_type", Optional.ofNullable(parsed.recurrence_type()).orElse("none"));
+            result.put("recurrence_interval", parsed.recurrence_interval());
             return result;
         } catch (Exception e) {
             log.warn("Scheduled task extraction failed", e);
             return Map.of("has_task", false);
+        }
+    }
+
+    // ========== 评测打分 ==========
+
+    /**
+     * 对单条回复做质量评估打分。
+     *
+     * @param question 用户原问题
+     * @param answer 待评估回复
+     * @param userProfile 用户画像文本（可为空）
+     * @return 四维打分和简短理由，失败返回 null
+     */
+    public EvalScoreResult evaluateResponseQuality(String question, String answer, String userProfile) {
+        try {
+            String profile = (userProfile == null || userProfile.isBlank()) ? "（无）" : userProfile;
+            String instruction = """
+                你是对话质量评审。请基于用户问题与助手回复给出 1-10 分评分（整数）：
+                - relevance: 是否直接回答了问题
+                - personalization: 是否结合用户画像给出个性化内容
+                - accuracy: 事实与逻辑是否正确、无明显编造
+                - helpfulness: 是否可执行、对用户有帮助
+
+                要求：
+                - 每项分数必须是 1 到 10 的整数
+                - justification 用 1-2 句话简要说明评分理由
+
+                用户问题：
+                %s
+
+                助手回复：
+                %s
+
+                用户画像（可能为空）：
+                %s
+                """.formatted(question, answer, profile);
+
+            return llmClient.chatWithJsonSchema(
+                    null,
+                    List.of(new UserMessage(instruction)),
+                    Schemas.evalScoreResult(),
+                    EvalScoreResult.class
+            );
+        } catch (Exception e) {
+            log.warn("Response quality evaluation failed", e);
+            return null;
         }
     }
 

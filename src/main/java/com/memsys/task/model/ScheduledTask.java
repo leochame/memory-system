@@ -10,6 +10,9 @@ public class ScheduledTask {
     public static final String STATUS_PENDING = "pending";
     public static final String STATUS_TRIGGERED = "triggered";
     public static final String STATUS_CANCELLED = "cancelled";
+    public static final String RECURRENCE_NONE = "none";
+    public static final String RECURRENCE_DAILY = "daily";
+    public static final String RECURRENCE_WEEKLY = "weekly";
 
     private String id;
     private String title;
@@ -24,6 +27,10 @@ public class ScheduledTask {
     private String executionStatus;
     private Integer executionExitCode;
     private String executionOutput;
+    private String recurrenceType;
+    private Integer recurrenceInterval;
+    private Integer reminderLeadMinutes;
+    private LocalDateTime upcomingReminderSentAt;
     private String sourceMessage;
     private String sourcePlatform;
     private String sourceConversationId;

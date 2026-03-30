@@ -104,4 +104,27 @@ class CreateTaskToolTest {
         assertThat(tasks.get(0).getTitle()).isEqualTo("前端任务");
         assertThat(tasks.get(0).getExecuteCommand()).isEqualTo("echo hello-from-front");
     }
+
+    @Test
+    void createTaskToolSupportsRecurringTaskPayload() {
+        MemoryStorage storage = new MemoryStorage(tempDir.toString());
+        LlmExtractionService extractionService = mock(LlmExtractionService.class);
+        ScheduledTaskService service = new ScheduledTaskService(storage, extractionService);
+        CreateTaskTool tool = new CreateTaskTool(service);
+        LlmClient.ToolDefinition definition = tool.build(List.of()).orElseThrow();
+
+        String result = definition.executor().apply(ToolExecutionRequest.builder()
+                .id("4")
+                .name("create_task")
+                .arguments("""
+                        {"title":"每周复盘","detail":"周会前准备","due_at_iso":"2099-03-21T09:00:00","recurrence_type":"weekly","recurrence_interval":1}
+                        """)
+                .build());
+
+        assertThat(result).contains("create_task 成功");
+        List<ScheduledTask> tasks = storage.readScheduledTasks();
+        assertThat(tasks).hasSize(1);
+        assertThat(tasks.get(0).getRecurrenceType()).isEqualTo("weekly");
+        assertThat(tasks.get(0).getRecurrenceInterval()).isEqualTo(1);
+    }
 }

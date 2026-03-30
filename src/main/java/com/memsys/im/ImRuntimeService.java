@@ -1,13 +1,21 @@
 package com.memsys.im;
 
 import com.memsys.cli.ConversationCli;
+import com.memsys.cli.ConversationProgressEvent;
+import com.memsys.cli.ConversationProgressListener;
 import com.memsys.identity.UserIdentityService;
 import com.memsys.im.feishu.FeishuOutboundClient;
+import com.memsys.im.model.ImConversationResult;
 import com.memsys.im.model.IncomingImMessage;
 import com.memsys.im.telegram.TelegramOutboundClient;
+import com.memsys.memory.MemoryScopeContext;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.ObjectProvider;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
+
+import java.util.ArrayList;
+import java.util.List;
 
 /**
  * IM 消息统一编排：
@@ -24,37 +32,80 @@ public class ImRuntimeService {
     private final UserIdentityService userIdentityService;
     private final ObjectProvider<TelegramOutboundClient> telegramOutboundClientProvider;
     private final ObjectProvider<FeishuOutboundClient> feishuOutboundClientProvider;
+    private final boolean temporaryConversationForIm;
 
     public ImRuntimeService(
             ConversationCli conversationCli,
             UserIdentityService userIdentityService,
             ObjectProvider<TelegramOutboundClient> telegramOutboundClientProvider,
-            ObjectProvider<FeishuOutboundClient> feishuOutboundClientProvider
+            ObjectProvider<FeishuOutboundClient> feishuOutboundClientProvider,
+            @Value("${im.temporary-conversation-enabled:false}") boolean temporaryConversationForIm
     ) {
         this.conversationCli = conversationCli;
         this.userIdentityService = userIdentityService;
         this.telegramOutboundClientProvider = telegramOutboundClientProvider;
         this.feishuOutboundClientProvider = feishuOutboundClientProvider;
+        this.temporaryConversationForIm = temporaryConversationForIm;
     }
 
     public String handleIncomingAndReply(IncomingImMessage incoming) {
         if (incoming == null || incoming.text().isBlank()) {
             return "";
         }
+        ImConversationResult result = processIncoming(incoming, null, null);
+        sendText(incoming.platform(), incoming.conversationId(), result.reply());
+        return result.reply();
+    }
+
+    public ImConversationResult processIncoming(IncomingImMessage incoming,
+                                                ConversationProgressListener progressListener,
+                                                Boolean temporaryOverride) {
+        if (incoming == null || incoming.text().isBlank()) {
+            return new ImConversationResult("", List.of(), 0L);
+        }
+        long startedAt = System.currentTimeMillis();
+        List<ConversationProgressEvent> steps = new ArrayList<>();
+        ConversationProgressListener mergedListener = event -> {
+            if (event == null) {
+                return;
+            }
+            steps.add(event);
+            if (progressListener != null) {
+                progressListener.onEvent(event);
+            }
+        };
 
         // Phase 9 #2: 统一身份解析 — 将平台+senderId 映射到统一身份
         String unifiedId = userIdentityService.resolveUnifiedId(
                 incoming.platform(), incoming.senderId());
         log.debug("Identity resolved: {}:{} -> {}", incoming.platform(), incoming.senderId(), unifiedId);
+        String taskSourceSenderId = unifiedId.isBlank() ? incoming.senderId() : unifiedId;
+        userIdentityService.recordConversationChannel(unifiedId, incoming.platform(), incoming.conversationId());
 
-        String reply = conversationCli.processUserMessage(
-                incoming.text(),
-                incoming.platform(),
-                incoming.conversationId(),
-                incoming.senderId()
-        );
-        sendText(incoming.platform(), incoming.conversationId(), reply);
-        return reply;
+        boolean temporaryConversation = temporaryOverride != null
+                ? temporaryOverride
+                : temporaryConversationForIm;
+        String reply;
+        try (MemoryScopeContext.Scope ignored = MemoryScopeContext.useScope(
+                MemoryScopeContext.personalScope(unifiedId))) {
+            reply = temporaryConversation
+                    ? conversationCli.processUserMessageTemporary(
+                    incoming.text(),
+                    incoming.platform(),
+                    incoming.conversationId(),
+                    taskSourceSenderId,
+                    mergedListener
+            )
+                    : conversationCli.processUserMessage(
+                    incoming.text(),
+                    incoming.platform(),
+                    incoming.conversationId(),
+                    taskSourceSenderId,
+                    mergedListener
+            );
+        }
+        long durationMs = Math.max(0L, System.currentTimeMillis() - startedAt);
+        return new ImConversationResult(reply, List.copyOf(steps), durationMs);
     }
 
     public void sendText(String platform, String conversationId, String text) {

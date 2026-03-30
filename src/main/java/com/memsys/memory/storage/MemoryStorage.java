@@ -3,6 +3,7 @@ package com.memsys.memory.storage;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
+import com.memsys.memory.MemoryScopeContext;
 import com.memsys.memory.model.Memory;
 import com.memsys.task.model.ScheduledTask;
 import lombok.extern.slf4j.Slf4j;
@@ -11,9 +12,11 @@ import org.springframework.stereotype.Component;
 
 import java.io.IOException;
 import java.nio.file.*;
+import java.nio.charset.StandardCharsets;
 import java.time.LocalDateTime;
 import java.time.OffsetDateTime;
 import java.time.format.DateTimeFormatter;
+import java.time.format.DateTimeParseException;
 import java.util.*;
 import java.util.stream.Collectors;
 
@@ -27,6 +30,10 @@ public class MemoryStorage {
     private static final String USER_INSIGHTS_STATE_START = "<!-- memsys:state";
     private static final String USER_INSIGHTS_STATE_END = "-->";
     private static final String DEFAULT_USER_INSIGHTS_NARRATIVE = "当前还没有形成稳定的长期用户画像。";
+    private static final String ENCODED_TEXT_PREFIX = "b64:";
+    private static final Set<String> GLOBAL_FILES = Set.of(
+            "identity_mappings.json"
+    );
 
     private final Path basePath;
     private final ObjectMapper objectMapper;
@@ -42,10 +49,11 @@ public class MemoryStorage {
     private void initializeStorage() {
         try {
             Files.createDirectories(basePath);
+            Files.createDirectories(basePath.resolve("scopes"));
 
             // 迁移：旧文件 implicit_memories.json → user_insights.json
-            Path oldImplicit = basePath.resolve("implicit_memories.json");
-            Path newInsights = basePath.resolve(LEGACY_USER_INSIGHTS_FILENAME);
+            Path oldImplicit = resolvePath("implicit_memories.json");
+            Path newInsights = resolvePath(LEGACY_USER_INSIGHTS_FILENAME);
             if (Files.exists(oldImplicit) && !Files.exists(newInsights)) {
                 Files.move(oldImplicit, newInsights);
                 log.info("Migrated implicit_memories.json → user_insights.json");
@@ -62,6 +70,9 @@ public class MemoryStorage {
             createFileIfNotExists("scheduled_tasks.json", "[]");
             createFileIfNotExists("pending_task_notifications.jsonl", "");
             createFileIfNotExists("session_summaries.jsonl", "");
+            createFileIfNotExists("memory_evidence_traces.jsonl", "");
+            createFileIfNotExists("eval_results.jsonl", "");
+            createFileIfNotExists("weekly_reviews.jsonl", "");
             createFileIfNotExists("identity_mappings.json", "{}");
 
             log.info("Memory storage initialized at: {}", basePath.toAbsolutePath());
@@ -72,7 +83,8 @@ public class MemoryStorage {
     }
 
     private void createFileIfNotExists(String filename, String defaultContent) throws IOException {
-        Path filePath = basePath.resolve(filename);
+        Path filePath = resolvePath(filename);
+        ensureParentDirectory(filePath);
         if (!Files.exists(filePath)) {
             Files.writeString(filePath, defaultContent);
         }
@@ -82,7 +94,7 @@ public class MemoryStorage {
 
     public Map<String, Object> readMetadata() {
         try {
-            String content = Files.readString(basePath.resolve("metadata.json"));
+            String content = Files.readString(resolvePath("metadata.json"));
             return objectMapper.readValue(content, Map.class);
         } catch (IOException e) {
             log.error("Failed to read metadata", e);
@@ -125,13 +137,16 @@ public class MemoryStorage {
     // ========== recent_user_messages.jsonl 操作 ==========
 
     public void updateRecentMessages(String message, LocalDateTime timestamp, int limit) {
+        if (limit <= 0) {
+            return;
+        }
         try {
-            Path filePath = basePath.resolve("recent_user_messages.jsonl");
+            Path filePath = resolvePath("recent_user_messages.jsonl");
             List<String> lines = Files.exists(filePath) ?
                 Files.readAllLines(filePath) : new ArrayList<>();
 
             // 添加新消息
-            String newLine = formatter.format(timestamp) + "|" + message;
+            String newLine = formatter.format(timestamp) + "|" + encodeText(message);
             lines.add(newLine);
 
             // 保持滚动窗口
@@ -140,7 +155,7 @@ public class MemoryStorage {
             }
 
             // 原子写入，避免并发读写导致文件被截断或写入不完整
-            Path tempFile = basePath.resolve("recent_user_messages.jsonl.tmp");
+            Path tempFile = newTempFile("recent_user_messages.jsonl");
             Files.writeString(tempFile, String.join("\n", lines) + "\n");
             Files.move(tempFile, filePath, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE);
         } catch (IOException e) {
@@ -149,8 +164,11 @@ public class MemoryStorage {
     }
 
     public List<Map<String, Object>> getRecentMessages(int limit) {
+        if (limit <= 0) {
+            return new ArrayList<>();
+        }
         try {
-            Path filePath = basePath.resolve("recent_user_messages.jsonl");
+            Path filePath = resolvePath("recent_user_messages.jsonl");
             if (!Files.exists(filePath)) {
                 return new ArrayList<>();
             }
@@ -164,7 +182,7 @@ public class MemoryStorage {
                     Map<String, Object> msg = new HashMap<>();
                     if (parts.length == 2) {
                         msg.put("timestamp", parts[0]);
-                        msg.put("message", parts[1]);
+                        msg.put("message", decodeText(parts[1]));
                     }
                     return msg;
                 })
@@ -179,8 +197,8 @@ public class MemoryStorage {
 
     public void appendToHistory(String role, String message, LocalDateTime timestamp) {
         try {
-            Path filePath = basePath.resolve("conversation_history.jsonl");
-            String line = formatter.format(timestamp) + "|" + role + "|" + message + "\n";
+            Path filePath = resolvePath("conversation_history.jsonl");
+            String line = formatter.format(timestamp) + "|" + role + "|" + encodeText(message) + "\n";
             Files.writeString(filePath, line, StandardOpenOption.CREATE, StandardOpenOption.APPEND);
         } catch (IOException e) {
             log.error("Failed to append to history", e);
@@ -195,7 +213,7 @@ public class MemoryStorage {
      */
     public void appendPendingExplicitMemory(Map<String, Object> record) {
         try {
-            Path filePath = basePath.resolve("pending_explicit_memories.jsonl");
+            Path filePath = resolvePath("pending_explicit_memories.jsonl");
             String line = objectMapper.writeValueAsString(record) + "\n";
             Files.writeString(filePath, line, StandardOpenOption.CREATE, StandardOpenOption.APPEND);
         } catch (IOException e) {
@@ -210,16 +228,20 @@ public class MemoryStorage {
     public List<Map<String, Object>> readPendingExplicitMemories() {
         List<Map<String, Object>> results = new ArrayList<>();
         try {
-            Path filePath = basePath.resolve("pending_explicit_memories.jsonl");
+            Path filePath = resolvePath("pending_explicit_memories.jsonl");
             if (!Files.exists(filePath)) {
                 return results;
             }
             List<String> lines = Files.readAllLines(filePath);
             for (String line : lines) {
                 if (line.isBlank()) continue;
-                @SuppressWarnings("unchecked")
-                Map<String, Object> record = objectMapper.readValue(line, Map.class);
-                results.add(record);
+                try {
+                    @SuppressWarnings("unchecked")
+                    Map<String, Object> record = objectMapper.readValue(line, Map.class);
+                    results.add(record);
+                } catch (IOException parseErr) {
+                    log.warn("Skipped malformed pending explicit memory line: {}", line);
+                }
             }
         } catch (IOException e) {
             log.error("Failed to read pending explicit memories", e);
@@ -231,7 +253,7 @@ public class MemoryStorage {
 
     public List<ScheduledTask> readScheduledTasks() {
         try {
-            Path filePath = basePath.resolve("scheduled_tasks.json");
+            Path filePath = resolvePath("scheduled_tasks.json");
             if (!Files.exists(filePath)) {
                 return new ArrayList<>();
             }
@@ -254,7 +276,7 @@ public class MemoryStorage {
 
     public void appendPendingTaskNotification(Map<String, Object> record) {
         try {
-            Path filePath = basePath.resolve("pending_task_notifications.jsonl");
+            Path filePath = resolvePath("pending_task_notifications.jsonl");
             String line = objectMapper.writeValueAsString(record) + "\n";
             Files.writeString(filePath, line, StandardOpenOption.CREATE, StandardOpenOption.APPEND);
         } catch (IOException e) {
@@ -263,53 +285,79 @@ public class MemoryStorage {
     }
 
     public List<Map<String, Object>> drainPendingTaskNotifications() {
+        Path drainingPath = null;
         try {
-            Path filePath = basePath.resolve("pending_task_notifications.jsonl");
+            Path filePath = resolvePath("pending_task_notifications.jsonl");
             if (!Files.exists(filePath)) {
                 return new ArrayList<>();
             }
-            List<String> lines = Files.readAllLines(filePath);
+            drainingPath = newTempFile("pending_task_notifications.jsonl.drain");
+            try {
+                Files.move(filePath, drainingPath, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE);
+            } catch (AtomicMoveNotSupportedException ignored) {
+                Files.move(filePath, drainingPath, StandardCopyOption.REPLACE_EXISTING);
+            }
+
+            List<String> lines = Files.readAllLines(drainingPath);
             List<Map<String, Object>> notifications = new ArrayList<>();
             for (String line : lines) {
                 if (line == null || line.isBlank()) {
                     continue;
                 }
-                notifications.add(objectMapper.readValue(line, new TypeReference<Map<String, Object>>() {
-                }));
+                try {
+                    notifications.add(objectMapper.readValue(line, new TypeReference<Map<String, Object>>() {
+                    }));
+                } catch (IOException parseErr) {
+                    log.warn("Skipped malformed pending task notification line: {}", line);
+                }
             }
-            Files.writeString(filePath, "");
             return notifications;
         } catch (IOException e) {
             log.error("Failed to drain pending task notifications", e);
             return new ArrayList<>();
+        } finally {
+            if (drainingPath != null) {
+                try {
+                    Files.deleteIfExists(drainingPath);
+                } catch (IOException cleanupErr) {
+                    log.warn("Failed to cleanup drained pending task notification file: {}", drainingPath, cleanupErr);
+                }
+            }
         }
     }
 
     public List<Map<String, Object>> getHistory(LocalDateTime startDate, LocalDateTime endDate) {
         try {
-            Path filePath = basePath.resolve("conversation_history.jsonl");
+            Path filePath = resolvePath("conversation_history.jsonl");
             if (!Files.exists(filePath)) {
                 return new ArrayList<>();
             }
-
-            return Files.readAllLines(filePath).stream()
-                .map(line -> {
-                    String[] parts = line.split("\\|", 3);
-                    Map<String, Object> entry = new HashMap<>();
-                    if (parts.length == 3) {
-                        LocalDateTime timestamp = LocalDateTime.parse(parts[0], formatter);
-                        if ((startDate == null || !timestamp.isBefore(startDate)) &&
-                            (endDate == null || !timestamp.isAfter(endDate))) {
-                            entry.put("timestamp", parts[0]);
-                            entry.put("role", parts[1]);
-                            entry.put("message", parts[2]);
-                            return entry;
-                        }
+            List<Map<String, Object>> history = new ArrayList<>();
+            List<String> lines = Files.readAllLines(filePath);
+            for (String line : lines) {
+                if (line == null || line.isBlank()) {
+                    continue;
+                }
+                String[] parts = line.split("\\|", 3);
+                if (parts.length != 3) {
+                    continue;
+                }
+                try {
+                    LocalDateTime timestamp = LocalDateTime.parse(parts[0], formatter);
+                    if ((startDate != null && timestamp.isBefore(startDate))
+                            || (endDate != null && timestamp.isAfter(endDate))) {
+                        continue;
                     }
-                    return null;
-                })
-                .filter(Objects::nonNull)
-                .collect(Collectors.toList());
+                    Map<String, Object> entry = new HashMap<>();
+                    entry.put("timestamp", parts[0]);
+                    entry.put("role", parts[1]);
+                    entry.put("message", decodeText(parts[2]));
+                    history.add(entry);
+                } catch (DateTimeParseException ignored) {
+                    log.warn("Skipped malformed history timestamp line: {}", line);
+                }
+            }
+            return history;
         } catch (IOException e) {
             log.error("Failed to read history", e);
             return new ArrayList<>();
@@ -324,8 +372,11 @@ public class MemoryStorage {
      * @return 按时间顺序排列的对话消息列表，每条消息包含 timestamp, role, message
      */
     public List<Map<String, Object>> getRecentConversationTurns(int turns) {
+        if (turns <= 0) {
+            return new ArrayList<>();
+        }
         try {
-            Path filePath = basePath.resolve("conversation_history.jsonl");
+            Path filePath = resolvePath("conversation_history.jsonl");
             if (!Files.exists(filePath)) {
                 return new ArrayList<>();
             }
@@ -345,19 +396,26 @@ public class MemoryStorage {
                     Map<String, Object> entry = new HashMap<>();
                     entry.put("timestamp", parts[0]);
                     entry.put("role", parts[1]);
-                    entry.put("message", parts[2]);
+                    entry.put("message", decodeText(parts[2]));
                     allMessages.add(0, entry); // 插入到开头，保持时间顺序
                 }
             }
 
-            // 计算需要返回的消息数量：N 轮 = N 条用户消息 + N 条助手消息 = 2N 条消息
-            int messageCount = turns * 2;
-            if (allMessages.size() <= messageCount) {
-                return allMessages;
+            // 以“用户消息”定义轮次，返回最近 N 条用户消息开始到结尾的完整消息片段。
+            List<Integer> userMessageIndexes = new ArrayList<>();
+            for (int i = 0; i < allMessages.size(); i++) {
+                if ("user".equals(allMessages.get(i).get("role"))) {
+                    userMessageIndexes.add(i);
+                }
+            }
+            if (userMessageIndexes.isEmpty()) {
+                return new ArrayList<>();
             }
 
-            // 返回最后 2N 条消息
-            return allMessages.subList(allMessages.size() - messageCount, allMessages.size());
+            int startUserPos = Math.max(0, userMessageIndexes.size() - turns);
+            int startMessageIndex = userMessageIndexes.get(startUserPos);
+
+            return new ArrayList<>(allMessages.subList(startMessageIndex, allMessages.size()));
         } catch (IOException e) {
             log.error("Failed to read recent conversation turns", e);
             return new ArrayList<>();
@@ -373,8 +431,11 @@ public class MemoryStorage {
      * @return 用户消息列表，每条消息包含 timestamp, message
      */
     public List<Map<String, Object>> getOlderUserMessages(int startTurn, int endTurn) {
+        if (endTurn <= startTurn || endTurn <= 0) {
+            return new ArrayList<>();
+        }
         try {
-            Path filePath = basePath.resolve("conversation_history.jsonl");
+            Path filePath = resolvePath("conversation_history.jsonl");
             if (!Files.exists(filePath)) {
                 return new ArrayList<>();
             }
@@ -393,34 +454,29 @@ public class MemoryStorage {
                     Map<String, Object> entry = new HashMap<>();
                     entry.put("timestamp", parts[0]);
                     entry.put("role", parts[1]);
-                    entry.put("message", parts[2]);
+                    entry.put("message", decodeText(parts[2]));
                     allMessages.add(0, entry); // 插入到开头，保持时间顺序
                 }
             }
 
-            // 计算需要返回的用户消息范围
-            // 第 1 轮 = 索引 0（用户）、索引 1（助手）
-            // 第 10 轮 = 索引 18（用户）、索引 19（助手）
-            // 第 11 轮 = 索引 20（用户）、索引 21（助手）
-            // 第 40 轮 = 索引 78（用户）、索引 79（助手）
-            // 所以第 11-40 轮的用户消息索引 = 20, 22, 24, ..., 78（偶数索引，从 0 开始）
+            // 以“用户消息数”定义轮次，避免历史中出现不成对消息时索引偏移。
+            List<Map<String, Object>> userOnlyMessages = allMessages.stream()
+                    .filter(msg -> "user".equals(msg.get("role")))
+                    .toList();
 
-            int startIndex = startTurn * 2; // 第 startTurn+1 轮的用户消息索引（偶数）
-            int endIndex = endTurn * 2; // 第 endTurn 轮的用户消息索引（偶数）
-
-            if (allMessages.size() <= startIndex) {
+            if (userOnlyMessages.size() <= startTurn) {
                 return new ArrayList<>();
             }
 
             List<Map<String, Object>> userMessages = new ArrayList<>();
-            for (int i = startIndex; i < Math.min(allMessages.size(), endIndex + 1); i += 2) {
-                Map<String, Object> msg = allMessages.get(i);
-                if ("user".equals(msg.get("role"))) {
-                    Map<String, Object> userMsg = new HashMap<>();
-                    userMsg.put("timestamp", msg.get("timestamp"));
-                    userMsg.put("message", msg.get("message"));
-                    userMessages.add(userMsg);
-                }
+            int startIndex = startTurn;
+            int endExclusive = Math.min(userOnlyMessages.size(), endTurn);
+            for (int i = startIndex; i < endExclusive; i++) {
+                Map<String, Object> msg = userOnlyMessages.get(i);
+                Map<String, Object> userMsg = new HashMap<>();
+                userMsg.put("timestamp", msg.get("timestamp"));
+                userMsg.put("message", msg.get("message"));
+                userMessages.add(userMsg);
             }
 
             return userMessages;
@@ -438,7 +494,7 @@ public class MemoryStorage {
      */
     public void appendSessionSummary(Map<String, Object> summaryRecord) {
         try {
-            Path filePath = basePath.resolve("session_summaries.jsonl");
+            Path filePath = resolvePath("session_summaries.jsonl");
             String line = objectMapper.writeValueAsString(summaryRecord) + "\n";
             Files.writeString(filePath, line, StandardOpenOption.CREATE, StandardOpenOption.APPEND);
             log.info("Session summary appended to session_summaries.jsonl");
@@ -455,7 +511,7 @@ public class MemoryStorage {
      */
     public List<Map<String, Object>> readSessionSummaries(int limit) {
         try {
-            Path filePath = basePath.resolve("session_summaries.jsonl");
+            Path filePath = resolvePath("session_summaries.jsonl");
             if (!Files.exists(filePath)) {
                 return new ArrayList<>();
             }
@@ -479,6 +535,100 @@ public class MemoryStorage {
         }
     }
 
+    // ========== memory_evidence_traces.jsonl 操作 ==========
+
+    /**
+     * 追加单条 Memory Evidence Trace（JSONL）。
+     */
+    public void appendMemoryEvidenceTrace(Map<String, Object> traceRecord) {
+        try {
+            Path filePath = resolvePath("memory_evidence_traces.jsonl");
+            String line = objectMapper.writeValueAsString(traceRecord) + "\n";
+            Files.writeString(filePath, line, StandardOpenOption.CREATE, StandardOpenOption.APPEND);
+        } catch (IOException e) {
+            log.error("Failed to append memory evidence trace", e);
+        }
+    }
+
+    /**
+     * 读取 Memory Evidence Trace 历史（按时间顺序，limit>0 时返回最后 N 条）。
+     */
+    public List<Map<String, Object>> readMemoryEvidenceTraces(int limit) {
+        try {
+            Path filePath = resolvePath("memory_evidence_traces.jsonl");
+            if (!Files.exists(filePath)) {
+                return new ArrayList<>();
+            }
+            List<String> lines = Files.readAllLines(filePath);
+            List<Map<String, Object>> traces = new ArrayList<>();
+            for (String line : lines) {
+                if (line == null || line.isBlank()) {
+                    continue;
+                }
+                try {
+                    traces.add(objectMapper.readValue(line, new TypeReference<Map<String, Object>>() {
+                    }));
+                } catch (IOException parseErr) {
+                    log.warn("Skipped malformed memory evidence trace line: {}", line);
+                }
+            }
+            if (limit > 0 && traces.size() > limit) {
+                return traces.subList(traces.size() - limit, traces.size());
+            }
+            return traces;
+        } catch (IOException e) {
+            log.error("Failed to read memory evidence traces", e);
+            return new ArrayList<>();
+        }
+    }
+
+    // ========== eval_results.jsonl 操作 ==========
+
+    /**
+     * 追加单条评测结果。
+     */
+    public void appendEvalResult(Map<String, Object> evalRecord) {
+        try {
+            Path filePath = resolvePath("eval_results.jsonl");
+            String line = objectMapper.writeValueAsString(evalRecord) + "\n";
+            Files.writeString(filePath, line, StandardOpenOption.CREATE, StandardOpenOption.APPEND);
+        } catch (IOException e) {
+            log.error("Failed to append eval result", e);
+        }
+    }
+
+    /**
+     * 读取评测结果（按时间顺序，limit>0 时返回最后 N 条）。
+     */
+    public List<Map<String, Object>> readEvalResults(int limit) {
+        try {
+            Path filePath = resolvePath("eval_results.jsonl");
+            if (!Files.exists(filePath)) {
+                return new ArrayList<>();
+            }
+            List<String> lines = Files.readAllLines(filePath);
+            List<Map<String, Object>> results = new ArrayList<>();
+            for (String line : lines) {
+                if (line == null || line.isBlank()) {
+                    continue;
+                }
+                try {
+                    results.add(objectMapper.readValue(line, new TypeReference<Map<String, Object>>() {
+                    }));
+                } catch (IOException parseErr) {
+                    log.warn("Skipped malformed eval result line: {}", line);
+                }
+            }
+            if (limit > 0 && results.size() > limit) {
+                return results.subList(results.size() - limit, results.size());
+            }
+            return results;
+        } catch (IOException e) {
+            log.error("Failed to read eval results", e);
+            return new ArrayList<>();
+        }
+    }
+
     // ========== proactive_reminders.jsonl 操作 ==========
 
     /**
@@ -487,7 +637,7 @@ public class MemoryStorage {
      */
     public void appendProactiveReminder(Map<String, Object> reminderRecord) {
         try {
-            Path filePath = basePath.resolve("proactive_reminders.jsonl");
+            Path filePath = resolvePath("proactive_reminders.jsonl");
             String line = objectMapper.writeValueAsString(reminderRecord) + "\n";
             Files.writeString(filePath, line, StandardOpenOption.CREATE, StandardOpenOption.APPEND);
             log.info("Proactive reminder appended to proactive_reminders.jsonl");
@@ -504,7 +654,7 @@ public class MemoryStorage {
      */
     public List<Map<String, Object>> readProactiveReminders(int limit) {
         try {
-            Path filePath = basePath.resolve("proactive_reminders.jsonl");
+            Path filePath = resolvePath("proactive_reminders.jsonl");
             if (!Files.exists(filePath)) {
                 return new ArrayList<>();
             }
@@ -528,6 +678,44 @@ public class MemoryStorage {
         }
     }
 
+    // ========== weekly_reviews.jsonl 操作 ==========
+
+    public void appendWeeklyReview(Map<String, Object> reviewRecord) {
+        try {
+            Path filePath = resolvePath("weekly_reviews.jsonl");
+            String line = objectMapper.writeValueAsString(reviewRecord) + "\n";
+            Files.writeString(filePath, line, StandardOpenOption.CREATE, StandardOpenOption.APPEND);
+        } catch (IOException e) {
+            log.error("Failed to append weekly review", e);
+        }
+    }
+
+    public List<Map<String, Object>> readWeeklyReviews(int limit) {
+        try {
+            Path filePath = resolvePath("weekly_reviews.jsonl");
+            if (!Files.exists(filePath)) {
+                return new ArrayList<>();
+            }
+            List<String> lines = Files.readAllLines(filePath);
+            List<Map<String, Object>> reviews = new ArrayList<>();
+            for (String line : lines) {
+                if (line == null || line.isBlank()) continue;
+                try {
+                    reviews.add(objectMapper.readValue(line, new TypeReference<Map<String, Object>>() {}));
+                } catch (IOException parseErr) {
+                    log.warn("Skipped malformed weekly review line: {}", line);
+                }
+            }
+            if (limit > 0 && reviews.size() > limit) {
+                return reviews.subList(reviews.size() - limit, reviews.size());
+            }
+            return reviews;
+        } catch (IOException e) {
+            log.error("Failed to read weekly reviews", e);
+            return new ArrayList<>();
+        }
+    }
+
     // ========== memory_queues.json 操作 ==========
 
     public void saveQueues(List<String> youngQueue, List<String> matureQueue) {
@@ -539,7 +727,7 @@ public class MemoryStorage {
 
     public List<List<String>> loadQueues() {
         try {
-            String content = Files.readString(basePath.resolve("memory_queues.json"));
+            String content = Files.readString(resolvePath("memory_queues.json"));
             Map<String, List<String>> queues = objectMapper.readValue(content, Map.class);
             return Arrays.asList(
                 queues.getOrDefault("young_queue", new ArrayList<>()),
@@ -561,7 +749,7 @@ public class MemoryStorage {
      */
     public Map<String, com.memsys.identity.model.UserIdentity> readIdentityMappings() {
         try {
-            Path filePath = basePath.resolve("identity_mappings.json");
+            Path filePath = resolvePath("identity_mappings.json");
             if (!Files.exists(filePath)) {
                 return new LinkedHashMap<>();
             }
@@ -579,6 +767,21 @@ public class MemoryStorage {
         }
     }
 
+    public Map<String, com.memsys.identity.model.UserIdentity> readIdentityMappingsOrThrow() throws IOException {
+        Path filePath = resolvePath("identity_mappings.json");
+        if (!Files.exists(filePath)) {
+            return new LinkedHashMap<>();
+        }
+        String content = Files.readString(filePath);
+        if (content.isBlank() || content.trim().equals("{}")) {
+            return new LinkedHashMap<>();
+        }
+        return objectMapper.readValue(content,
+                objectMapper.getTypeFactory().constructMapType(
+                        LinkedHashMap.class, String.class,
+                        com.memsys.identity.model.UserIdentity.class));
+    }
+
     /**
      * 写入身份映射文件。
      * Phase 9 #2 — 统一身份映射。
@@ -587,11 +790,32 @@ public class MemoryStorage {
         writeJsonFile("identity_mappings.json", mappings);
     }
 
+    public List<String> listKnownScopes() {
+        LinkedHashSet<String> scopes = new LinkedHashSet<>();
+        scopes.add(MemoryScopeContext.DEFAULT_SCOPE);
+        Path scopesRoot = basePath.resolve("scopes");
+        if (!Files.exists(scopesRoot)) {
+            return new ArrayList<>(scopes);
+        }
+        try (DirectoryStream<Path> stream = Files.newDirectoryStream(scopesRoot)) {
+            for (Path entry : stream) {
+                if (!Files.isDirectory(entry)) {
+                    continue;
+                }
+                String raw = entry.getFileName().toString().replace("__", ":");
+                scopes.add(MemoryScopeContext.normalize(raw));
+            }
+        } catch (IOException e) {
+            log.warn("Failed to list scope directories", e);
+        }
+        return new ArrayList<>(scopes);
+    }
+
     // ========== 通用操作 ==========
 
     private Map<String, Memory> readMemoryFile(String filename) {
         try {
-            String content = Files.readString(basePath.resolve(filename));
+            String content = Files.readString(resolvePath(filename));
             return objectMapper.readValue(content,
                 objectMapper.getTypeFactory().constructMapType(HashMap.class, String.class, Memory.class));
         } catch (IOException e) {
@@ -602,14 +826,84 @@ public class MemoryStorage {
 
     private void writeJsonFile(String filename, Object data) {
         try {
-            Path filePath = basePath.resolve(filename);
-            Path tempFile = basePath.resolve(filename + ".tmp");
+            Path filePath = resolvePath(filename);
+            ensureParentDirectory(filePath);
+            Path tempFile = newTempFile(filename);
+            ensureParentDirectory(tempFile);
 
             // 原子写入
             objectMapper.writerWithDefaultPrettyPrinter().writeValue(tempFile.toFile(), data);
-            Files.move(tempFile, filePath, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE);
+            moveWithAtomicFallback(tempFile, filePath);
         } catch (IOException e) {
             log.error("Failed to write file: {}", filename, e);
+        }
+    }
+
+    private Path newTempFile(String filename) {
+        return resolvePath(filename + "." + UUID.randomUUID() + ".tmp");
+    }
+
+    private Path resolvePath(String filename) {
+        Path path;
+        if (filename == null || filename.isBlank()) {
+            path = basePath.resolve("unknown");
+        } else if (GLOBAL_FILES.contains(filename)) {
+            path = basePath.resolve(filename);
+        } else {
+            String scope = MemoryScopeContext.currentScope();
+            if (MemoryScopeContext.DEFAULT_SCOPE.equals(scope)) {
+                path = basePath.resolve(filename);
+            } else {
+                String scopeDirName = scope.replace(":", "__");
+                path = basePath.resolve("scopes").resolve(scopeDirName).resolve(filename);
+            }
+        }
+        try {
+            ensureParentDirectory(path);
+        } catch (IOException e) {
+            log.warn("Failed to ensure parent directory for {}", path, e);
+        }
+        return path;
+    }
+
+    private void ensureParentDirectory(Path path) throws IOException {
+        if (path == null) {
+            return;
+        }
+        Path parent = path.getParent();
+        if (parent != null) {
+            Files.createDirectories(parent);
+        }
+    }
+
+    private void moveWithAtomicFallback(Path source, Path target) throws IOException {
+        try {
+            Files.move(source, target, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE);
+        } catch (AtomicMoveNotSupportedException ignored) {
+            Files.move(source, target, StandardCopyOption.REPLACE_EXISTING);
+        }
+    }
+
+    private String encodeText(String text) {
+        String raw = text == null ? "" : text;
+        String encoded = Base64.getUrlEncoder().withoutPadding()
+                .encodeToString(raw.getBytes(StandardCharsets.UTF_8));
+        return ENCODED_TEXT_PREFIX + encoded;
+    }
+
+    private String decodeText(String value) {
+        if (value == null) {
+            return "";
+        }
+        if (!value.startsWith(ENCODED_TEXT_PREFIX)) {
+            return value;
+        }
+        String payload = value.substring(ENCODED_TEXT_PREFIX.length());
+        try {
+            byte[] decoded = Base64.getUrlDecoder().decode(payload);
+            return new String(decoded, StandardCharsets.UTF_8);
+        } catch (Exception ignored) {
+            return value;
         }
     }
 
@@ -619,14 +913,14 @@ public class MemoryStorage {
             return;
         }
 
-        Path legacyJsonPath = basePath.resolve(LEGACY_USER_INSIGHTS_FILENAME);
+        Path legacyJsonPath = resolvePath(LEGACY_USER_INSIGHTS_FILENAME);
         if (Files.exists(legacyJsonPath)) {
             Map<String, Memory> legacyMemories = readMemoryFile(LEGACY_USER_INSIGHTS_FILENAME);
-            Path tempFile = basePath.resolve(USER_INSIGHTS_MARKDOWN_FILENAME + ".tmp");
+            Path tempFile = newTempFile(USER_INSIGHTS_MARKDOWN_FILENAME);
             Files.writeString(tempFile, renderUserInsightsMarkdown(legacyMemories));
             Files.move(tempFile, markdownPath, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE);
 
-            Path backupPath = basePath.resolve(USER_INSIGHTS_BACKUP_FILENAME);
+            Path backupPath = resolvePath(USER_INSIGHTS_BACKUP_FILENAME);
             Files.move(legacyJsonPath, backupPath, StandardCopyOption.REPLACE_EXISTING);
             log.info("Migrated user_insights.json → user-insights.md (backup: {})", backupPath.getFileName());
             return;
@@ -663,7 +957,7 @@ public class MemoryStorage {
     private void writeUserInsights(Map<String, Memory> memories) {
         try {
             Path filePath = userInsightsMarkdownPath();
-            Path tempFile = basePath.resolve(USER_INSIGHTS_MARKDOWN_FILENAME + ".tmp");
+            Path tempFile = newTempFile(USER_INSIGHTS_MARKDOWN_FILENAME);
             Files.writeString(tempFile, renderUserInsightsMarkdown(memories));
             Files.move(tempFile, filePath, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE);
         } catch (IOException e) {
@@ -696,10 +990,13 @@ public class MemoryStorage {
         List<String> sentences = memories.entrySet().stream()
                 .sorted(Comparator
                         .comparing((Map.Entry<String, Memory> entry) ->
-                                Optional.ofNullable(entry.getValue().getLastAccessed()).orElse(LocalDateTime.MIN))
+                                Optional.ofNullable(entry.getValue())
+                                        .map(Memory::getLastAccessed)
+                                        .orElse(LocalDateTime.MIN))
                         .reversed()
                         .thenComparing(Map.Entry::getKey))
                 .map(Map.Entry::getValue)
+                .filter(Objects::nonNull)
                 .map(Memory::getContent)
                 .filter(Objects::nonNull)
                 .map(String::trim)
@@ -797,7 +1094,7 @@ public class MemoryStorage {
     }
 
     private Path userInsightsMarkdownPath() {
-        return basePath.resolve(USER_INSIGHTS_MARKDOWN_FILENAME);
+        return resolvePath(USER_INSIGHTS_MARKDOWN_FILENAME);
     }
 
     private record UserInsightsDocument(String narrative, Map<String, Memory> memories) {

@@ -58,7 +58,9 @@ public final class LlmDtos {
             boolean has_task,
             String task_title,
             String task_detail,
-            String due_at_iso
+            String due_at_iso,
+            String recurrence_type,
+            int recurrence_interval
     ) {
     }
 
@@ -105,6 +107,18 @@ public final class LlmDtos {
             String reminder_type,
             List<String> based_on_memories,
             String suggested_action
+    ) {
+    }
+
+    /**
+     * 评测打分结构化输出：用于对单条回复进行质量评估。
+     */
+    public record EvalScoreResult(
+            int relevance,
+            int personalization,
+            int accuracy,
+            int helpfulness,
+            String justification
     ) {
     }
 }

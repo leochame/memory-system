@@ -59,7 +59,10 @@ public class SkillService {
     }
 
     public Optional<SkillFile> readSkill(String name) {
-        Path path = skillsDir.resolve(name + ".md");
+        Path path = resolveSkillPath(name);
+        if (path == null) {
+            return Optional.empty();
+        }
         if (!Files.exists(path)) {
             return Optional.empty();
         }
@@ -73,11 +76,15 @@ public class SkillService {
     }
 
     public void saveSkill(String name, String markdownContent) {
-        Path path = skillsDir.resolve(name + ".md");
+        Path path = resolveSkillPath(name);
+        if (path == null) {
+            log.warn("Failed to save skill: invalid name '{}'", name);
+            return;
+        }
         try {
-            Path temp = skillsDir.resolve(name + ".md.tmp");
+            Path temp = skillsDir.resolve(path.getFileName().toString() + ".tmp");
             Files.writeString(temp, markdownContent);
-            Files.move(temp, path, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE);
+            moveWithAtomicFallback(temp, path);
             log.info("Saved skill: {}", name);
         } catch (IOException e) {
             log.error("Failed to save skill: {}", name, e);
@@ -85,12 +92,38 @@ public class SkillService {
     }
 
     public boolean deleteSkill(String name) {
-        Path path = skillsDir.resolve(name + ".md");
+        Path path = resolveSkillPath(name);
+        if (path == null) {
+            return false;
+        }
         try {
             return Files.deleteIfExists(path);
         } catch (IOException e) {
             log.warn("Failed to delete skill: {}", name, e);
             return false;
+        }
+    }
+
+    private Path resolveSkillPath(String name) {
+        if (name == null || name.isBlank()) {
+            return null;
+        }
+        String normalized = name.trim();
+        if (normalized.contains("/") || normalized.contains("\\") || normalized.contains("..")) {
+            return null;
+        }
+        Path path = skillsDir.resolve(normalized + ".md").normalize();
+        if (!path.startsWith(skillsDir)) {
+            return null;
+        }
+        return path;
+    }
+
+    private void moveWithAtomicFallback(Path source, Path target) throws IOException {
+        try {
+            Files.move(source, target, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE);
+        } catch (AtomicMoveNotSupportedException ignored) {
+            Files.move(source, target, StandardCopyOption.REPLACE_EXISTING);
         }
     }
 

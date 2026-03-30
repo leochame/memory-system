@@ -2,7 +2,9 @@ package com.memsys.memory;
 
 import com.memsys.memory.model.Memory;
 import com.memsys.memory.storage.MemoryStorage;
+import com.memsys.rag.RagService;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
@@ -21,21 +23,39 @@ public class MemoryManager {
     private final int maxSlots;
     private final int daysUnaccessed;
     private final int topOfMindLimit;
+    private final RagService ragService;
 
+    @Autowired
     public MemoryManager(
             MemoryStorage storage,
             @Value("${memory.max-slots:100}") int maxSlots,
             @Value("${memory.days-unaccessed:30}") int daysUnaccessed,
-            @Value("${memory.top-of-mind-limit:15}") int topOfMindLimit
+            @Value("${memory.top-of-mind-limit:15}") int topOfMindLimit,
+            RagService ragService
     ) {
         this.storage = storage;
         this.maxSlots = maxSlots;
         this.daysUnaccessed = daysUnaccessed;
         this.topOfMindLimit = topOfMindLimit;
+        this.ragService = ragService;
         loadQueuesFromStorage();
     }
 
-    public void loadQueuesFromStorage() {
+    public MemoryManager(
+            MemoryStorage storage,
+            int maxSlots,
+            int daysUnaccessed,
+            int topOfMindLimit
+    ) {
+        this.storage = storage;
+        this.maxSlots = maxSlots;
+        this.daysUnaccessed = daysUnaccessed;
+        this.topOfMindLimit = topOfMindLimit;
+        this.ragService = null;
+        loadQueuesFromStorage();
+    }
+
+    public synchronized void loadQueuesFromStorage() {
         List<List<String>> queues = storage.loadQueues();
         youngQueue.clear();
         matureQueue.clear();
@@ -44,11 +64,11 @@ public class MemoryManager {
         log.info("Loaded queues - young: {}, mature: {}", youngQueue.size(), matureQueue.size());
     }
 
-    public void saveQueuesToStorage() {
+    public synchronized void saveQueuesToStorage() {
         storage.saveQueues(new ArrayList<>(youngQueue), new ArrayList<>(matureQueue));
     }
 
-    public List<Map.Entry<String, Memory>> getTopOfMindMemories(int limit) {
+    public synchronized List<Map.Entry<String, Memory>> getTopOfMindMemories(int limit) {
         List<Map.Entry<String, Memory>> result = new ArrayList<>();
         Map<String, Memory> allMemories = getAllMemories();
 
@@ -73,7 +93,7 @@ public class MemoryManager {
         return result;
     }
 
-    public void updateAccessTime(String slotName) {
+    public synchronized void updateAccessTime(String slotName) {
         Memory memory = findMemory(slotName);
         if (memory == null) {
             log.warn("Memory not found: {}", slotName);
@@ -102,11 +122,11 @@ public class MemoryManager {
         saveQueuesToStorage();
     }
 
-    public String detectConflict(String slotName, Map<String, Memory> existingMemories) {
+    public synchronized String detectConflict(String slotName, Map<String, Memory> existingMemories) {
         return existingMemories.containsKey(slotName) ? slotName : null;
     }
 
-    public void overrideMemory(String slotName, String newContent, Map<String, Object> metadata) {
+    public synchronized void overrideMemory(String slotName, String newContent, Map<String, Object> metadata) {
         Memory memory = findMemory(slotName);
         if (memory == null) {
             log.warn("Memory not found for override: {}", slotName);
@@ -117,21 +137,22 @@ public class MemoryManager {
         memory.setLastAccessed(LocalDateTime.now());
         memory.setHitCount(memory.getHitCount() + 1);
 
-        if (metadata.containsKey("confidence")) {
+        if (metadata != null && metadata.containsKey("confidence")) {
             memory.setConfidence((String) metadata.get("confidence"));
         }
 
         saveMemory(slotName, memory);
     }
 
-    public List<String> cleanupOldMemories(int maxSlots, int daysUnaccessed) {
+    public synchronized List<String> cleanupOldMemories(int maxSlots, int daysUnaccessed) {
         List<String> deleted = new ArrayList<>();
         Map<String, Memory> allMemories = getAllMemories();
         LocalDateTime cutoffDate = LocalDateTime.now().minus(daysUnaccessed, ChronoUnit.DAYS);
 
         // 删除长期未访问的记忆
         for (Map.Entry<String, Memory> entry : allMemories.entrySet()) {
-            if (entry.getValue().getLastAccessed().isBefore(cutoffDate)) {
+            LocalDateTime lastAccessed = entry.getValue() == null ? null : entry.getValue().getLastAccessed();
+            if (lastAccessed != null && lastAccessed.isBefore(cutoffDate)) {
                 deleteMemory(entry.getKey());
                 deleted.add(entry.getKey());
             }
@@ -141,7 +162,11 @@ public class MemoryManager {
         if (allMemories.size() - deleted.size() > maxSlots) {
             List<Map.Entry<String, Memory>> sorted = allMemories.entrySet().stream()
                 .filter(e -> !deleted.contains(e.getKey()))
-                .sorted(Comparator.comparing(e -> e.getValue().getLastAccessed()))
+                .sorted(Comparator.comparing(
+                        (Map.Entry<String, Memory> e) ->
+                                e.getValue() == null ? null : e.getValue().getLastAccessed(),
+                        Comparator.nullsFirst(Comparator.naturalOrder())
+                ))
                 .collect(Collectors.toList());
 
             int toDelete = allMemories.size() - deleted.size() - maxSlots;
@@ -161,15 +186,15 @@ public class MemoryManager {
         return deleted;
     }
 
-    public Map<String, Memory> listAllMemories() {
+    public synchronized Map<String, Memory> listAllMemories() {
         return getAllMemories();
     }
 
-    public Memory getMemory(String slotName) {
+    public synchronized Memory getMemory(String slotName) {
         return findMemory(slotName);
     }
 
-    public void editMemory(String slotName, String newContent) {
+    public synchronized void editMemory(String slotName, String newContent) {
         Memory memory = findMemory(slotName);
         if (memory != null) {
             memory.setContent(newContent);
@@ -177,24 +202,27 @@ public class MemoryManager {
         }
     }
 
-    public void deleteMemory(String slotName) {
+    public synchronized void deleteMemory(String slotName) {
         Memory memory = findMemory(slotName);
         if (memory == null) return;
 
         storage.deleteUserInsight(slotName);
+        if (ragService != null) {
+            ragService.deleteMemory(slotName);
+        }
 
         youngQueue.remove(slotName);
         matureQueue.remove(slotName);
         saveQueuesToStorage();
     }
 
-    public void forgetMemory(String slotName, boolean keepHistory) {
+    public synchronized void forgetMemory(String slotName, boolean keepHistory) {
         if (!keepHistory) {
             deleteMemory(slotName);
         }
     }
 
-    public void setGlobalControl(boolean useSavedMemories, boolean useChatHistory) {
+    public synchronized void setGlobalControl(boolean useSavedMemories, boolean useChatHistory) {
         Map<String, Object> metadata = storage.readMetadata();
         Map<String, Object> globalControls = new HashMap<>();
         globalControls.put("use_saved_memories", useSavedMemories);

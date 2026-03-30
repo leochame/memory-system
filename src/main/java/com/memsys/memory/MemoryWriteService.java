@@ -80,17 +80,19 @@ public class MemoryWriteService {
         if (detectConflict) {
             Map<String, Memory> existing = storage.readUserInsights();
             Memory existingMemory = existing.get(slotName);
-            if (existingMemory != null && !existingMemory.getContent().equals(content)) {
+            String existingContent = existingMemory == null ? null : existingMemory.getContent();
+            String newContent = content == null ? "" : content;
+            if (existingMemory != null && !java.util.Objects.equals(existingContent, newContent)) {
                 log.info("Memory conflict detected for slot '{}': existing='{}' vs new='{}'",
                         slotName,
-                        truncate(existingMemory.getContent(), 80),
-                        truncate(content, 80));
+                        truncate(existingContent, 80),
+                        truncate(newContent, 80));
 
                 // 将冲突记忆写入 pending 队列，不覆盖已有记忆
                 Map<String, Object> conflictRecord = new HashMap<>();
                 conflictRecord.put("slot_name", slotName);
-                conflictRecord.put("new_content", content);
-                conflictRecord.put("existing_content", existingMemory.getContent());
+                conflictRecord.put("new_content", newContent);
+                conflictRecord.put("existing_content", existingContent);
                 conflictRecord.put("source", source.name());
                 conflictRecord.put("confidence", confidence);
                 conflictRecord.put("status", Memory.MemoryStatus.CONFLICT.name());

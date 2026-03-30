@@ -23,6 +23,7 @@ import org.springframework.stereotype.Component;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Optional;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ThreadFactory;
@@ -36,6 +37,9 @@ import java.util.concurrent.ThreadFactory;
 @Order(Ordered.HIGHEST_PRECEDENCE)
 @ConditionalOnProperty(prefix = "im.feishu", name = {"enabled", "long-connection-enabled"}, havingValue = "true")
 public class FeishuLongConnectionClient implements ApplicationRunner {
+    private static final long DEDUP_WINDOW_MILLIS = 5 * 60 * 1000L;
+    private static final int DEDUP_MAX_SIZE = 10_000;
+    private static final ConcurrentHashMap<String, Long> RECENT_MESSAGE_KEYS = new ConcurrentHashMap<>();
 
     private final ObjectMapper objectMapper;
     private final FeishuInboundParser inboundParser;
@@ -128,6 +132,11 @@ public class FeishuLongConnectionClient implements ApplicationRunner {
                 return;
             }
             IncomingImMessage in = incoming.get();
+            if (!shouldProcess(in)) {
+                log.info("Feishu inbound ignored as duplicate. messageId={}, conversationId={}",
+                        in.messageId(), in.conversationId());
+                return;
+            }
             try {
                 String reply = imRuntimeService.handleIncomingAndReply(in);
                 log.info("Feishu inbound handled. messageId={}, conversationId={}, replyLen={}",
@@ -170,6 +179,11 @@ public class FeishuLongConnectionClient implements ApplicationRunner {
                 return;
             }
             IncomingImMessage in = incoming.get();
+            if (!shouldProcess(in)) {
+                log.info("Feishu legacy inbound ignored as duplicate. messageId={}, conversationId={}",
+                        in.messageId(), in.conversationId());
+                return;
+            }
             try {
                 String reply = imRuntimeService.handleIncomingAndReply(in);
                 log.info("Feishu legacy inbound handled. messageId={}, conversationId={}, replyLen={}",
@@ -225,6 +239,24 @@ public class FeishuLongConnectionClient implements ApplicationRunner {
             return "***";
         }
         return raw.substring(0, 6) + "***";
+    }
+
+    private boolean shouldProcess(IncomingImMessage incoming) {
+        String messageId = incoming == null ? "" : trim(incoming.messageId());
+        if (messageId.isBlank()) {
+            return true;
+        }
+        cleanupDedupCache(System.currentTimeMillis());
+        String key = "feishu:long-conn:" + incoming.conversationId() + ":" + messageId;
+        return RECENT_MESSAGE_KEYS.putIfAbsent(key, System.currentTimeMillis()) == null;
+    }
+
+    private void cleanupDedupCache(long now) {
+        RECENT_MESSAGE_KEYS.entrySet().removeIf(entry -> now - entry.getValue() > DEDUP_WINDOW_MILLIS);
+        if (RECENT_MESSAGE_KEYS.size() <= DEDUP_MAX_SIZE) {
+            return;
+        }
+        RECENT_MESSAGE_KEYS.clear();
     }
 
     @PreDestroy

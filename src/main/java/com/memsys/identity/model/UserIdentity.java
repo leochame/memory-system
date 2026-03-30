@@ -43,6 +43,12 @@ public class UserIdentity {
      */
     private Map<String, String> platformBindings = new LinkedHashMap<>();
 
+    /**
+     * 平台会话映射：platform -> last_conversation_id。
+     * 用于主动消息推送（如周报）。
+     */
+    private Map<String, String> platformConversations = new LinkedHashMap<>();
+
     /** 创建时间 */
     private LocalDateTime createdAt;
 
@@ -59,20 +65,48 @@ public class UserIdentity {
      * 为指定平台绑定用户 ID。
      */
     public void bindPlatform(String platform, String platformUserId) {
-        this.platformBindings.put(platform.toLowerCase(), platformUserId);
+        ensurePlatformBindings().put(platform.toLowerCase(), platformUserId);
     }
 
     /**
      * 获取指定平台的绑定 ID。
      */
     public String getPlatformUserId(String platform) {
-        return this.platformBindings.get(platform.toLowerCase());
+        return ensurePlatformBindings().get(platform.toLowerCase());
     }
 
     /**
      * 检查是否已绑定指定平台。
      */
     public boolean hasPlatformBinding(String platform) {
-        return this.platformBindings.containsKey(platform.toLowerCase());
+        return ensurePlatformBindings().containsKey(platform.toLowerCase());
+    }
+
+    public void bindConversation(String platform, String conversationId) {
+        if (platform == null || platform.isBlank() || conversationId == null || conversationId.isBlank()) {
+            return;
+        }
+        ensurePlatformConversations().put(platform.toLowerCase(), conversationId.trim());
+    }
+
+    public String getConversationId(String platform) {
+        if (platform == null || platform.isBlank()) {
+            return "";
+        }
+        return ensurePlatformConversations().getOrDefault(platform.toLowerCase(), "");
+    }
+
+    private Map<String, String> ensurePlatformBindings() {
+        if (this.platformBindings == null) {
+            this.platformBindings = new LinkedHashMap<>();
+        }
+        return this.platformBindings;
+    }
+
+    private Map<String, String> ensurePlatformConversations() {
+        if (this.platformConversations == null) {
+            this.platformConversations = new LinkedHashMap<>();
+        }
+        return this.platformConversations;
     }
 }

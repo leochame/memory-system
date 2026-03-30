@@ -4,6 +4,9 @@ import com.memsys.llm.LlmClient;
 import com.memsys.llm.LlmExtractionService;
 import com.memsys.memory.MemoryAsyncService;
 import com.memsys.memory.MemoryManager;
+import com.memsys.memory.MemoryReflectionService;
+import com.memsys.memory.model.MemoryEvidenceTrace;
+import com.memsys.memory.model.ReflectionResult;
 import com.memsys.memory.storage.MemoryStorage;
 import com.memsys.prompt.AgentGuideService;
 import com.memsys.prompt.SystemPromptBuilder;
@@ -22,13 +25,20 @@ import org.junit.jupiter.api.io.TempDir;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.time.LocalDateTime;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
 
 class ConversationCliTest {
 
@@ -56,10 +66,12 @@ class ConversationCliTest {
                 storage,
                 new MemoryManager(storage, 100, 30, 15),
                 null,
+                alwaysNeedMemoryReflectionService(),
+                null,
                 null,
                 new AgentGuideService(mapFile.toString(), tempDir.toString()),
                 new SystemPromptBuilder(),
-                new NoopMemoryAsyncService(),
+                new ImmediateMemoryAsyncService(),
                 null,
                 skillService,
                 null,
@@ -77,6 +89,92 @@ class ConversationCliTest {
         assertThat(llmClient.capturedSystemPrompts).hasSize(2);
         assertThat(llmClient.capturedSystemPrompts.get(0)).contains("MAP_LINE: memory first");
         assertThat(llmClient.capturedSystemPrompts.get(1)).doesNotContain("MAP_LINE: memory first");
+    }
+
+    @Test
+    void processUserMessageWithMemoryForEvalShouldNotConsumeStartupMap() throws Exception {
+        MemoryStorage storage = new MemoryStorage(tempDir.toString());
+        storage.writeMetadata(Map.of(
+                "global_controls", Map.of(
+                        "use_saved_memories", true,
+                        "use_chat_history", false
+                )
+        ));
+
+        Path mapFile = tempDir.resolve("Agent.md");
+        Files.writeString(mapFile, "MAP_LINE: memory first");
+
+        SkillService skillService = new SkillService(tempDir.toString());
+        RecordingLlmClient llmClient = new RecordingLlmClient();
+
+        ConversationCli conversationCli = new ConversationCli(
+                llmClient,
+                storage,
+                new MemoryManager(storage, 100, 30, 15),
+                null,
+                alwaysNeedMemoryReflectionService(),
+                null,
+                null,
+                new AgentGuideService(mapFile.toString(), tempDir.toString()),
+                new SystemPromptBuilder(),
+                new ImmediateMemoryAsyncService(),
+                null,
+                skillService,
+                null,
+                toolsWithoutRag(skillService),
+                40,
+                15,
+                false,
+                0.35,
+                5
+        );
+
+        conversationCli.processUserMessageWithMemoryForEval("eval");
+        conversationCli.processUserMessage("normal");
+
+        assertThat(llmClient.capturedSystemPrompts).hasSize(2);
+        assertThat(llmClient.capturedSystemPrompts.get(0)).contains("MAP_LINE: memory first");
+        assertThat(llmClient.capturedSystemPrompts.get(1)).contains("MAP_LINE: memory first");
+    }
+
+    @Test
+    void processUserMessageWithMemoryForEvalShouldNotPersistEvidenceTrace() throws Exception {
+        MemoryStorage storage = new MemoryStorage(tempDir.toString());
+        storage.writeMetadata(Map.of(
+                "global_controls", Map.of(
+                        "use_saved_memories", true,
+                        "use_chat_history", false
+                )
+        ));
+
+        SkillService skillService = new SkillService(tempDir.toString());
+        RecordingLlmClient llmClient = new RecordingLlmClient();
+        ConversationCli conversationCli = new ConversationCli(
+                llmClient,
+                storage,
+                new MemoryManager(storage, 100, 30, 15),
+                null,
+                alwaysNeedMemoryReflectionService(),
+                null,
+                null,
+                new AgentGuideService(tempDir.resolve("missing-Agent.md").toString(), tempDir.toString()),
+                new SystemPromptBuilder(),
+                new ImmediateMemoryAsyncService(),
+                null,
+                skillService,
+                null,
+                toolsWithoutRag(skillService),
+                40,
+                15,
+                false,
+                0.35,
+                5
+        );
+
+        String reply = conversationCli.processUserMessageWithMemoryForEval("eval only");
+        assertThat(reply).isEqualTo("assistant reply");
+        assertThat(conversationCli.getLastEvidenceTrace()).isNotNull();
+        assertThat(storage.readMemoryEvidenceTraces(10)).isEmpty();
     }
 
     @Test
@@ -98,10 +196,12 @@ class ConversationCliTest {
                 storage,
                 new MemoryManager(storage, 100, 30, 15),
                 null,
+                alwaysNeedMemoryReflectionService(),
+                null,
                 null,
                 new AgentGuideService(tempDir.resolve("missing-Agent.md").toString(), tempDir.toString()),
                 new SystemPromptBuilder(),
-                new NoopMemoryAsyncService(),
+                new ImmediateMemoryAsyncService(),
                 null,
                 skillService,
                 null,
@@ -178,6 +278,8 @@ class ConversationCliTest {
                 storage,
                 new MemoryManager(storage, 100, 30, 15),
                 null,
+                alwaysNeedMemoryReflectionService(),
+                null,
                 null,
                 new AgentGuideService(tempDir.resolve("missing-Agent.md").toString(), tempDir.toString()),
                 new SystemPromptBuilder(),
@@ -234,6 +336,8 @@ class ConversationCliTest {
                 storage,
                 new MemoryManager(storage, 100, 30, 15),
                 null,
+                alwaysNeedMemoryReflectionService(),
+                null,
                 null,
                 new AgentGuideService(tempDir.resolve("missing-Agent.md").toString(), tempDir.toString()),
                 new SystemPromptBuilder(),
@@ -260,6 +364,510 @@ class ConversationCliTest {
                 .contains("create_task");
     }
 
+    @Test
+    void processUserMessageShouldEmitProgressEvents() {
+        MemoryStorage storage = new MemoryStorage(tempDir.toString());
+        storage.writeMetadata(Map.of(
+                "global_controls", Map.of(
+                        "use_saved_memories", true,
+                        "use_chat_history", false
+                )
+        ));
+
+        SkillService skillService = new SkillService(tempDir.toString());
+        RecordingLlmClient llmClient = new RecordingLlmClient();
+        ConversationCli conversationCli = new ConversationCli(
+                llmClient,
+                storage,
+                new MemoryManager(storage, 100, 30, 15),
+                null,
+                alwaysNeedMemoryReflectionService(),
+                null,
+                null,
+                new AgentGuideService(tempDir.resolve("missing-Agent.md").toString(), tempDir.toString()),
+                new SystemPromptBuilder(),
+                new NoopMemoryAsyncService(),
+                null,
+                skillService,
+                null,
+                toolsWithoutRag(skillService),
+                40,
+                15,
+                false,
+                0.35,
+                5
+        );
+
+        List<ConversationProgressEvent> events = new ArrayList<>();
+        conversationCli.processUserMessage("帮我继续排查", "cli", "scope:test", "user:test", events::add);
+
+        assertThat(events).isNotEmpty();
+        assertThat(events.get(0).stage()).isEqualTo("accepted");
+        assertThat(events.stream().map(ConversationProgressEvent::stage))
+                .contains("reflection_started", "evidence_ready", "generating", "completed");
+    }
+
+    @Test
+    void processUserMessageShouldGenerateEvidenceTraceWithRetrievedAndUsedSplit() {
+        MemoryStorage storage = new MemoryStorage(tempDir.toString());
+        storage.writeMetadata(Map.of(
+                "global_controls", Map.of(
+                        "use_saved_memories", true,
+                        "use_chat_history", false
+                )
+        ));
+
+        SkillService skillService = new SkillService(tempDir.toString());
+        skillService.saveSkill("debugging", "Keep answers concise.");
+        ToolCallingLlmClient llmClient = new ToolCallingLlmClient();
+
+        ConversationCli conversationCli = new ConversationCli(
+                llmClient,
+                storage,
+                new MemoryManager(storage, 100, 30, 15),
+                null,
+                alwaysNeedMemoryReflectionService(),
+                null,
+                null,
+                new AgentGuideService(tempDir.resolve("missing-Agent.md").toString(), tempDir.toString()),
+                new SystemPromptBuilder(),
+                new ImmediateMemoryAsyncService(),
+                null,
+                skillService,
+                null,
+                toolsWithoutRag(skillService),
+                40,
+                15,
+                false,
+                0.35,
+                5
+        );
+
+        String reply = conversationCli.processUserMessage("继续看看排查方案");
+        assertThat(reply).isEqualTo("assistant reply");
+
+        MemoryEvidenceTrace trace = conversationCli.getLastEvidenceTrace();
+        assertThat(trace).isNotNull();
+        assertThat(trace.retrievedInsights()).isNotEmpty();
+        assertThat(trace.loadedSkills()).contains("debugging");
+        assertThat(trace.usedSkills()).contains("debugging");
+
+        List<Map<String, Object>> history = storage.readMemoryEvidenceTraces(5);
+        assertThat(history).hasSize(1);
+        assertThat(history.get(0))
+                .containsKeys("retrieved_insights", "used_insights", "loaded_skills", "used_skills", "used_evidence_summary");
+    }
+
+    @Test
+    void processUserMessageShouldSkipExampleSearchWhenPurposeIsNotExperience() {
+        MemoryStorage storage = new MemoryStorage(tempDir.toString());
+        storage.writeMetadata(Map.of(
+                "global_controls", Map.of(
+                        "use_saved_memories", true,
+                        "use_chat_history", false
+                )
+        ));
+
+        SkillService skillService = new SkillService(tempDir.toString());
+        RecordingLlmClient llmClient = new RecordingLlmClient();
+        MemoryReflectionService reflectionService = reflectionServiceWithPurposes(List.of("personalization"));
+        AtomicInteger exampleSearchCalls = new AtomicInteger();
+
+        RagService ragService = new RagService(storage, tempDir.toString()) {
+            @Override
+            public List<RelevantMemory> buildSmartContext(String currentMessage, int maxMemories) {
+                return List.of();
+            }
+
+            @Override
+            public List<RelevantMemory> searchExamples(String query, int topK, double minScore) {
+                exampleSearchCalls.incrementAndGet();
+                return List.of();
+            }
+        };
+
+        ConversationCli conversationCli = new ConversationCli(
+                llmClient,
+                storage,
+                new MemoryManager(storage, 100, 30, 15),
+                null,
+                reflectionService,
+                null,
+                null,
+                new AgentGuideService(tempDir.resolve("missing-Agent.md").toString(), tempDir.toString()),
+                new SystemPromptBuilder(),
+                new NoopMemoryAsyncService(),
+                ragService,
+                skillService,
+                null,
+                toolsWithRag(skillService, ragService),
+                40,
+                15,
+                true,
+                0.35,
+                5
+        );
+
+        conversationCli.processUserMessage("继续按我的偏好回答");
+        assertThat(exampleSearchCalls.get()).isZero();
+    }
+
+    @Test
+    void processUserMessageShouldSkipMatchedTaskLookupWhenPurposeIsNotFollowup() {
+        MemoryStorage storage = new MemoryStorage(tempDir.toString());
+        storage.writeMetadata(Map.of(
+                "global_controls", Map.of(
+                        "use_saved_memories", true,
+                        "use_chat_history", false
+                )
+        ));
+
+        SkillService skillService = new SkillService(tempDir.toString());
+        RecordingLlmClient llmClient = new RecordingLlmClient();
+        MemoryReflectionService reflectionService = reflectionServiceWithPurposes(List.of("continuity"));
+        ScheduledTaskService scheduledTaskService = mock(ScheduledTaskService.class);
+        when(scheduledTaskService.drainPendingNotificationsForConversation(anyString(), anyString())).thenReturn(List.of());
+
+        ConversationCli conversationCli = new ConversationCli(
+                llmClient,
+                storage,
+                new MemoryManager(storage, 100, 30, 15),
+                null,
+                reflectionService,
+                null,
+                null,
+                new AgentGuideService(tempDir.resolve("missing-Agent.md").toString(), tempDir.toString()),
+                new SystemPromptBuilder(),
+                new NoopMemoryAsyncService(),
+                null,
+                skillService,
+                scheduledTaskService,
+                toolsWithoutRag(skillService),
+                40,
+                15,
+                false,
+                0.35,
+                5
+        );
+
+        conversationCli.processUserMessage("继续之前内容", "cli", "scope:test", "user:test");
+        verify(scheduledTaskService, never()).listTasks(20);
+    }
+
+    @Test
+    void processUserMessageShouldTreatUppercaseReflectionPurposesAsValid() {
+        MemoryStorage storage = new MemoryStorage(tempDir.toString());
+        storage.writeMetadata(Map.of(
+                "global_controls", Map.of(
+                        "use_saved_memories", true,
+                        "use_chat_history", false
+                )
+        ));
+
+        SkillService skillService = new SkillService(tempDir.toString());
+        RecordingLlmClient llmClient = new RecordingLlmClient();
+        MemoryReflectionService reflectionService = reflectionServiceWithPurposes(List.of("PERSONALIZATION"));
+
+        ConversationCli conversationCli = new ConversationCli(
+                llmClient,
+                storage,
+                new MemoryManager(storage, 100, 30, 15),
+                null,
+                reflectionService,
+                null,
+                null,
+                new AgentGuideService(tempDir.resolve("missing-Agent.md").toString(), tempDir.toString()),
+                new SystemPromptBuilder(),
+                new NoopMemoryAsyncService(),
+                null,
+                skillService,
+                null,
+                toolsWithoutRag(skillService),
+                40,
+                15,
+                false,
+                0.35,
+                5
+        );
+
+        conversationCli.processUserMessage("按我的习惯继续");
+
+        MemoryEvidenceTrace trace = conversationCli.getLastEvidenceTrace();
+        assertThat(trace).isNotNull();
+        assertThat(trace.retrievedInsights()).isNotEmpty();
+        assertThat(trace.usedInsights()).isNotEmpty();
+    }
+
+    @Test
+    void processUserMessageShouldNotInjectInsightsWhenReflectionSaysNoMemory() {
+        MemoryStorage storage = new MemoryStorage(tempDir.toString());
+        storage.writeMetadata(Map.of(
+                "global_controls", Map.of(
+                        "use_saved_memories", true,
+                        "use_chat_history", false
+                )
+        ));
+
+        SkillService skillService = new SkillService(tempDir.toString());
+        RecordingLlmClient llmClient = new RecordingLlmClient();
+
+        ConversationCli conversationCli = new ConversationCli(
+                llmClient,
+                storage,
+                new MemoryManager(storage, 100, 30, 15),
+                null,
+                noMemoryReflectionService(),
+                null,
+                null,
+                new AgentGuideService(tempDir.resolve("missing-Agent.md").toString(), tempDir.toString()),
+                new SystemPromptBuilder(),
+                new NoopMemoryAsyncService(),
+                null,
+                skillService,
+                null,
+                toolsWithoutRag(skillService),
+                40,
+                15,
+                false,
+                0.35,
+                5
+        );
+
+        conversationCli.processUserMessage("你好");
+
+        assertThat(llmClient.capturedSystemPrompts).hasSize(1);
+        assertThat(llmClient.capturedSystemPrompts.get(0)).doesNotContain("## 5. 用户画像正文（User Insights）");
+    }
+
+    @Test
+    void processUserMessageShouldFallbackWhenReflectionServiceUnavailable() {
+        MemoryStorage storage = new MemoryStorage(tempDir.toString());
+        storage.writeMetadata(Map.of(
+                "global_controls", Map.of(
+                        "use_saved_memories", true,
+                        "use_chat_history", false
+                )
+        ));
+        SkillService skillService = new SkillService(tempDir.toString());
+        RecordingLlmClient llmClient = new RecordingLlmClient();
+
+        ConversationCli conversationCli = new ConversationCli(
+                llmClient,
+                storage,
+                new MemoryManager(storage, 100, 30, 15),
+                null,
+                null,
+                null,
+                null,
+                new AgentGuideService(tempDir.resolve("missing-Agent.md").toString(), tempDir.toString()),
+                new SystemPromptBuilder(),
+                new NoopMemoryAsyncService(),
+                null,
+                skillService,
+                null,
+                toolsWithoutRag(skillService),
+                40,
+                15,
+                false,
+                0.35,
+                5
+        );
+
+        String reply = conversationCli.processUserMessage("继续说");
+        assertThat(reply).isEqualTo("assistant reply");
+
+        ReflectionResult reflection = conversationCli.getLastReflectionResult();
+        assertThat(reflection).isNotNull();
+        assertThat(reflection.needs_memory()).isTrue();
+        assertThat(reflection.reason()).isEqualTo("反思阶段异常，默认加载长期记忆以保证回答稳定性。");
+        assertThat(reflection.evidence_purposes()).containsExactly("continuity");
+    }
+
+    @Test
+    void getLastEvidenceTraceShouldFallbackToPersistedTraceWhenInMemoryTraceMissing() {
+        MemoryStorage storage = new MemoryStorage(tempDir.toString());
+        storage.writeMetadata(Map.of(
+                "global_controls", Map.of(
+                        "use_saved_memories", true,
+                        "use_chat_history", false
+                )
+        ));
+        SkillService skillService = new SkillService(tempDir.toString());
+        RecordingLlmClient llmClient = new RecordingLlmClient();
+        ConversationCli conversationCli = new ConversationCli(
+                llmClient,
+                storage,
+                new MemoryManager(storage, 100, 30, 15),
+                null,
+                alwaysNeedMemoryReflectionService(),
+                null,
+                null,
+                new AgentGuideService(tempDir.resolve("missing-Agent.md").toString(), tempDir.toString()),
+                new SystemPromptBuilder(),
+                new NoopMemoryAsyncService(),
+                null,
+                skillService,
+                null,
+                toolsWithoutRag(skillService),
+                40,
+                15,
+                false,
+                0.35,
+                5
+        );
+
+        Map<String, Object> reflection = new LinkedHashMap<>();
+        reflection.put("needs_memory", true);
+        reflection.put("reason", "需要历史偏好");
+        reflection.put("evidence_purposes", List.of("personalization"));
+
+        Map<String, Object> traceRecord = new LinkedHashMap<>();
+        traceRecord.put("timestamp", LocalDateTime.now().toString());
+        traceRecord.put("user_message", "根据我的偏好推荐");
+        traceRecord.put("memory_loaded", true);
+        traceRecord.put("reflection", reflection);
+        traceRecord.put("retrieved_insights", List.of("food_preference: 不吃鱼"));
+        traceRecord.put("used_insights", List.of("food_preference: 不吃鱼"));
+        traceRecord.put("retrieved_examples", List.of());
+        traceRecord.put("used_examples", List.of());
+        traceRecord.put("loaded_skills", List.of("debugging"));
+        traceRecord.put("used_skills", List.of());
+        traceRecord.put("retrieved_tasks", List.of());
+        traceRecord.put("used_tasks", List.of());
+        traceRecord.put("used_evidence_summary", "insights 1/1, examples 0/0, skills 0/1, tasks 0/0");
+        storage.appendMemoryEvidenceTrace(traceRecord);
+
+        MemoryEvidenceTrace trace = conversationCli.getLastEvidenceTrace();
+        assertThat(trace).isNotNull();
+        assertThat(trace.userMessage()).isEqualTo("根据我的偏好推荐");
+        assertThat(trace.reflection()).isNotNull();
+        assertThat(trace.reflection().needs_memory()).isTrue();
+        assertThat(trace.retrievedInsights()).contains("food_preference: 不吃鱼");
+        assertThat(trace.loadedSkills()).contains("debugging");
+    }
+
+    @Test
+    void getLastEvidenceTraceShouldNormalizeNullLikeFieldsFromPersistedTrace() {
+        MemoryStorage storage = new MemoryStorage(tempDir.toString());
+        storage.writeMetadata(Map.of(
+                "global_controls", Map.of(
+                        "use_saved_memories", true,
+                        "use_chat_history", false
+                )
+        ));
+        SkillService skillService = new SkillService(tempDir.toString());
+        RecordingLlmClient llmClient = new RecordingLlmClient();
+        ConversationCli conversationCli = new ConversationCli(
+                llmClient,
+                storage,
+                new MemoryManager(storage, 100, 30, 15),
+                null,
+                alwaysNeedMemoryReflectionService(),
+                null,
+                null,
+                new AgentGuideService(tempDir.resolve("missing-Agent.md").toString(), tempDir.toString()),
+                new SystemPromptBuilder(),
+                new NoopMemoryAsyncService(),
+                null,
+                skillService,
+                null,
+                toolsWithoutRag(skillService),
+                40,
+                15,
+                false,
+                0.35,
+                5
+        );
+
+        Map<String, Object> reflection = new LinkedHashMap<>();
+        reflection.put("needs_memory", true);
+        reflection.put("reason", null);
+        reflection.put("evidence_purposes", java.util.Arrays.asList("continuity", null, "null"));
+
+        Map<String, Object> traceRecord = new LinkedHashMap<>();
+        traceRecord.put("timestamp", LocalDateTime.now().toString());
+        traceRecord.put("user_message", null);
+        traceRecord.put("memory_loaded", true);
+        traceRecord.put("reflection", reflection);
+        traceRecord.put("retrieved_insights", java.util.Arrays.asList("null", null, "user_insights.md: 偏好简洁"));
+        traceRecord.put("used_insights", null);
+        traceRecord.put("retrieved_examples", List.of());
+        traceRecord.put("used_examples", List.of());
+        traceRecord.put("loaded_skills", List.of());
+        traceRecord.put("used_skills", List.of());
+        traceRecord.put("retrieved_tasks", List.of());
+        traceRecord.put("used_tasks", List.of());
+        traceRecord.put("used_evidence_summary", null);
+        storage.appendMemoryEvidenceTrace(traceRecord);
+
+        MemoryEvidenceTrace trace = conversationCli.getLastEvidenceTrace();
+        assertThat(trace).isNotNull();
+        assertThat(trace.userMessage()).isEmpty();
+        assertThat(trace.reflection()).isNotNull();
+        assertThat(trace.reflection().reason()).isEmpty();
+        assertThat(trace.reflection().evidence_purposes()).containsExactly("continuity");
+        assertThat(trace.retrievedInsights()).containsExactly("user_insights.md: 偏好简洁");
+        assertThat(trace.usedEvidenceSummary()).isEmpty();
+    }
+
+    @Test
+    void getLastEvidenceTraceShouldKeepNeedsMemoryUnknownWhenFieldMissing() {
+        MemoryStorage storage = new MemoryStorage(tempDir.toString());
+        storage.writeMetadata(Map.of(
+                "global_controls", Map.of(
+                        "use_saved_memories", true,
+                        "use_chat_history", false
+                )
+        ));
+        SkillService skillService = new SkillService(tempDir.toString());
+        RecordingLlmClient llmClient = new RecordingLlmClient();
+        ConversationCli conversationCli = new ConversationCli(
+                llmClient,
+                storage,
+                new MemoryManager(storage, 100, 30, 15),
+                null,
+                alwaysNeedMemoryReflectionService(),
+                null,
+                null,
+                new AgentGuideService(tempDir.resolve("missing-Agent.md").toString(), tempDir.toString()),
+                new SystemPromptBuilder(),
+                new NoopMemoryAsyncService(),
+                null,
+                skillService,
+                null,
+                toolsWithoutRag(skillService),
+                40,
+                15,
+                false,
+                0.35,
+                5
+        );
+
+        Map<String, Object> reflection = new LinkedHashMap<>();
+        reflection.put("reason", "legacy trace without needs_memory");
+        reflection.put("evidence_purposes", List.of("continuity"));
+
+        Map<String, Object> traceRecord = new LinkedHashMap<>();
+        traceRecord.put("timestamp", LocalDateTime.now().toString());
+        traceRecord.put("user_message", "继续上次的话题");
+        traceRecord.put("memory_loaded", true);
+        traceRecord.put("reflection", reflection);
+        traceRecord.put("retrieved_insights", List.of("user_insights.md: 喜欢简洁回答"));
+        traceRecord.put("used_insights", List.of());
+        traceRecord.put("retrieved_examples", List.of());
+        traceRecord.put("used_examples", List.of());
+        traceRecord.put("loaded_skills", List.of());
+        traceRecord.put("used_skills", List.of());
+        traceRecord.put("retrieved_tasks", List.of());
+        traceRecord.put("used_tasks", List.of());
+        traceRecord.put("used_evidence_summary", "insights 0/1, examples 0/0, skills 0/0, tasks 0/0");
+        storage.appendMemoryEvidenceTrace(traceRecord);
+
+        MemoryEvidenceTrace trace = conversationCli.getLastEvidenceTrace();
+        assertThat(trace).isNotNull();
+        assertThat(trace.reflection()).isNull();
+    }
+
     private List<BaseTool> toolsWithoutRag(SkillService skillService) {
         return List.of(
                 new SearchRagTool(null, false, 5, 0.35),
@@ -276,7 +884,7 @@ class ConversationCliTest {
         );
     }
 
-    private static final class RecordingLlmClient extends LlmClient {
+    private static class RecordingLlmClient extends LlmClient {
 
         private List<ToolDefinition> capturedTools = List.of();
         private final List<String> capturedSystemPrompts = new ArrayList<>();
@@ -294,6 +902,31 @@ class ConversationCliTest {
             this.capturedSystemPrompts.add(systemPrompt);
             return "assistant reply";
         }
+
+        @Override
+        public String chat(String systemPrompt, List<ChatMessage> messages, double temperature) {
+            this.capturedSystemPrompts.add(systemPrompt);
+            return "assistant reply";
+        }
+    }
+
+    private static final class ToolCallingLlmClient extends RecordingLlmClient {
+        @Override
+        public String chatWithTools(String systemPrompt,
+                                    List<ChatMessage> messages,
+                                    List<ToolDefinition> toolDefinitions,
+                                    double temperature) {
+            for (ToolDefinition toolDefinition : toolDefinitions) {
+                if ("load_skill".equals(toolDefinition.specification().name())) {
+                    toolDefinition.executor().apply(ToolExecutionRequest.builder()
+                            .id("auto")
+                            .name("load_skill")
+                            .arguments("{\"name\":\"debugging\"}")
+                            .build());
+                }
+            }
+            return super.chatWithTools(systemPrompt, messages, toolDefinitions, temperature);
+        }
     }
 
     private static final class NoopMemoryAsyncService extends MemoryAsyncService {
@@ -306,5 +939,40 @@ class ConversationCliTest {
         public boolean submit(String taskName, Runnable task) {
             return true;
         }
+    }
+
+    private static final class ImmediateMemoryAsyncService extends MemoryAsyncService {
+
+        private ImmediateMemoryAsyncService() {
+            super(false, 1, 1);
+        }
+
+        @Override
+        public boolean submit(String taskName, Runnable task) {
+            if (task != null) {
+                task.run();
+            }
+            return true;
+        }
+    }
+
+    private MemoryReflectionService alwaysNeedMemoryReflectionService() {
+        MemoryReflectionService reflectionService = mock(MemoryReflectionService.class);
+        when(reflectionService.reflect(anyString(), anyString())).thenReturn(ReflectionResult.fallback());
+        return reflectionService;
+    }
+
+    private MemoryReflectionService reflectionServiceWithPurposes(List<String> purposes) {
+        MemoryReflectionService reflectionService = mock(MemoryReflectionService.class);
+        when(reflectionService.reflect(anyString(), anyString()))
+                .thenReturn(new ReflectionResult(true, "需要历史信息", purposes));
+        return reflectionService;
+    }
+
+    private MemoryReflectionService noMemoryReflectionService() {
+        MemoryReflectionService reflectionService = mock(MemoryReflectionService.class);
+        when(reflectionService.reflect(anyString(), anyString()))
+                .thenReturn(new ReflectionResult(false, "当前问题无需长期记忆。", List.of()));
+        return reflectionService;
     }
 }

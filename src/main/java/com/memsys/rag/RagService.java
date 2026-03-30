@@ -3,6 +3,7 @@ package com.memsys.rag;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 import com.memsys.llm.LlmDtos.ExampleItem;
+import com.memsys.memory.MemoryScopeContext;
 import com.memsys.memory.model.Memory;
 import com.memsys.memory.storage.MemoryStorage;
 import dev.langchain4j.data.embedding.Embedding;
@@ -35,6 +36,7 @@ import java.util.Map;
 public class RagService {
 
     private static final double DEFAULT_CONTEXT_MIN_SCORE = 0.30;
+    private static final String METADATA_SCOPE = "scope";
 
     private final MemoryStorage memoryStorage;
     private final VectorIndex vectorIndex;
@@ -63,30 +65,57 @@ public class RagService {
     }
 
     public void indexMemory(String slotName, Memory memory) {
+        if (slotName == null || slotName.isBlank() || memory == null) {
+            return;
+        }
         Map<String, Object> metadata = new HashMap<>();
         metadata.put("slot_name", slotName);
-        metadata.put("memory_type", memory.getMemoryType().toString());
-        metadata.put("source", memory.getSource().toString());
+        metadata.put("memory_type", memory.getMemoryType() == null ? "UNKNOWN" : memory.getMemoryType().toString());
+        metadata.put("source", memory.getSource() == null ? "UNKNOWN" : memory.getSource().toString());
         metadata.put("created_at", String.valueOf(memory.getCreatedAt()));
+        metadata.put(METADATA_SCOPE, currentScope());
 
-        vectorIndex.upsert("memory:" + slotName, memory.getContent(), metadata);
+        vectorIndex.upsert(scopedDocId("memory:" + slotName), memory.getContent(), metadata);
+    }
+
+    public void deleteMemory(String slotName) {
+        if (slotName == null || slotName.isBlank()) {
+            return;
+        }
+        vectorIndex.delete(scopedDocId("memory:" + slotName));
+        vectorIndex.delete("memory:" + slotName);
     }
 
     public void indexAllMemories() {
         Map<String, Memory> all = memoryStorage.readUserInsights();
         for (Map.Entry<String, Memory> entry : all.entrySet()) {
-            indexMemory(entry.getKey(), entry.getValue());
+            String slotName = entry.getKey();
+            Memory memory = entry.getValue();
+            if (slotName == null || slotName.isBlank() || memory == null) {
+                log.warn("Skip invalid memory record while indexing. slotName={}, memoryNull={}",
+                        slotName, memory == null);
+                continue;
+            }
+            indexMemory(slotName, memory);
         }
         log.info("Indexed {} memories to vector store", all.size());
     }
 
     public List<RelevantMemory> searchMemories(String query, int topK, double minScore) {
-        List<SearchHit> hits = vectorIndex.search(query, topK, minScore);
+        int candidateSize = Math.max(topK * 4, topK);
+        List<SearchHit> hits = vectorIndex.search(query, candidateSize, minScore);
         List<RelevantMemory> results = new ArrayList<>(hits.size());
+        String scope = currentScope();
         for (SearchHit hit : hits) {
             VectorDocument doc = hit.document();
+            if (!docInCurrentScope(doc, scope)) {
+                continue;
+            }
             String slotName = (String) doc.getMetadata().getOrDefault("slot_name", doc.getId());
             results.add(new RelevantMemory(slotName, doc.getContent(), hit.score(), doc.getMetadata()));
+            if (results.size() >= topK) {
+                break;
+            }
         }
         return results;
     }
@@ -103,18 +132,23 @@ public class RagService {
         metadata.put("type", "example");
         metadata.put("problem", example.problem());
         metadata.put("solution", example.solution());
+        metadata.put(METADATA_SCOPE, currentScope());
         if (example.tags() != null && !example.tags().isEmpty()) {
             metadata.put("tags", String.join(",", example.tags()));
         }
 
-        vectorIndex.upsert(id, content, metadata);
+        vectorIndex.upsert(scopedDocId(id), content, metadata);
     }
 
     public List<RelevantMemory> searchExamples(String query, int topK, double minScore) {
-        List<SearchHit> hits = vectorIndex.search(query, topK * 2, minScore);
+        List<SearchHit> hits = vectorIndex.search(query, topK * 6, minScore);
         List<RelevantMemory> examples = new ArrayList<>();
+        String scope = currentScope();
         for (SearchHit hit : hits) {
             VectorDocument doc = hit.document();
+            if (!docInCurrentScope(doc, scope)) {
+                continue;
+            }
             if (!"example".equals(doc.getMetadata().get("type"))) {
                 continue;
             }
@@ -127,17 +161,51 @@ public class RagService {
     }
 
     public Map<String, Object> getStatistics() {
-        List<VectorDocument> docs = vectorIndex.listDocuments();
-        long memoryCount = docs.stream().filter(doc -> doc.getId().startsWith("memory:")).count();
-        long conversationCount = docs.stream().filter(doc -> doc.getId().startsWith("conversation:")).count();
-        long exampleCount = docs.stream().filter(doc -> doc.getId().startsWith("example:")).count();
+        String scope = currentScope();
+        List<VectorDocument> docs = vectorIndex.listDocuments().stream()
+                .filter(doc -> docInCurrentScope(doc, scope))
+                .toList();
+        long memoryCount = docs.stream().filter(doc -> rawDocId(doc).startsWith("memory:")).count();
+        long conversationCount = docs.stream().filter(doc -> rawDocId(doc).startsWith("conversation:")).count();
+        long exampleCount = docs.stream().filter(doc -> rawDocId(doc).startsWith("example:")).count();
 
         Map<String, Object> stats = new LinkedHashMap<>();
-        stats.put("total_documents", vectorIndex.size());
+        stats.put("total_documents", docs.size());
         stats.put("memory_documents", memoryCount);
         stats.put("conversation_documents", conversationCount);
         stats.put("example_documents", exampleCount);
         return stats;
+    }
+
+    private boolean docInCurrentScope(VectorDocument doc, String scope) {
+        if (doc == null) {
+            return false;
+        }
+        String docScope = String.valueOf(doc.getMetadata().getOrDefault(METADATA_SCOPE, ""));
+        if (docScope == null || docScope.isBlank()) {
+            return MemoryScopeContext.DEFAULT_SCOPE.equals(scope);
+        }
+        return scope.equals(MemoryScopeContext.normalize(docScope));
+    }
+
+    private String currentScope() {
+        return MemoryScopeContext.currentScope();
+    }
+
+    private String scopedDocId(String rawId) {
+        return currentScope() + "|" + rawId;
+    }
+
+    private String rawDocId(VectorDocument doc) {
+        if (doc == null || doc.getId() == null) {
+            return "";
+        }
+        String id = doc.getId();
+        int split = id.indexOf('|');
+        if (split >= 0 && split < id.length() - 1) {
+            return id.substring(split + 1);
+        }
+        return id;
     }
 
     public static class RelevantMemory {

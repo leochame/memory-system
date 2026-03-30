@@ -27,6 +27,7 @@ import org.springframework.stereotype.Component;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.*;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.stream.Collectors;
 
 /**
@@ -39,6 +40,9 @@ public class ConversationCli {
 
     private static final int RECENT_TURNS_FOR_MESSAGES = 10;
     private static final DateTimeFormatter TASK_TIME_FORMATTER = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm");
+    private static final int BASE_PROFILE_MAX_CHARS = 800;
+    private static final int FAST_RAG_MAX_RESULTS = 3;
+    private static final int FAST_EXAMPLE_MAX_RESULTS = 2;
 
     private final LlmClient llmClient;
     private final MemoryStorage storage;
@@ -60,10 +64,9 @@ public class ConversationCli {
     private final double ragMinScore;
     private final int ragMaxResults;
 
-    private boolean temporaryMode = false;
-    private boolean appendedStartupMapForSession = false;
     private volatile ReflectionResult lastReflectionResult = null;
     private volatile MemoryEvidenceTrace lastEvidenceTrace = null;
+    private final AtomicBoolean startupMapInjected = new AtomicBoolean(false);
 
     public ConversationCli(
             LlmClient llmClient,
@@ -107,12 +110,78 @@ public class ConversationCli {
         this.ragMaxResults = ragMaxResults;
     }
 
-    public void setTemporaryMode(boolean temporaryMode) {
-        this.temporaryMode = temporaryMode;
-    }
-
     public String processUserMessage(String userMessage) {
         return processUserMessage(userMessage, "", "", "");
+    }
+
+    public String processUserMessageTemporary(String userMessage) {
+        return processUserMessageTemporary(userMessage, "", "", "");
+    }
+
+    /**
+     * 评测专用临时模式：仅生成回答，不读取/清空任务通知，也不附加任务提示。
+     */
+    public String processUserMessageTemporaryForEval(String userMessage) {
+        return handleTemporaryConversation(userMessage);
+    }
+
+    public String processUserMessageTemporary(
+            String userMessage,
+            String sourcePlatform,
+            String sourceConversationId,
+            String sourceSenderId
+    ) {
+        return processUserMessageTemporary(userMessage, sourcePlatform, sourceConversationId, sourceSenderId, null);
+    }
+
+    public String processUserMessageTemporary(
+            String userMessage,
+            String sourcePlatform,
+            String sourceConversationId,
+            String sourceSenderId,
+            ConversationProgressListener progressListener
+    ) {
+        emitProgress(progressListener, "accepted", "已收到消息，开始处理。");
+        List<Map<String, Object>> dueTaskNotifications = scheduledTaskService == null
+                ? List.of()
+                : scheduledTaskService.drainPendingNotificationsForConversation(sourcePlatform, sourceConversationId);
+        emitProgress(progressListener, "temporary_mode", "临时会话模式：跳过长期记忆读写。");
+        String temporaryResponse = handleTemporaryConversation(userMessage, progressListener);
+        emitProgress(progressListener, "completed", "已完成回答生成。");
+        return decorateResponseWithTaskSignals(temporaryResponse, dueTaskNotifications);
+    }
+
+    /**
+     * 评测专用有记忆模式：读取上下文并生成回答，但不产生任何落盘副作用。
+     */
+    public String processUserMessageWithMemoryForEval(String userMessage) {
+        // 检查全局控制（与正常主链路保持一致）
+        Map<String, Object> metadata = storage.readMetadata();
+        @SuppressWarnings("unchecked")
+        Map<String, Object> globalControls = (Map<String, Object>) metadata.get("global_controls");
+        boolean useSavedMemories = globalControls == null
+                || parseBoolean(globalControls.get("use_saved_memories"), true);
+        boolean useChatHistory = globalControls == null
+                || parseBoolean(globalControls.get("use_chat_history"), true);
+
+        List<Map<String, Object>> recentTurns = useChatHistory
+                ? storage.getRecentConversationTurns(RECENT_TURNS_FOR_MESSAGES)
+                : new ArrayList<>();
+
+        List<ChatMessage> messages = recentTurns.stream()
+                .map(turn -> {
+                    String role = (String) turn.get("role");
+                    String content = (String) turn.get("message");
+                    if ("assistant".equals(role)) {
+                        return (ChatMessage) new AiMessage(content);
+                    }
+                    return (ChatMessage) new UserMessage(content);
+                })
+                .collect(Collectors.toCollection(ArrayList::new));
+        messages.add(new UserMessage(userMessage));
+
+        String startupMap = startupMapForEval();
+        return generateResponseForEvalWithoutTools(userMessage, useSavedMemories, useChatHistory, messages, startupMap);
     }
 
     public String processUserMessage(
@@ -121,26 +190,44 @@ public class ConversationCli {
             String sourceConversationId,
             String sourceSenderId
     ) {
+        return processUserMessage(userMessage, sourcePlatform, sourceConversationId, sourceSenderId, null);
+    }
+
+    public String processUserMessage(
+            String userMessage,
+            String sourcePlatform,
+            String sourceConversationId,
+            String sourceSenderId,
+            ConversationProgressListener progressListener
+    ) {
+        long requestStartNs = System.nanoTime();
+        emitProgress(progressListener, "accepted", "已收到消息，开始处理。");
         LocalDateTime timestamp = LocalDateTime.now();
         List<Map<String, Object>> dueTaskNotifications = scheduledTaskService == null
                 ? List.of()
                 : scheduledTaskService.drainPendingNotificationsForConversation(sourcePlatform, sourceConversationId);
 
-        if (temporaryMode) {
-            String temporaryResponse = handleTemporaryConversation(userMessage);
-            return decorateResponseWithTaskSignals(temporaryResponse, dueTaskNotifications);
-        }
-
         // 检查全局控制
         Map<String, Object> metadata = storage.readMetadata();
         @SuppressWarnings("unchecked")
         Map<String, Object> globalControls = (Map<String, Object>) metadata.get("global_controls");
-        boolean useSavedMemories = globalControls == null || (boolean) globalControls.getOrDefault("use_saved_memories", true);
-        boolean useChatHistory = globalControls == null || (boolean) globalControls.getOrDefault("use_chat_history", true);
+        boolean useSavedMemories = globalControls == null
+                || parseBoolean(globalControls.get("use_saved_memories"), true);
+        boolean useChatHistory = globalControls == null
+                || parseBoolean(globalControls.get("use_chat_history"), true);
+        emitProgress(progressListener, "controls_loaded", "已读取全局控制开关。",
+                Map.of(
+                        "use_saved_memories", useSavedMemories,
+                        "use_chat_history", useChatHistory
+                ));
 
         // 1) 获取最近 10 轮完整对话作为 messages 上下文
+        long contextStartNs = System.nanoTime();
         List<Map<String, Object>> recentTurns = useChatHistory ?
             storage.getRecentConversationTurns(RECENT_TURNS_FOR_MESSAGES) : new ArrayList<>();
+        long contextMs = elapsedMillis(contextStartNs);
+        emitProgress(progressListener, "context_loaded", "已加载对话上下文。",
+                Map.of("recent_turns", recentTurns.size()));
 
         List<ChatMessage> messages = recentTurns.stream()
             .map(turn -> {
@@ -156,102 +243,73 @@ public class ConversationCli {
         messages.add(new UserMessage(userMessage));
 
         // 2) 调用 LLM（支持按需工具调用）
-        String startupMap = appendedStartupMapForSession ? "" : agentGuideService.getCachedGuide();
+        String startupMap = consumeStartupMapOnce();
         String response;
+        // 仅允许结构化显式授权，不基于自然语言关键词放行命令执行。
+        boolean commandExecutionAllowed = false;
         try (ToolRuntimeContext.Scope ignored = ToolRuntimeContext.bindTaskSourceContext(
                 sourcePlatform,
                 sourceConversationId,
-                sourceSenderId
+                sourceSenderId,
+                commandExecutionAllowed
         )) {
-            response = generateResponse(userMessage, useSavedMemories, useChatHistory, messages, startupMap);
-        }
-        appendedStartupMapForSession = true;
-
-        // 3) 异步记忆操作
-        if (useChatHistory) {
-            memoryAsync.submit("persist_recent_user_message", () ->
-                    storage.updateRecentMessages(userMessage, timestamp, recentMessagesLimit));
-            memoryAsync.submit("append_history_user", () ->
-                    storage.appendToHistory("user", userMessage, timestamp));
-            memoryAsync.submit("append_history_assistant", () ->
-                    storage.appendToHistory("assistant", response, LocalDateTime.now()));
-        }
-
-        if (useSavedMemories) {
-            memoryAsync.submit("extract_explicit_memory", () -> {
-                Map<String, Object> explicitMemory = memoryExtractor.extractExplicitMemory(userMessage);
-                if ((boolean) explicitMemory.getOrDefault("has_memory", false)) {
-                    handleExplicitMemoryAsync(explicitMemory, userMessage);
-                }
-            });
-            memoryAsync.submit("update_relevant_memory_access", () -> updateMemoryAccess(userMessage));
+            response = generateResponse(
+                    userMessage,
+                    useSavedMemories,
+                    useChatHistory,
+                    messages,
+                    startupMap,
+                    dueTaskNotifications,
+                    sourcePlatform,
+                    sourceConversationId,
+                    progressListener
+            );
         }
 
-        // Phase 8: 会话摘要 — 每轮对话完成后计数，达到阈值时异步生成摘要
-        if (useChatHistory && conversationSummaryService.onTurnCompleted()) {
-            memoryAsync.submit("generate_session_summary", () -> {
-                String summary = conversationSummaryService.generateAndPersistSummary();
-                if (summary != null) {
-                    log.info("Session summary generated ({} turns)", conversationSummaryService.getCurrentTurnCount());
-                }
-            });
-        }
+        // 3) 后处理全部改为异步提交：主链路优先返回，后台尽力执行。
+        long postprocessSubmitStartNs = System.nanoTime();
+        int submittedAsyncTasks = 0;
+        boolean shouldGenerateTurnSummary = useChatHistory
+                && conversationSummaryService != null
+                && conversationSummaryService.onTurnCompleted();
+        String topicShiftContext = buildRecentContextSummary(messages);
+        submittedAsyncTasks += submitPostProcessTasks(
+                useSavedMemories,
+                useChatHistory,
+                shouldGenerateTurnSummary,
+                topicShiftContext,
+                userMessage,
+                response,
+                timestamp,
+                sourcePlatform,
+                sourceConversationId,
+                sourceSenderId
+        );
+        long postprocessSubmitMs = elapsedMillis(postprocessSubmitStartNs);
+        emitProgress(progressListener, "memory_postprocess_queued", "记忆后处理已异步排队。",
+                Map.of("submitted_tasks", submittedAsyncTasks));
 
-        // Phase 8 #2: 主题切换检测 — 即使未达轮次阈值，主题切换时也生成摘要
-        if (useChatHistory) {
-            final String topicShiftContext = buildRecentContextSummary(
-                    recentTurns.stream()
-                            .map(turn -> {
-                                String role = (String) turn.get("role");
-                                String content = (String) turn.get("message");
-                                if ("assistant".equals(role)) {
-                                    return (ChatMessage) new AiMessage(content);
-                                }
-                                return (ChatMessage) new UserMessage(content);
-                            })
-                            .collect(Collectors.toCollection(ArrayList::new)));
-            final String topicShiftMessage = userMessage;
-            memoryAsync.submit("detect_topic_shift", () -> {
-                String summary = conversationSummaryService.checkTopicShiftAndSummarize(
-                        topicShiftContext, topicShiftMessage);
-                if (summary != null) {
-                    log.info("Topic-shift summary generated at turn {}",
-                            conversationSummaryService.getCurrentTurnCount());
-                }
-            });
-        }
-
-        // Phase 9 #4: 自然语言定时任务提取 — 每轮对话异步检测是否包含任务创建意图
-        if (scheduledTaskService != null) {
-            final String taskMessage = userMessage;
-            final String taskPlatform = sourcePlatform;
-            final String taskConversationId = sourceConversationId;
-            final String taskSenderId = sourceSenderId;
-            memoryAsync.submit("extract_scheduled_task", () -> {
-                try {
-                    var taskOpt = scheduledTaskService.tryCreateTaskFromMessage(
-                            taskMessage, taskPlatform, taskConversationId, taskSenderId);
-                    taskOpt.ifPresent(task ->
-                            log.info("Auto-created scheduled task from conversation: '{}' due at {}",
-                                    task.getTitle(), task.getDueAt()));
-                } catch (Exception e) {
-                    log.debug("Scheduled task extraction skipped: {}", e.getMessage());
-                }
-            });
-        }
-
+        emitProgress(progressListener, "completed", "已完成回答生成。");
+        long totalMs = elapsedMillis(requestStartNs);
+        log.info("Conversation RTT(sync): total={}ms, context={}ms, postprocess_submit={}ms, async_tasks_submitted={}",
+                totalMs, contextMs, postprocessSubmitMs, submittedAsyncTasks);
         return decorateResponseWithTaskSignals(response, dueTaskNotifications);
     }
 
     // ========== 内部方法 ==========
 
     private String handleTemporaryConversation(String userMessage) {
+        return handleTemporaryConversation(userMessage, null);
+    }
+
+    private String handleTemporaryConversation(String userMessage, ConversationProgressListener progressListener) {
         String systemPrompt = promptBuilder.buildTemporaryPrompt();
         List<ChatMessage> messages = List.of(new UserMessage(userMessage));
+        emitProgress(progressListener, "generating", "正在调用模型生成回复。");
         return llmClient.chat(systemPrompt, messages, 0.7);
     }
 
-    private void handleExplicitMemoryAsync(Map<String, Object> memoryData, String rawUserMessage) {
+    private void handleExplicitMemory(Map<String, Object> memoryData, String rawUserMessage) {
         String slotName = (String) memoryData.get("slot_name");
         String content = (String) memoryData.get("content");
         String memoryType = (String) memoryData.get("memory_type");
@@ -264,13 +322,22 @@ public class ConversationCli {
         Map<String, Memory> existingMemories = memoryManager.listAllMemories();
         if (existingMemories.containsKey(slotName)) {
             Memory existing = existingMemories.get(slotName);
+            String existingContent = existing == null || existing.getContent() == null
+                    ? ""
+                    : existing.getContent().trim();
+            String newContent = content.trim();
+            if (Objects.equals(existingContent, newContent)) {
+                log.info("Explicit memory unchanged, skip conflict: {}", slotName);
+                return;
+            }
             Map<String, Object> record = new HashMap<>();
-            record.put("timestamp", LocalDateTime.now().toString());
-            record.put("reason", "conflict");
             record.put("slot_name", slotName);
             record.put("new_content", content);
             record.put("existing_content", existing == null ? null : existing.getContent());
             record.put("memory_type", memoryType);
+            record.put("source", Memory.SourceType.EXPLICIT.name());
+            record.put("status", Memory.MemoryStatus.CONFLICT.name());
+            record.put("detected_at", LocalDateTime.now().toString());
             record.put("raw_user_message", rawUserMessage);
             storage.appendPendingExplicitMemory(record);
             log.info("Explicit memory conflict; wrote to pending inbox: {}", slotName);
@@ -286,20 +353,84 @@ public class ConversationCli {
         return Memory.MemoryType.USER_INSIGHT;
     }
 
+    private boolean parseBoolean(Object value, boolean defaultValue) {
+        if (value == null) {
+            return defaultValue;
+        }
+        if (value instanceof Boolean bool) {
+            return bool;
+        }
+        String text = String.valueOf(value).trim();
+        if ("true".equalsIgnoreCase(text) || "on".equalsIgnoreCase(text) || "1".equals(text)) {
+            return true;
+        }
+        if ("false".equalsIgnoreCase(text) || "off".equalsIgnoreCase(text) || "0".equals(text)) {
+            return false;
+        }
+        return defaultValue;
+    }
+
+    private Boolean parseOptionalBoolean(Object value) {
+        if (value == null) {
+            return null;
+        }
+        if (value instanceof Boolean bool) {
+            return bool;
+        }
+        String text = String.valueOf(value).trim();
+        if (text.isBlank() || "null".equalsIgnoreCase(text)) {
+            return null;
+        }
+        if ("true".equalsIgnoreCase(text) || "on".equalsIgnoreCase(text) || "1".equals(text)) {
+            return true;
+        }
+        if ("false".equalsIgnoreCase(text) || "off".equalsIgnoreCase(text) || "0".equals(text)) {
+            return false;
+        }
+        return null;
+    }
+
+    private String consumeStartupMapOnce() {
+        if (!startupMapInjected.compareAndSet(false, true)) {
+            return "";
+        }
+        return agentGuideService.getCachedGuide();
+    }
+
+    private String startupMapForEval() {
+        return agentGuideService.getCachedGuide();
+    }
+
     private String generateResponse(String currentMessage,
                                     boolean useSavedMemories,
                                     boolean useChatHistory,
                                     List<ChatMessage> messages,
-                                    String startupMap) {
+                                    String startupMap,
+                                    List<Map<String, Object>> dueTaskNotifications,
+                                    String sourcePlatform,
+                                    String sourceConversationId,
+                                    ConversationProgressListener progressListener) {
+        long reflectionMs = 0L;
+        long evidenceMs = 0L;
+        long llmMs = 0L;
         // Memory Reflection：在加载记忆前先判断是否需要
         ReflectionResult reflection = ReflectionResult.fallback();
         if (useSavedMemories) {
+            emitProgress(progressListener, "reflection_started", "正在判断是否需要加载长期记忆。");
+            long reflectionStartNs = System.nanoTime();
             try {
-                String recentContext = buildRecentContextSummary(messages);
-                reflection = memoryReflectionService.reflect(currentMessage, recentContext);
+                if (memoryReflectionService != null) {
+                    String recentContext = buildRecentContextSummary(messages);
+                    reflection = memoryReflectionService.reflect(currentMessage, recentContext);
+                } else {
+                    log.warn("MemoryReflectionService unavailable, using fallback reflection result");
+                }
             } catch (Exception e) {
                 log.warn("Memory reflection invocation failed, using fallback", e);
             }
+            reflectionMs = elapsedMillis(reflectionStartNs);
+            emitProgress(progressListener, "reflection_done", "记忆需求判断完成。",
+                    Map.of("needs_memory", reflection.needs_memory()));
         }
         this.lastReflectionResult = reflection;
 
@@ -319,10 +450,15 @@ public class ConversationCli {
 
         // 构建系统提示词并记录证据使用情况
         EvidenceCollector evidence = new EvidenceCollector();
+        long evidenceStartNs = System.nanoTime();
         String systemPrompt = buildSystemPromptWithEvidence(
-                shouldLoadMemory,
+                useSavedMemories,
                 useChatHistory,
                 currentMessage,
+                reflection,
+                dueTaskNotifications,
+                sourcePlatform,
+                sourceConversationId,
                 startupMap,
                 availableSkillNames,
                 skillToolAvailable,
@@ -333,43 +469,292 @@ public class ConversationCli {
                 taskToolAvailable,
                 evidence
         );
+        evidenceMs = elapsedMillis(evidenceStartNs);
+        emitProgress(progressListener, "evidence_ready", "记忆证据准备完成。",
+                Map.of(
+                        "retrieved_insights", evidence.snapshotRetrievedInsights().size(),
+                        "retrieved_examples", evidence.snapshotRetrievedExamples().size(),
+                        "loaded_skills", evidence.snapshotLoadedSkills().size(),
+                        "retrieved_tasks", evidence.snapshotRetrievedTasks().size()
+                ));
 
-        // 记录 Memory Evidence Trace
+        List<LlmClient.ToolDefinition> tracedTools = attachToolUsageTracking(tools, evidence);
+        emitProgress(progressListener, "generating", "正在调用模型生成回复。");
+        long llmStartNs = System.nanoTime();
+        String response = llmClient.chatWithTools(systemPrompt, messages, tracedTools, 0.7);
+        llmMs = elapsedMillis(llmStartNs);
+        emitProgress(progressListener, "generated", "模型回复已生成。");
+        evidence.finalizeUsedEvidence(reflection, shouldLoadMemory);
+
         String truncatedMessage = currentMessage.length() > 200
                 ? currentMessage.substring(0, 200) + "..."
                 : currentMessage;
-        this.lastEvidenceTrace = new MemoryEvidenceTrace(
+        MemoryEvidenceTrace trace = new MemoryEvidenceTrace(
                 LocalDateTime.now(),
                 truncatedMessage,
                 reflection,
                 shouldLoadMemory,
-                evidence.topOfMindCount,
-                evidence.ragResultCount,
-                evidence.examplesUsed,
-                evidence.userInsightUsed,
-                availableSkillNames.size(),
-                shouldLoadMemory ? "记忆已加载" : "反思判断不需要记忆，已跳过"
+                evidence.snapshotRetrievedInsights(),
+                evidence.snapshotUsedInsights(),
+                evidence.snapshotRetrievedExamples(),
+                evidence.snapshotUsedExamples(),
+                evidence.snapshotLoadedSkills(),
+                evidence.snapshotUsedSkills(),
+                evidence.snapshotRetrievedTasks(),
+                evidence.snapshotUsedTasks(),
+                evidence.usedEvidenceSummary
         );
+        this.lastEvidenceTrace = trace;
 
-        log.info("Memory Evidence Trace: loaded={}, topOfMind={}, rag={}, insight={}, examples={}, skills={}",
-                shouldLoadMemory, evidence.topOfMindCount, evidence.ragResultCount,
-                evidence.userInsightUsed, evidence.examplesUsed, availableSkillNames.size());
+        log.info("Memory Evidence Trace: loaded={}, retrieved(insights/examples/skills/tasks)=({}/{}/{}/{}), used=({}/{}/{}/{})",
+                shouldLoadMemory,
+                trace.retrievedInsights().size(),
+                trace.retrievedExamples().size(),
+                trace.loadedSkills().size(),
+                trace.retrievedTasks().size(),
+                trace.usedInsights().size(),
+                trace.usedExamples().size(),
+                trace.usedSkills().size(),
+                trace.usedTasks().size());
+        log.info("Conversation stages(sync): reflection={}ms, evidence={}ms, llm={}ms",
+                reflectionMs, evidenceMs, llmMs);
 
-        return llmClient.chatWithTools(systemPrompt, messages, tools, 0.7);
+        return response;
+    }
+
+    private void emitProgress(ConversationProgressListener listener, String stage, String message) {
+        emitProgress(listener, stage, message, Map.of());
+    }
+
+    private void emitProgress(ConversationProgressListener listener,
+                              String stage,
+                              String message,
+                              Map<String, Object> details) {
+        if (listener == null) {
+            return;
+        }
+        try {
+            listener.onEvent(new ConversationProgressEvent(
+                    stage == null ? "" : stage,
+                    message == null ? "" : message,
+                    details == null ? Map.of() : Map.copyOf(details),
+                    System.currentTimeMillis()
+            ));
+        } catch (Exception e) {
+            log.debug("Progress listener failed: {}", e.getMessage());
+        }
+    }
+
+    /**
+     * 评测专用回答生成：保留记忆反思与记忆检索，但禁用工具调用，避免副作用。
+     */
+    private String generateResponseForEvalWithoutTools(String currentMessage,
+                                                       boolean useSavedMemories,
+                                                       boolean useChatHistory,
+                                                       List<ChatMessage> messages,
+                                                       String startupMap) {
+        ReflectionResult reflection = ReflectionResult.fallback();
+        if (useSavedMemories) {
+            try {
+                if (memoryReflectionService != null) {
+                    String recentContext = buildRecentContextSummary(messages);
+                    reflection = memoryReflectionService.reflect(currentMessage, recentContext);
+                } else {
+                    log.warn("MemoryReflectionService unavailable in eval mode, using fallback reflection result");
+                }
+            } catch (Exception e) {
+                log.warn("Memory reflection invocation failed in eval mode, using fallback", e);
+            }
+        }
+        this.lastReflectionResult = reflection;
+
+        boolean shouldLoadMemory = useSavedMemories && reflection.needs_memory();
+        List<String> availableSkillNames = shouldLoadMemory ? skillService.listSkillNames() : List.of();
+        EvidenceCollector evidence = new EvidenceCollector();
+
+        String systemPrompt = buildSystemPromptWithEvidence(
+                useSavedMemories,
+                useChatHistory,
+                currentMessage,
+                reflection,
+                List.of(),
+                "",
+                "",
+                startupMap,
+                availableSkillNames,
+                false,
+                false,
+                false,
+                false,
+                false,
+                false,
+                evidence
+        );
+        evidence.finalizeUsedEvidence(reflection, shouldLoadMemory);
+
+        String truncatedMessage = currentMessage.length() > 200
+                ? currentMessage.substring(0, 200) + "..."
+                : currentMessage;
+        MemoryEvidenceTrace trace = new MemoryEvidenceTrace(
+                LocalDateTime.now(),
+                truncatedMessage,
+                reflection,
+                shouldLoadMemory,
+                evidence.snapshotRetrievedInsights(),
+                evidence.snapshotUsedInsights(),
+                evidence.snapshotRetrievedExamples(),
+                evidence.snapshotUsedExamples(),
+                evidence.snapshotLoadedSkills(),
+                evidence.snapshotUsedSkills(),
+                evidence.snapshotRetrievedTasks(),
+                evidence.snapshotUsedTasks(),
+                evidence.usedEvidenceSummary
+        );
+        this.lastEvidenceTrace = trace;
+
+        return llmClient.chat(systemPrompt, messages, 0.7);
     }
 
     /** 内部辅助类，用于在构建 system prompt 时收集证据使用数据 */
     private static class EvidenceCollector {
-        int topOfMindCount = 0;
-        int ragResultCount = 0;
-        boolean examplesUsed = false;
-        boolean userInsightUsed = false;
+        private static final Set<String> INSIGHT_PURPOSES = Set.of("personalization", "continuity", "constraint");
+
+        private final LinkedHashSet<String> retrievedInsights = new LinkedHashSet<>();
+        private final LinkedHashSet<String> retrievedExamples = new LinkedHashSet<>();
+        private final LinkedHashSet<String> loadedSkills = new LinkedHashSet<>();
+        private final LinkedHashSet<String> retrievedTasks = new LinkedHashSet<>();
+        private final LinkedHashSet<String> usedInsights = new LinkedHashSet<>();
+        private final LinkedHashSet<String> usedExamples = new LinkedHashSet<>();
+        private final LinkedHashSet<String> usedSkills = new LinkedHashSet<>();
+        private final LinkedHashSet<String> usedTasks = new LinkedHashSet<>();
+        private String usedEvidenceSummary = "本轮未形成证据摘要。";
+
+        void addRetrievedInsights(Collection<String> items) {
+            if (items != null) {
+                retrievedInsights.addAll(items.stream().filter(Objects::nonNull).map(String::trim).filter(s -> !s.isBlank()).toList());
+            }
+        }
+
+        void addRetrievedExamples(Collection<String> items) {
+            if (items != null) {
+                retrievedExamples.addAll(items.stream().filter(Objects::nonNull).map(String::trim).filter(s -> !s.isBlank()).toList());
+            }
+        }
+
+        void addLoadedSkills(Collection<String> items) {
+            if (items != null) {
+                loadedSkills.addAll(items.stream().filter(Objects::nonNull).map(String::trim).filter(s -> !s.isBlank()).toList());
+            }
+        }
+
+        void addRetrievedTasks(Collection<String> items) {
+            if (items != null) {
+                retrievedTasks.addAll(items.stream().filter(Objects::nonNull).map(String::trim).filter(s -> !s.isBlank()).toList());
+            }
+        }
+
+        void recordToolUsage(String toolName, String argumentsJson) {
+            if ("load_skill".equals(toolName)) {
+                String skillName = extractJsonString(argumentsJson, "name");
+                if (skillName != null && !skillName.isBlank()) {
+                    usedSkills.add(skillName.trim());
+                } else {
+                    usedSkills.add("load_skill");
+                }
+                return;
+            }
+            if ("create_task".equals(toolName)) {
+                String title = extractJsonString(argumentsJson, "title");
+                if (title == null || title.isBlank()) {
+                    title = extractJsonString(argumentsJson, "task_title");
+                }
+                if (title == null || title.isBlank()) {
+                    title = "create_task";
+                }
+                usedTasks.add(title.trim());
+            }
+        }
+
+        void finalizeUsedEvidence(ReflectionResult reflection, boolean memoryLoaded) {
+            if (!memoryLoaded) {
+                usedEvidenceSummary = "反思判断不需要记忆，已跳过长期证据加载。";
+                return;
+            }
+            Set<String> purposes = reflection == null || reflection.evidence_purposes() == null
+                    ? Set.of()
+                    : reflection.evidence_purposes().stream()
+                    .filter(Objects::nonNull)
+                    .map(String::trim)
+                    .filter(s -> !s.isBlank())
+                    .map(s -> s.toLowerCase(Locale.ROOT))
+                    .collect(Collectors.toCollection(LinkedHashSet::new));
+
+            if (!Collections.disjoint(purposes, INSIGHT_PURPOSES)) {
+                usedInsights.addAll(limit(retrievedInsights, 5));
+            }
+            if (purposes.contains("experience")) {
+                usedExamples.addAll(limit(retrievedExamples, 3));
+            }
+            if (purposes.contains("followup")) {
+                usedTasks.addAll(limit(retrievedTasks, 3));
+            }
+
+            List<String> summaryParts = new ArrayList<>();
+            summaryParts.add("insights " + usedInsights.size() + "/" + retrievedInsights.size());
+            summaryParts.add("examples " + usedExamples.size() + "/" + retrievedExamples.size());
+            summaryParts.add("skills " + usedSkills.size() + "/" + loadedSkills.size());
+            summaryParts.add("tasks " + usedTasks.size() + "/" + retrievedTasks.size());
+            usedEvidenceSummary = String.join(", ", summaryParts);
+        }
+
+        private static List<String> limit(LinkedHashSet<String> source, int maxSize) {
+            if (source.isEmpty()) {
+                return List.of();
+            }
+            return source.stream().limit(Math.max(0, maxSize)).toList();
+        }
+
+        List<String> snapshotRetrievedInsights() {
+            return List.copyOf(retrievedInsights);
+        }
+
+        List<String> snapshotRetrievedExamples() {
+            return List.copyOf(retrievedExamples);
+        }
+
+        List<String> snapshotLoadedSkills() {
+            return List.copyOf(loadedSkills);
+        }
+
+        List<String> snapshotRetrievedTasks() {
+            return List.copyOf(retrievedTasks);
+        }
+
+        List<String> snapshotUsedInsights() {
+            return List.copyOf(usedInsights);
+        }
+
+        List<String> snapshotUsedExamples() {
+            return List.copyOf(usedExamples);
+        }
+
+        List<String> snapshotUsedSkills() {
+            return List.copyOf(usedSkills);
+        }
+
+        List<String> snapshotUsedTasks() {
+            return List.copyOf(usedTasks);
+        }
     }
 
     @SuppressWarnings("unchecked")
     private String buildSystemPromptWithEvidence(boolean useSavedMemories,
                                      boolean useChatHistory,
                                      String currentMessage,
+                                     ReflectionResult reflection,
+                                     List<Map<String, Object>> dueTaskNotifications,
+                                     String sourcePlatform,
+                                     String sourceConversationId,
                                      String startupMap,
                                      List<String> availableSkillNames,
                                      boolean skillToolAvailable,
@@ -387,57 +772,19 @@ public class ConversationCli {
         Map<String, Object> userMetadata = (Map<String, Object>) metadata.get("user_interaction_metadata");
         Map<String, Object> assistantPreferences = (Map<String, Object>) metadata.get("assistant_preferences");
 
-        List<Map.Entry<String, Memory>> topMemories = useSavedMemories ?
-            memoryManager.getTopOfMindMemories(topOfMindLimit) : new ArrayList<>();
+        boolean shouldLoadMemory = useSavedMemories && reflection != null && reflection.needs_memory();
+        Set<String> purposes = normalizePurposes(reflection);
+        boolean needsInsightEvidence = shouldLoadMemory && needsInsightEvidence(purposes);
+        boolean needsExperienceEvidence = shouldLoadMemory && purposes.contains("experience");
+        boolean needsFollowupEvidence = shouldLoadMemory && purposes.contains("followup");
 
-        List<Map<String, Object>> olderUserMessages = useChatHistory ?
-            storage.getOlderUserMessages(RECENT_TURNS_FOR_MESSAGES, recentMessagesLimit) : new ArrayList<>();
+        List<Map.Entry<String, Memory>> topMemories = needsInsightEvidence
+                ? memoryManager.getTopOfMindMemories(topOfMindLimit)
+                : new ArrayList<>();
 
-        String userInsightsNarrative = useSavedMemories ? storage.readUserInsightsNarrative() : null;
-
-        // RAG 语义检索
-        List<RagService.RelevantMemory> ragContext = null;
-        if (ragEnabled && useSavedMemories && currentMessage != null && !currentMessage.isEmpty()) {
-            try {
-                ragContext = ragService.buildSmartContext(currentMessage, ragMaxResults);
-                Set<String> topOfMindSlots = topMemories.stream()
-                    .map(Map.Entry::getKey)
-                    .collect(Collectors.toSet());
-                ragContext = ragContext.stream()
-                    .filter(mem -> !topOfMindSlots.contains(mem.getSlotName()))
-                    .toList();
-            } catch (Exception e) {
-                log.warn("RAG context retrieval failed, continuing without it", e);
-            }
-        }
-
-        // Examples
-        String examplesContent = null;
-        if (ragEnabled && useSavedMemories && currentMessage != null && !currentMessage.isEmpty()) {
-            try {
-                List<RagService.RelevantMemory> examples = ragService.searchExamples(currentMessage, 3, 0.3);
-                if (!examples.isEmpty()) {
-                    StringBuilder eb = new StringBuilder();
-                    for (RagService.RelevantMemory ex : examples) {
-                        String problem = (String) ex.getMetadata().getOrDefault("problem", "");
-                        String solution = (String) ex.getMetadata().getOrDefault("solution", "");
-                        eb.append("**Problem**: ").append(problem).append("\n");
-                        eb.append("**Solution**: ").append(solution).append("\n\n");
-                    }
-                    examplesContent = eb.toString();
-                }
-            } catch (Exception e) {
-                log.warn("Example search failed", e);
-            }
-        }
-
-        // 收集证据使用数据
-        if (evidence != null) {
-            evidence.topOfMindCount = topMemories.size();
-            evidence.ragResultCount = (ragContext != null) ? ragContext.size() : 0;
-            evidence.examplesUsed = (examplesContent != null && !examplesContent.isBlank());
-            evidence.userInsightUsed = (userInsightsNarrative != null && !userInsightsNarrative.isBlank());
-        }
+        String userInsightsNarrative = shouldLoadMemory
+                ? truncateForEvidence(storage.readUserInsightsNarrative(), BASE_PROFILE_MAX_CHARS)
+                : null;
 
         // Phase 8: 读取会话摘要，用于替代 olderUserMessages 压缩 prompt
         String sessionSummariesText = null;
@@ -470,15 +817,84 @@ public class ConversationCli {
             }
         }
 
-        // 当有摘要时，跳过 olderUserMessages（压缩效果）
-        List<Map<String, Object>> effectiveOlderMessages = (sessionSummariesText != null && !sessionSummariesText.isBlank())
-                ? List.of() : olderUserMessages;
+        // 仅在无摘要时读取 older messages，避免先读后丢。
+        List<Map<String, Object>> olderUserMessages = (useChatHistory && (sessionSummariesText == null || sessionSummariesText.isBlank()))
+                ? storage.getOlderUserMessages(RECENT_TURNS_FOR_MESSAGES, recentMessagesLimit)
+                : new ArrayList<>();
+
+        // RAG 语义检索
+        List<RagService.RelevantMemory> ragContext = null;
+        if (ragEnabled && needsInsightEvidence && currentMessage != null && !currentMessage.isEmpty()) {
+            try {
+                int ragLimit = Math.max(1, Math.min(ragMaxResults, FAST_RAG_MAX_RESULTS));
+                ragContext = ragService.buildSmartContext(currentMessage, ragLimit);
+                Set<String> topOfMindSlots = topMemories.stream()
+                    .map(Map.Entry::getKey)
+                    .collect(Collectors.toSet());
+                ragContext = ragContext.stream()
+                    .filter(mem -> !topOfMindSlots.contains(mem.getSlotName()))
+                    .toList();
+            } catch (Exception e) {
+                log.warn("RAG context retrieval failed, continuing without it", e);
+            }
+        }
+
+        // Examples
+        String examplesContent = null;
+        List<String> retrievedExamples = new ArrayList<>();
+        if (ragEnabled && needsExperienceEvidence && currentMessage != null && !currentMessage.isEmpty()) {
+            try {
+                List<RagService.RelevantMemory> examples = ragService.searchExamples(currentMessage, FAST_EXAMPLE_MAX_RESULTS, 0.3);
+                if (!examples.isEmpty()) {
+                    StringBuilder eb = new StringBuilder();
+                    for (RagService.RelevantMemory ex : examples) {
+                        String problem = (String) ex.getMetadata().getOrDefault("problem", "");
+                        String solution = (String) ex.getMetadata().getOrDefault("solution", "");
+                        if (!problem.isBlank()) {
+                            retrievedExamples.add(truncateForEvidence(problem, 80));
+                        }
+                        eb.append("**Problem**: ").append(problem).append("\n");
+                        eb.append("**Solution**: ").append(solution).append("\n\n");
+                    }
+                    examplesContent = eb.toString();
+                }
+            } catch (Exception e) {
+                log.warn("Example search failed", e);
+            }
+        }
+
+        boolean includeMatchedTasks = needsFollowupEvidence || (dueTaskNotifications != null && !dueTaskNotifications.isEmpty());
+        List<String> retrievedTasks = collectTaskContext(sourcePlatform, sourceConversationId, dueTaskNotifications, includeMatchedTasks);
+
+        // 收集证据使用数据
+        if (evidence != null) {
+            List<String> insightEvidence = new ArrayList<>();
+            for (Map.Entry<String, Memory> entry : topMemories) {
+                String slot = entry.getKey();
+                String content = entry.getValue() == null ? "" : String.valueOf(entry.getValue().getContent());
+                insightEvidence.add(slot + ": " + truncateForEvidence(content, 80));
+            }
+            if (ragContext != null) {
+                for (RagService.RelevantMemory memory : ragContext) {
+                    String score = String.format(Locale.ROOT, "%.0f%%", memory.getScore() * 100);
+                    insightEvidence.add(memory.getSlotName() + " (" + score + "): " + truncateForEvidence(memory.getContent(), 80));
+                }
+            }
+            if (userInsightsNarrative != null && !userInsightsNarrative.isBlank()) {
+                insightEvidence.add("user_insights.md: " + truncateForEvidence(userInsightsNarrative, 80));
+            }
+            evidence.addRetrievedInsights(insightEvidence);
+            evidence.addRetrievedExamples(retrievedExamples);
+            evidence.addLoadedSkills(availableSkillNames);
+            evidence.addRetrievedTasks(retrievedTasks);
+        }
 
         return promptBuilder.buildSystemPrompt(
             startupMap,
             userMetadata,
             assistantPreferences,
-            effectiveOlderMessages,
+            reflection,
+            olderUserMessages,
             userInsightsNarrative,
             availableSkillNames,
             skillToolAvailable,
@@ -487,10 +903,289 @@ public class ConversationCli {
             shellCommandToolAvailable,
             pythonToolAvailable,
             taskToolAvailable,
+            retrievedTasks,
             examplesContent,
             ragContext,
             sessionSummariesText
         );
+    }
+
+    private List<LlmClient.ToolDefinition> attachToolUsageTracking(List<LlmClient.ToolDefinition> tools,
+                                                                    EvidenceCollector evidence) {
+        if (tools == null || tools.isEmpty() || evidence == null) {
+            return tools == null ? List.of() : tools;
+        }
+        return tools.stream()
+                .map(tool -> new LlmClient.ToolDefinition(
+                        tool.specification(),
+                        request -> {
+                            evidence.recordToolUsage(request.name(), request.arguments());
+                            return tool.executor().apply(request);
+                        }))
+                .toList();
+    }
+
+    private Set<String> normalizePurposes(ReflectionResult reflection) {
+        if (reflection == null || reflection.evidence_purposes() == null) {
+            return Set.of();
+        }
+        return reflection.evidence_purposes().stream()
+                .filter(Objects::nonNull)
+                .map(String::trim)
+                .filter(s -> !s.isBlank())
+                .map(s -> s.toLowerCase(Locale.ROOT))
+                .collect(Collectors.toCollection(LinkedHashSet::new));
+    }
+
+    private boolean needsInsightEvidence(Set<String> purposes) {
+        if (purposes == null || purposes.isEmpty()) {
+            return false;
+        }
+        return purposes.contains("personalization")
+                || purposes.contains("continuity")
+                || purposes.contains("constraint");
+    }
+
+    private List<String> collectTaskContext(String sourcePlatform,
+                                            String sourceConversationId,
+                                            List<Map<String, Object>> dueTaskNotifications,
+                                            boolean includeMatchedTasks) {
+        LinkedHashSet<String> items = new LinkedHashSet<>();
+        if (dueTaskNotifications != null) {
+            for (Map<String, Object> notification : dueTaskNotifications) {
+                String title = String.valueOf(notification.getOrDefault("task_title", "未命名任务")).trim();
+                String dueRaw = String.valueOf(notification.getOrDefault("due_at", "")).trim();
+                String dueAt = dueRaw.isEmpty() ? "未知时间" : formatTaskTime(dueRaw);
+                items.add("[到期] " + title + " @ " + dueAt);
+            }
+        }
+        if (!includeMatchedTasks || scheduledTaskService == null) {
+            return items.stream().limit(5).toList();
+        }
+        try {
+            List<com.memsys.task.model.ScheduledTask> tasks = scheduledTaskService.listTasks(20);
+            String normalizedPlatform = safeLower(sourcePlatform);
+            String normalizedConversationId = safeTrim(sourceConversationId);
+            for (com.memsys.task.model.ScheduledTask task : tasks) {
+                if (task == null) {
+                    continue;
+                }
+                if (!matchesTaskConversation(task, normalizedPlatform, normalizedConversationId)) {
+                    continue;
+                }
+                String title = task.getTitle() == null || task.getTitle().isBlank() ? "(untitled)" : task.getTitle().trim();
+                String status = task.getStatus() == null || task.getStatus().isBlank() ? "unknown" : task.getStatus().trim();
+                String dueAt = task.getDueAt() == null ? "unknown" : task.getDueAt().format(TASK_TIME_FORMATTER);
+                items.add("[匹配] " + title + " (" + status + ", " + dueAt + ")");
+                if (items.size() >= 5) {
+                    break;
+                }
+            }
+        } catch (Exception e) {
+            log.debug("Task context collection skipped: {}", e.getMessage());
+        }
+        return items.stream().limit(5).toList();
+    }
+
+    private boolean matchesTaskConversation(com.memsys.task.model.ScheduledTask task,
+                                            String normalizedPlatform,
+                                            String normalizedConversationId) {
+        if (task == null) {
+            return false;
+        }
+        String taskConversationId = safeTrim(task.getSourceConversationId());
+        if (normalizedConversationId.isBlank() || taskConversationId.isBlank()) {
+            return false;
+        }
+        if (!normalizedConversationId.equals(taskConversationId)) {
+            return false;
+        }
+        String taskPlatform = safeLower(task.getSourcePlatform());
+        return normalizedPlatform.isBlank() || taskPlatform.isBlank() || normalizedPlatform.equals(taskPlatform);
+    }
+
+    private String safeTrim(String value) {
+        return value == null ? "" : value.trim();
+    }
+
+    private String safeLower(String value) {
+        return safeTrim(value).toLowerCase(Locale.ROOT);
+    }
+
+    private String truncateForEvidence(String text, int maxLen) {
+        if (text == null) {
+            return "";
+        }
+        String normalized = text.replace("\n", " ").trim();
+        if (normalized.length() <= Math.max(0, maxLen)) {
+            return normalized;
+        }
+        return normalized.substring(0, Math.max(0, maxLen)) + "...";
+    }
+
+    private static String extractJsonString(String json, String field) {
+        if (json == null || json.isBlank() || field == null || field.isBlank()) {
+            return null;
+        }
+        String pattern = "\"" + field + "\"";
+        int fieldIndex = json.indexOf(pattern);
+        if (fieldIndex < 0) {
+            return null;
+        }
+        int colon = json.indexOf(':', fieldIndex + pattern.length());
+        if (colon < 0) {
+            return null;
+        }
+        int start = json.indexOf('"', colon + 1);
+        if (start < 0) {
+            return null;
+        }
+        int end = start + 1;
+        while (end < json.length()) {
+            char c = json.charAt(end);
+            if (c == '"' && json.charAt(end - 1) != '\\') {
+                break;
+            }
+            end++;
+        }
+        if (end >= json.length()) {
+            return null;
+        }
+        return json.substring(start + 1, end);
+    }
+
+    private int submitPostProcessTasks(boolean useSavedMemories,
+                                       boolean useChatHistory,
+                                       boolean shouldGenerateTurnSummary,
+                                       String topicShiftContext,
+                                       String userMessage,
+                                       String response,
+                                       LocalDateTime timestamp,
+                                       String sourcePlatform,
+                                       String sourceConversationId,
+                                       String sourceSenderId) {
+        int submitted = 0;
+
+        if (useChatHistory) {
+            submitted += submitAsyncTask("persist_conversation_history", () -> {
+                storage.updateRecentMessages(userMessage, timestamp, recentMessagesLimit);
+                storage.appendToHistory("user", userMessage, timestamp);
+                storage.appendToHistory("assistant", response, LocalDateTime.now());
+            });
+        }
+
+        MemoryEvidenceTrace trace = this.lastEvidenceTrace;
+        if (trace != null) {
+            submitted += submitAsyncTask("append_memory_evidence_trace", () -> appendEvidenceTrace(trace));
+        }
+
+        if (useSavedMemories && memoryExtractor != null) {
+            submitted += submitAsyncTask("extract_explicit_memory", () -> {
+                try {
+                    Map<String, Object> explicitMemory = memoryExtractor.extractExplicitMemory(userMessage);
+                    if (parseBoolean(explicitMemory.get("has_memory"), false)) {
+                        handleExplicitMemory(explicitMemory, userMessage);
+                    }
+                } catch (Exception e) {
+                    log.debug("Explicit memory extraction skipped: {}", e.getMessage());
+                }
+            });
+            submitted += submitAsyncTask("update_memory_access", () -> updateMemoryAccess(userMessage));
+        }
+
+        if (useChatHistory && conversationSummaryService != null && shouldGenerateTurnSummary) {
+            submitted += submitAsyncTask("conversation_turn_summary", () -> {
+                try {
+                    String summary = conversationSummaryService.generateAndPersistSummary();
+                    if (summary != null) {
+                        log.info("Session summary generated ({} turns)", conversationSummaryService.getCurrentTurnCount());
+                    }
+                } catch (Exception e) {
+                    log.debug("Session summary generation skipped: {}", e.getMessage());
+                }
+            });
+        }
+
+        if (useChatHistory && conversationSummaryService != null) {
+            submitted += submitAsyncTask("topic_shift_summary", () -> {
+                try {
+                    String summary = conversationSummaryService.checkTopicShiftAndSummarize(
+                            topicShiftContext, userMessage);
+                    if (summary != null) {
+                        log.info("Topic-shift summary generated at turn {}",
+                                conversationSummaryService.getCurrentTurnCount());
+                    }
+                } catch (Exception e) {
+                    log.debug("Topic-shift summary skipped: {}", e.getMessage());
+                }
+            });
+        }
+
+        if (scheduledTaskService != null) {
+            submitted += submitAsyncTask("extract_scheduled_task", () -> {
+                try {
+                    var taskOpt = scheduledTaskService.tryCreateTaskFromMessage(
+                            userMessage, sourcePlatform, sourceConversationId, sourceSenderId);
+                    taskOpt.ifPresent(task ->
+                            log.info("Auto-created scheduled task from conversation: '{}' due at {}",
+                                    task.getTitle(), task.getDueAt()));
+                } catch (Exception e) {
+                    log.debug("Scheduled task extraction skipped: {}", e.getMessage());
+                }
+            });
+        }
+
+        return submitted;
+    }
+
+    private int submitAsyncTask(String taskName, Runnable task) {
+        if (task == null) {
+            return 0;
+        }
+        if (memoryAsync == null) {
+            try {
+                task.run();
+            } catch (Exception e) {
+                log.debug("Inline postprocess task failed: {}", taskName, e);
+            }
+            return 1;
+        }
+        boolean accepted = memoryAsync.submit(taskName, task);
+        return accepted ? 1 : 0;
+    }
+
+    private long elapsedMillis(long startNs) {
+        return Math.max(0L, (System.nanoTime() - startNs) / 1_000_000L);
+    }
+
+    private void appendEvidenceTrace(MemoryEvidenceTrace trace) {
+        try {
+            Map<String, Object> record = new LinkedHashMap<>();
+            record.put("timestamp", trace.timestamp() == null ? null : trace.timestamp().toString());
+            record.put("user_message", trace.userMessage());
+            record.put("memory_loaded", trace.memoryLoaded());
+
+            ReflectionResult reflection = trace.reflection();
+            Map<String, Object> reflectionMap = new LinkedHashMap<>();
+            if (reflection != null) {
+                reflectionMap.put("needs_memory", reflection.needs_memory());
+                reflectionMap.put("reason", reflection.reason());
+                reflectionMap.put("evidence_purposes", reflection.evidence_purposes());
+            }
+            record.put("reflection", reflectionMap);
+            record.put("retrieved_insights", trace.retrievedInsights());
+            record.put("used_insights", trace.usedInsights());
+            record.put("retrieved_examples", trace.retrievedExamples());
+            record.put("used_examples", trace.usedExamples());
+            record.put("loaded_skills", trace.loadedSkills());
+            record.put("used_skills", trace.usedSkills());
+            record.put("retrieved_tasks", trace.retrievedTasks());
+            record.put("used_tasks", trace.usedTasks());
+            record.put("used_evidence_summary", trace.usedEvidenceSummary());
+            storage.appendMemoryEvidenceTrace(record);
+        } catch (Exception e) {
+            log.warn("Failed to append memory evidence trace", e);
+        }
     }
 
     private boolean hasTool(List<LlmClient.ToolDefinition> tools, String name) {
@@ -531,6 +1226,9 @@ public class ConversationCli {
     }
 
     private boolean isRelevant(String userMessage, Memory memory) {
+        if (memory == null || memory.getContent() == null || memory.getContent().isBlank()) {
+            return false;
+        }
         String content = memory.getContent().toLowerCase();
         String[] contentWords = content.split("[\\s,，。.!！?？;；:：]+");
         for (String word : contentWords) {
@@ -552,7 +1250,91 @@ public class ConversationCli {
      * 获取最近一轮的 Memory Evidence Trace，供 /memory-debug 命令展示完整证据审计。
      */
     public MemoryEvidenceTrace getLastEvidenceTrace() {
-        return lastEvidenceTrace;
+        if (lastEvidenceTrace != null) {
+            return lastEvidenceTrace;
+        }
+        try {
+            List<Map<String, Object>> traces = storage.readMemoryEvidenceTraces(1);
+            if (traces.isEmpty()) {
+                return null;
+            }
+            return parseEvidenceTrace(traces.get(0));
+        } catch (Exception e) {
+            log.debug("Failed to load last evidence trace from storage: {}", e.getMessage());
+            return null;
+        }
+    }
+
+    @SuppressWarnings("unchecked")
+    private MemoryEvidenceTrace parseEvidenceTrace(Map<String, Object> record) {
+        if (record == null || record.isEmpty()) {
+            return null;
+        }
+        LocalDateTime timestamp = null;
+        Object ts = record.get("timestamp");
+        if (ts != null) {
+            try {
+                timestamp = LocalDateTime.parse(String.valueOf(ts));
+            } catch (Exception ignored) {
+                // ignore malformed timestamp and keep null for resilient CLI display
+            }
+        }
+
+        ReflectionResult reflection = null;
+        Object reflectionObj = record.get("reflection");
+        if (reflectionObj instanceof Map<?, ?> rawMap) {
+            Map<String, Object> reflectionMap = (Map<String, Object>) rawMap;
+            Boolean needsMemory = parseOptionalBoolean(reflectionMap.get("needs_memory"));
+            if (needsMemory != null) {
+                String reason = normalizeText(reflectionMap.get("reason"));
+                List<String> purposes = normalizeStringList(reflectionMap.get("evidence_purposes"));
+                reflection = new ReflectionResult(needsMemory, reason, purposes);
+            }
+        }
+
+        return new MemoryEvidenceTrace(
+                timestamp,
+                normalizeText(record.get("user_message")),
+                reflection,
+                parseBoolean(record.get("memory_loaded"), false),
+                normalizeStringList(record.get("retrieved_insights")),
+                normalizeStringList(record.get("used_insights")),
+                normalizeStringList(record.get("retrieved_examples")),
+                normalizeStringList(record.get("used_examples")),
+                normalizeStringList(record.get("loaded_skills")),
+                normalizeStringList(record.get("used_skills")),
+                normalizeStringList(record.get("retrieved_tasks")),
+                normalizeStringList(record.get("used_tasks")),
+                normalizeText(record.get("used_evidence_summary"))
+        );
+    }
+
+    private List<String> normalizeStringList(Object value) {
+        if (value == null) {
+            return List.of();
+        }
+        if (value instanceof Collection<?> collection) {
+            return collection.stream()
+                    .map(this::normalizeText)
+                    .filter(s -> !s.isBlank())
+                    .toList();
+        }
+        String text = normalizeText(value);
+        if (text.isBlank()) {
+            return List.of();
+        }
+        return List.of(text);
+    }
+
+    private String normalizeText(Object value) {
+        if (value == null) {
+            return "";
+        }
+        String text = String.valueOf(value).trim();
+        if ("null".equalsIgnoreCase(text)) {
+            return "";
+        }
+        return text;
     }
 
     /**
@@ -606,4 +1388,5 @@ public class ConversationCli {
             return dueRaw;
         }
     }
+
 }

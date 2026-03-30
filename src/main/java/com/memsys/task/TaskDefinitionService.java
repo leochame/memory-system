@@ -2,13 +2,13 @@ package com.memsys.task;
 
 import com.memsys.task.model.TaskDefinition;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.yaml.snakeyaml.DumperOptions;
 import org.yaml.snakeyaml.LoaderOptions;
 import org.yaml.snakeyaml.Yaml;
-import org.yaml.snakeyaml.constructor.Constructor;
-import org.yaml.snakeyaml.representer.Representer;
+import org.yaml.snakeyaml.constructor.SafeConstructor;
 
 import java.io.IOException;
 import java.nio.file.*;
@@ -28,6 +28,7 @@ public class TaskDefinitionService {
 
     private final Path tasksDir;
 
+    @Autowired
     public TaskDefinitionService(@Value("${memory.base-path:.memory}") String basePath) {
         this.tasksDir = Paths.get(basePath).resolve("tasks");
         try {
@@ -100,7 +101,7 @@ public class TaskDefinitionService {
         try {
             TaskDefinition def = readYaml(path);
             if (def != null) {
-                def.setName(name);
+                def.setName(stripExtension(path.getFileName().toString()));
             }
             return Optional.ofNullable(def);
         } catch (Exception e) {
@@ -118,15 +119,27 @@ public class TaskDefinitionService {
             return;
         }
         String name = sanitizeName(definition.getName());
-        Path path = tasksDir.resolve(name + ".yaml");
+        if (name.isBlank()) {
+            log.warn("Cannot save task definition: sanitized name is empty. original={}", definition.getName());
+            return;
+        }
+        Path resolved = resolveTaskFile(name);
+        Path path = (resolved != null && Files.exists(resolved))
+                ? resolved
+                : tasksDir.resolve(name + ".yaml");
         try {
             if (definition.getCreatedAt() == null) {
                 definition.setCreatedAt(LocalDateTime.now());
             }
+            definition.setName(name);
             String yamlContent = toYaml(definition);
-            Path temp = tasksDir.resolve(name + ".yaml.tmp");
+            Path temp = newTempFile(name + ".yaml");
             Files.writeString(temp, yamlContent);
-            Files.move(temp, path, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE);
+            try {
+                Files.move(temp, path, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE);
+            } catch (AtomicMoveNotSupportedException ignored) {
+                Files.move(temp, path, StandardCopyOption.REPLACE_EXISTING);
+            }
             log.info("Saved task definition: {}", name);
         } catch (IOException e) {
             log.error("Failed to save task definition: {}", name, e);
@@ -176,6 +189,9 @@ public class TaskDefinitionService {
             return null;
         }
         String sanitized = sanitizeName(name);
+        if (sanitized.isBlank()) {
+            return null;
+        }
         Path yamlPath = tasksDir.resolve(sanitized + ".yaml");
         if (Files.exists(yamlPath)) {
             return yamlPath;
@@ -192,8 +208,35 @@ public class TaskDefinitionService {
         if (content == null || content.isBlank()) {
             return null;
         }
-        Yaml yaml = createYaml();
-        return yaml.loadAs(content, TaskDefinition.class);
+        LoaderOptions loaderOptions = new LoaderOptions();
+        loaderOptions.setAllowDuplicateKeys(false);
+        Yaml yaml = new Yaml(new SafeConstructor(loaderOptions));
+        Object loaded = yaml.load(content);
+        if (!(loaded instanceof Map<?, ?> map)) {
+            return null;
+        }
+
+        TaskDefinition definition = new TaskDefinition();
+        String type = asString(map.get("type"));
+        if (type != null) {
+            definition.setType(type);
+        }
+        definition.setTitle(asString(map.get("title")));
+        definition.setDetail(asString(map.get("detail")));
+        definition.setCron(asString(map.get("cron")));
+        definition.setOnce(asString(map.get("once")));
+        definition.setExecuteCommand(asString(map.get("executeCommand")));
+        definition.setExecuteTimeoutSeconds(asInteger(map.get("executeTimeoutSeconds")));
+        Boolean enabled = asBoolean(map.get("enabled"));
+        if (enabled != null) {
+            definition.setEnabled(enabled);
+        }
+        definition.setNotifyPlatform(asString(map.get("notifyPlatform")));
+        definition.setNotifyConversationId(asString(map.get("notifyConversationId")));
+        definition.setNotifySenderId(asString(map.get("notifySenderId")));
+        definition.setCreatedAt(asLocalDateTime(map.get("createdAt")));
+        definition.setLastTriggeredAt(asLocalDateTime(map.get("lastTriggeredAt")));
+        return definition;
     }
 
     private String toYaml(TaskDefinition definition) {
@@ -230,14 +273,6 @@ public class TaskDefinitionService {
         }
     }
 
-    private Yaml createYaml() {
-        LoaderOptions loaderOptions = new LoaderOptions();
-        loaderOptions.setAllowDuplicateKeys(false);
-        Representer representer = new Representer(new DumperOptions());
-        representer.getPropertyUtils().setSkipMissingProperties(true);
-        return new Yaml(new Constructor(TaskDefinition.class, loaderOptions), representer);
-    }
-
     private String stripExtension(String filename) {
         int dot = filename.lastIndexOf('.');
         return dot > 0 ? filename.substring(0, dot) : filename;
@@ -246,5 +281,60 @@ public class TaskDefinitionService {
     private String sanitizeName(String name) {
         // 只保留字母、数字、中文、连字符、下划线
         return name.replaceAll("[^a-zA-Z0-9\\u4e00-\\u9fff\\-_]", "_").trim();
+    }
+
+    private Path newTempFile(String prefix) {
+        return tasksDir.resolve(prefix + "." + UUID.randomUUID() + ".tmp");
+    }
+
+    private String asString(Object value) {
+        if (value == null) {
+            return null;
+        }
+        String text = String.valueOf(value).trim();
+        return text.isEmpty() ? null : text;
+    }
+
+    private Integer asInteger(Object value) {
+        if (value == null) {
+            return null;
+        }
+        if (value instanceof Number number) {
+            return number.intValue();
+        }
+        try {
+            return Integer.parseInt(String.valueOf(value).trim());
+        } catch (Exception ignored) {
+            return null;
+        }
+    }
+
+    private Boolean asBoolean(Object value) {
+        if (value == null) {
+            return null;
+        }
+        if (value instanceof Boolean bool) {
+            return bool;
+        }
+        String text = String.valueOf(value).trim();
+        if ("true".equalsIgnoreCase(text)) {
+            return true;
+        }
+        if ("false".equalsIgnoreCase(text)) {
+            return false;
+        }
+        return null;
+    }
+
+    private LocalDateTime asLocalDateTime(Object value) {
+        String text = asString(value);
+        if (text == null) {
+            return null;
+        }
+        try {
+            return LocalDateTime.parse(text);
+        } catch (Exception ignored) {
+            return null;
+        }
     }
 }

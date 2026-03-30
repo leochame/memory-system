@@ -117,6 +117,13 @@ public final class Schemas {
         props.put("due_at_iso", JsonStringSchema.builder()
                 .description("Absolute due datetime in local timezone, ISO-8601 format, e.g. 2026-03-21T09:00:00")
                 .build());
+        props.put("recurrence_type", JsonEnumSchema.builder()
+                .description("Task recurrence type")
+                .enumValues(List.of("none", "daily", "weekly"))
+                .build());
+        props.put("recurrence_interval", JsonIntegerSchema.builder()
+                .description("Recurrence interval. Use 0 when recurrence_type is none; otherwise >=1")
+                .build());
 
         return JsonSchema.builder()
                 .name("ScheduledTaskResult")
@@ -205,6 +212,30 @@ public final class Schemas {
 
         return JsonSchema.builder()
                 .name("ProactiveReminderResult")
+                .rootElement(strictObject(props))
+                .build();
+    }
+
+    public static JsonSchema evalScoreResult() {
+        Map<String, JsonSchemaElement> props = new LinkedHashMap<>();
+        props.put("relevance", JsonIntegerSchema.builder()
+                .description("Relevance score from 1 to 10")
+                .build());
+        props.put("personalization", JsonIntegerSchema.builder()
+                .description("Personalization score from 1 to 10")
+                .build());
+        props.put("accuracy", JsonIntegerSchema.builder()
+                .description("Accuracy score from 1 to 10")
+                .build());
+        props.put("helpfulness", JsonIntegerSchema.builder()
+                .description("Helpfulness score from 1 to 10")
+                .build());
+        props.put("justification", JsonStringSchema.builder()
+                .description("Short reason explaining the score")
+                .build());
+
+        return JsonSchema.builder()
+                .name("EvalScoreResult")
                 .rootElement(strictObject(props))
                 .build();
     }

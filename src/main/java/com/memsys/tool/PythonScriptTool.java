@@ -109,20 +109,28 @@ public class PythonScriptTool extends BaseTool {
                     .directory(scriptsRoot.toFile())
                     .redirectErrorStream(true)
                     .start();
+            ByteArrayOutputStream output = new ByteArrayOutputStream();
+            Thread outputReader = startOutputReader(process.getInputStream(), output, "python-script-output-reader");
             boolean finished = process.waitFor(timeoutSeconds, TimeUnit.SECONDS);
             if (!finished) {
                 process.destroyForcibly();
+                process.waitFor(2, TimeUnit.SECONDS);
+                outputReader.join(2000);
                 return "run_python_script 执行超时（" + timeoutSeconds + "s）。";
             }
+            outputReader.join(2000);
 
-            String output = readProcessOutput(process.getInputStream());
+            String outputText = output.toString(StandardCharsets.UTF_8);
             int exitCode = process.exitValue();
             log.info("Executed tool run_python_script(exit={}, script='{}', args={})",
                     exitCode, scriptPath, args);
 
             return "exit_code=" + exitCode
                     + "\nscript=" + scriptsRoot.relativize(scriptPath)
-                    + "\noutput:\n" + truncate(output, maxOutputChars);
+                    + "\noutput:\n" + truncate(outputText, maxOutputChars);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            return "run_python_script 执行失败：执行被中断。";
         } catch (Exception e) {
             log.warn("run_python_script execution failed: script={}, args={}", scriptPath, args, e);
             return "run_python_script 执行失败：" + e.getMessage();
@@ -168,11 +176,16 @@ public class PythonScriptTool extends BaseTool {
         return true;
     }
 
-    private String readProcessOutput(InputStream inputStream) throws Exception {
-        try (inputStream; ByteArrayOutputStream output = new ByteArrayOutputStream()) {
-            inputStream.transferTo(output);
-            return output.toString(StandardCharsets.UTF_8);
-        }
+    private Thread startOutputReader(InputStream inputStream, ByteArrayOutputStream output, String threadName) {
+        Thread reader = new Thread(() -> {
+            try (inputStream; output) {
+                inputStream.transferTo(output);
+            } catch (Exception ignored) {
+                // Ignore reader exceptions; process exit status is the source of truth.
+            }
+        }, threadName);
+        reader.setDaemon(true);
+        reader.start();
+        return reader;
     }
 }
-

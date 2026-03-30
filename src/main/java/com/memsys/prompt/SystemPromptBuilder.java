@@ -1,5 +1,6 @@
 package com.memsys.prompt;
 
+import com.memsys.memory.model.ReflectionResult;
 import com.memsys.rag.RagService;
 import org.springframework.stereotype.Component;
 
@@ -13,6 +14,7 @@ public class SystemPromptBuilder {
             String agentGuide,
             Map<String, Object> userMetadata,
             Map<String, Object> assistantPreferences,
+            ReflectionResult reflectionResult,
             List<Map<String, Object>> recentMessages,
             String userInsightsNarrative,
             List<String> availableSkillNames,
@@ -22,6 +24,7 @@ public class SystemPromptBuilder {
             boolean shellCommandToolAvailable,
             boolean pythonToolAvailable,
             boolean taskToolAvailable,
+            List<String> retrievedTasks,
             String examplesContent,
             List<RagService.RelevantMemory> ragContext,
             String sessionSummariesText
@@ -51,6 +54,21 @@ public class SystemPromptBuilder {
             assistantPreferences.forEach((key, value) ->
                 prompt.append(String.format("- %s: %s\n", key, value))
             );
+            prompt.append("\n");
+        }
+
+        // 3.5 Memory Reflection Decision
+        if (reflectionResult != null) {
+            prompt.append("## 3.5 记忆反思决策\n");
+            prompt.append("- needs_memory: ").append(reflectionResult.needs_memory()).append("\n");
+            if (reflectionResult.reason() != null && !reflectionResult.reason().isBlank()) {
+                prompt.append("- reason: ").append(reflectionResult.reason().trim()).append("\n");
+            }
+            if (reflectionResult.evidence_purposes() != null && !reflectionResult.evidence_purposes().isEmpty()) {
+                prompt.append("- evidence_purposes: ")
+                        .append(String.join(", ", reflectionResult.evidence_purposes()))
+                        .append("\n");
+            }
             prompt.append("\n");
         }
 
@@ -112,6 +130,15 @@ public class SystemPromptBuilder {
             prompt.append("\n");
         }
 
+        // 9. Task Context
+        if (retrievedTasks != null && !retrievedTasks.isEmpty()) {
+            prompt.append("## 9. 相关任务上下文（Retrieved Tasks）\n");
+            for (String task : retrievedTasks) {
+                prompt.append("- ").append(task).append("\n");
+            }
+            prompt.append("\n");
+        }
+
         prompt.append("---\n\n");
         prompt.append("重要说明：\n");
         prompt.append("- 以上信息是你的背景知识和记忆，用于理解用户和提供个性化回复\n");
@@ -136,6 +163,7 @@ public class SystemPromptBuilder {
             prompt.append("- 当用户明确提出提醒/日程需求时，可调用 `create_task(...)` 创建定时任务\n");
             prompt.append("- 若前端已提供明确标题/时间/命令，优先传 `title/due_at_iso/execute_command` 直接建任务\n");
         }
+        prompt.append("- 当前系统支持定时任务与 IM 主动提醒；当用户提出提醒需求时，不要声称“无法主动提醒”\n");
         prompt.append("- 请根据 messages 列表中的实际对话内容进行回复，同时参考背景信息提供个性化回复\n");
         prompt.append("\n请基于以上背景信息和 messages 列表中的实际对话内容，与用户进行对话。\n");
 

@@ -1,6 +1,8 @@
 package com.memsys.task;
 
 import com.memsys.im.ImRuntimeService;
+import com.memsys.memory.MemoryScopeContext;
+import com.memsys.memory.storage.MemoryStorage;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
@@ -22,58 +24,72 @@ public class ScheduledTaskReminderJob {
 
     private final ScheduledTaskService scheduledTaskService;
     private final ImRuntimeService imRuntimeService;
+    private final MemoryStorage memoryStorage;
     private final boolean imReminderEnabled;
 
     public ScheduledTaskReminderJob(
             ScheduledTaskService scheduledTaskService,
             ImRuntimeService imRuntimeService,
+            MemoryStorage memoryStorage,
             @Value("${scheduling.im-reminder-enabled:true}") boolean imReminderEnabled
     ) {
         this.scheduledTaskService = scheduledTaskService;
         this.imRuntimeService = imRuntimeService;
+        this.memoryStorage = memoryStorage;
         this.imReminderEnabled = imReminderEnabled;
     }
 
     @Scheduled(fixedDelayString = "${scheduling.task-reminder-check-ms:30000}")
     public void triggerDueTasks() {
-        int triggeredCount = scheduledTaskService.triggerDueTasks();
-        List<Map<String, Object>> notifications = scheduledTaskService.drainPendingNotifications();
-        if (notifications.isEmpty()) {
-            if (triggeredCount > 0) {
-                log.info("Triggered {} scheduled tasks", triggeredCount);
+        int totalTriggered = 0;
+        int totalPushed = 0;
+        int totalRequeued = 0;
+        for (String scope : memoryStorage.listKnownScopes()) {
+            int triggeredCount;
+            List<Map<String, Object>> notifications;
+            try (MemoryScopeContext.Scope ignored = MemoryScopeContext.useScope(scope)) {
+                triggeredCount = scheduledTaskService.triggerDueTasks();
+                notifications = scheduledTaskService.drainPendingNotifications();
             }
-            return;
-        }
 
-        int pushedCount = 0;
-        List<Map<String, Object>> remaining = new ArrayList<>();
-        for (Map<String, Object> notification : notifications) {
-            String platform = trim(notification.get("source_platform")).toLowerCase();
-            String conversationId = trim(notification.get("source_conversation_id"));
-            if (platform.isBlank() || conversationId.isBlank()) {
-                remaining.add(notification);
+            totalTriggered += triggeredCount;
+            if (notifications.isEmpty()) {
                 continue;
             }
-            if (!imReminderEnabled) {
-                remaining.add(notification);
-                continue;
-            }
-            String text = buildReminderText(notification);
-            try {
-                imRuntimeService.sendText(platform, conversationId, text);
-                pushedCount++;
-            } catch (Exception e) {
-                log.warn("Failed to push IM reminder. platform={}, conversationId={}", platform, conversationId, e);
-                remaining.add(notification);
-            }
-        }
 
-        if (!remaining.isEmpty()) {
-            scheduledTaskService.requeueNotifications(remaining);
+            int pushedCount = 0;
+            List<Map<String, Object>> remaining = new ArrayList<>();
+            for (Map<String, Object> notification : notifications) {
+                String platform = trim(notification.get("source_platform")).toLowerCase();
+                String conversationId = trim(notification.get("source_conversation_id"));
+                if (platform.isBlank() || conversationId.isBlank()) {
+                    remaining.add(notification);
+                    continue;
+                }
+                if (!imReminderEnabled) {
+                    remaining.add(notification);
+                    continue;
+                }
+                String text = buildReminderText(notification);
+                try {
+                    imRuntimeService.sendText(platform, conversationId, text);
+                    pushedCount++;
+                } catch (Exception e) {
+                    log.warn("Failed to push IM reminder. platform={}, conversationId={}", platform, conversationId, e);
+                    remaining.add(notification);
+                }
+            }
+            totalPushed += pushedCount;
+            totalRequeued += remaining.size();
+            if (!remaining.isEmpty()) {
+                try (MemoryScopeContext.Scope ignored = MemoryScopeContext.useScope(scope)) {
+                    scheduledTaskService.requeueNotifications(remaining);
+                }
+            }
         }
-        if (triggeredCount > 0 || pushedCount > 0) {
+        if (totalTriggered > 0 || totalPushed > 0 || totalRequeued > 0) {
             log.info("Scheduled task reminders processed. triggered={}, pushed={}, requeued={}",
-                    triggeredCount, pushedCount, remaining.size());
+                    totalTriggered, totalPushed, totalRequeued);
         }
     }
 

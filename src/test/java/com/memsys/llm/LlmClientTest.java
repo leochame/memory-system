@@ -90,6 +90,42 @@ class LlmClientTest {
     }
 
     @Test
+    void chatWithToolsShouldStopWhenMaxToolRoundsReached() {
+        ToolExecutionRequest first = ToolExecutionRequest.builder()
+                .id("tool-1")
+                .name("load_skill")
+                .arguments("{\"name\":\"debug\"}")
+                .build();
+        ToolExecutionRequest second = ToolExecutionRequest.builder()
+                .id("tool-2")
+                .name("load_skill")
+                .arguments("{\"name\":\"debug\"}")
+                .build();
+        FakeChatModelGateway gateway = new FakeChatModelGateway(
+                List.of(
+                        AiMessage.from(List.of(first)),
+                        AiMessage.from("round-limit reached", List.of(second))
+                )
+        );
+        AtomicInteger executions = new AtomicInteger();
+
+        LlmClient client = new LlmClient(gateway, 1);
+        String result = client.chatWithTools(
+                "system",
+                List.of(new UserMessage("hello")),
+                List.of(new LlmClient.ToolDefinition(skillTool("load_skill"), req -> {
+                    executions.incrementAndGet();
+                    return "ok";
+                })),
+                0.7
+        );
+
+        assertThat(result).isEqualTo("round-limit reached");
+        assertThat(executions.get()).isEqualTo(1);
+        assertThat(gateway.toolCalls).hasSize(2);
+    }
+
+    @Test
     void chatRetriesTransientErrorAndEventuallySucceeds() {
         AtomicInteger calls = new AtomicInteger();
         LlmClient.ChatModelGateway gateway = new LlmClient.ChatModelGateway() {

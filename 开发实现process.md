@@ -345,6 +345,337 @@
   - 末尾统计展示轮次阈值触发 vs 主题切换触发的数量对比
   - 可直接用于答辩场景 #5 演示
 
+#### 迭代记录 - 2026-03-29 00:50
+
+- 增强目标：补齐 `/memory-review` 场景化展示命令，满足开发文档 6.3 清单缺口并提升答辩可演示性
+- 涉及文件：修改 `src/main/java/com/memsys/cli/CliRunner.java`、更新 `README.md` 命令清单与说明、更新 `开发实现process.md` 状态快照
+- 实现方案：在 CliRunner 增加 `/memory-review` 命令，按“最近反思 + 最近摘要 + 治理状态 + 近期任务”输出一页记忆复盘视图；同步命令注册与帮助文案；文档补充新命令用途与示例
+- 状态：已完成
+- 实际修改文件：
+  - 修改 `src/main/java/com/memsys/cli/CliRunner.java` — 新增 `/memory-review` 命令路由与 `showMemoryReview()` 展示方法；展示最近反思证据、会话摘要、治理概览、近期任务；同步帮助描述与底部快捷命令提示
+  - 修改 `README.md` — 在 CLI 命令表补充 `/memory-review` 及相关记忆展示命令条目
+  - 修改 `开发实现process.md` — 记录本次迭代并更新当前状态快照
+- 实际结果：
+  - `/memory-review` 可一页式复盘记忆系统关键状态：反思决策、摘要压缩、治理健康度、任务执行态
+  - 开发文档 6.3 场景化命令清单中的 `/memory-review` 缺口已补齐
+  - 本地编译通过：`export JAVA_HOME=$(/usr/libexec/java_home) && mvn compile -q`
+
+#### 迭代记录 - 2026-03-29 10:40
+
+- 增强目标：按开发文档 6.1（Step 1/6）补齐“将反思结果传入 `SystemPromptBuilder`”缺口，确保 Memory Reflection 决策可被主提示词显式消费
+- 涉及文件：修改 `src/main/java/com/memsys/cli/ConversationCli.java`、修改 `src/main/java/com/memsys/prompt/SystemPromptBuilder.java`、修改 `src/test/java/com/memsys/prompt/SystemPromptBuilderTest.java`
+- 实现方案：
+  1. `ConversationCli.buildSystemPromptWithEvidence(...)` 新增 `ReflectionResult` 参数
+  2. 主链路与评测链路调用 `buildSystemPromptWithEvidence(...)` 时统一传入当前轮 `reflection`
+  3. `SystemPromptBuilder.buildSystemPrompt(...)` 新增 `reflectionResult` 入参，并在提示词中输出 `needs_memory/reason/evidence_purposes`
+  4. 更新 `SystemPromptBuilderTest` 断言，验证反思决策字段已进入系统提示词
+- 状态：已完成
+- 实际结果：
+  - 开发文档 6.1 的 5 条要求已全部在主链路闭环：结构化对象、反思阶段插入、按反思结果决定记忆加载、反思结果进入 SystemPrompt、失败回退不阻断
+  - 本地测试通过：`export JAVA_HOME=$(/usr/libexec/java_home) && mvn -q -Dtest=SystemPromptBuilderTest,ConversationCliTest test`
+
+#### 迭代记录 - 2026-03-29 10:55
+
+- 增强目标：按开发文档 6.2（Step 2/6）补齐“记忆证据追踪”缺口，覆盖记忆/案例/任务/skill 的 retrieved vs used 双视图，并支持 trace 历史落盘
+- 涉及文件：修改 `src/main/java/com/memsys/memory/model/MemoryEvidenceTrace.java`、`src/main/java/com/memsys/cli/ConversationCli.java`、`src/main/java/com/memsys/prompt/SystemPromptBuilder.java`、`src/main/java/com/memsys/memory/storage/MemoryStorage.java`、`src/main/java/com/memsys/cli/CliRunner.java`、`src/test/java/com/memsys/cli/ConversationCliTest.java`、`src/test/java/com/memsys/prompt/SystemPromptBuilderTest.java`、`src/test/java/com/memsys/memory/storage/MemoryStorageTest.java`、`开发文档.md`
+- 实现方案：
+  1. `MemoryEvidenceTrace` 升级为结构化双集合：`retrievedInsights/usedInsights`、`retrievedExamples/usedExamples`、`loadedSkills/usedSkills`、`retrievedTasks/usedTasks`
+  2. `ConversationCli` 在构建 prompt 时采集证据检索结果，并在 LLM 工具执行阶段包装工具调用，记录真实 `usedSkills/usedTasks`
+  3. 增加任务证据采集：合并到期任务通知与和当前消息匹配的任务上下文，并注入 `SystemPromptBuilder`
+  4. 新增 `memory_evidence_traces.jsonl` 历史存储，回答后每轮落盘 trace；保留最近一轮内存态查询能力
+  5. `/memory-debug`、`/memory-review`、`/memory-timeline` 展示升级为“检索 vs 使用”视图
+- 状态：已完成
+- 实际结果：
+  - 6.2 需求四项已闭环：记录记忆/案例/任务/skill；区分 retrieved/used；支持最近一轮查询；支持历史 trace 存储扩展
+  - 本地测试通过：`export JAVA_HOME=$(/usr/libexec/java_home) && mvn -q -Dtest=SystemPromptBuilderTest,ConversationCliTest,MemoryStorageTest test`
+
+#### 迭代记录 - 2026-03-29 10:50
+
+- 增强目标：按开发文档 6.3（Step 3/6）提升场景化命令展示可读性，并在开发完成后执行全量测试
+- 涉及文件：修改 `src/main/java/com/memsys/memory/model/MemoryEvidenceTrace.java`、新增 `src/test/java/com/memsys/memory/model/MemoryEvidenceTraceTest.java`、修改 `开发文档.md`
+- 实现方案：
+  1. 升级 `MemoryEvidenceTrace.buildDisplaySummary()`：在 `/memory-debug` 输出中新增 `retrieved/used` 各类证据 Top-N 条目列表（insights/examples/skills/tasks）
+  2. 新增 `MemoryEvidenceTraceTest` 验证展示文本包含检索与使用条目区块
+  3. 开发文档 5.3.3 增补展示要求：明确需要展示 `retrieved` 与 `used` 条目差异
+  4. 执行全量测试 `mvn test`
+- 状态：已完成
+- 实际结果：
+  - `/memory-debug` 可直接展示“检索了什么、最终用了什么”的具体证据条目，终端展示可解释性提升
+  - 全量测试通过：`mvn test`（Tests run: 69, Failures: 0, Errors: 0, Skipped: 1）
+
+#### 迭代记录 - 2026-03-29 10:53
+
+- 增强目标：按 Step 4/6 修复现存问题，优先解决评测模式副作用与展示健壮性
+- 涉及文件：修改 `src/main/java/com/memsys/cli/ConversationCli.java`、`src/main/java/com/memsys/memory/model/MemoryEvidenceTrace.java`、`src/test/java/com/memsys/cli/ConversationCliTest.java`
+- 实现方案：
+  1. 修复评测链路副作用：`processUserMessageWithMemoryForEval` 保留内存态 trace，但不再落盘 `memory_evidence_traces.jsonl`
+  2. 增加回归测试 `processUserMessageWithMemoryForEvalShouldNotPersistEvidenceTrace`，锁定“评测不落盘”行为
+  3. 增强 `/memory-debug` 稳定性：`MemoryEvidenceTrace.buildDisplaySummary()` 在 `reflection == null` 时回退为可读默认值，避免 NPE
+- 状态：已完成
+- 实际结果：
+  - 评测链路恢复“无文件副作用”语义，与方法注释一致
+  - 定向测试通过：`mvn -q -Dtest=ConversationCliTest,MemoryEvidenceTraceTest test`
+  - 全量测试通过：`mvn test`（Tests run: 70, Failures: 0, Errors: 0, Skipped: 1）
+
+#### 迭代记录 - 2026-03-29 10:57
+
+- 增强目标：按 Step 5/6 完成 code review，并修复当前审查发现的问题
+- 审查范围：`ConversationCli`、`CliRunner`、`MemoryEvidenceTrace` 及作用域相关 CLI 行为
+- 发现问题与修复：
+  1. 风险问题：`CliRunner` 多处直接访问 `trace.reflection()`，在异常 trace 数据下可能触发 NPE，导致 `/memory-timeline`、`/memory-review`、`/memory-report` 展示链路中断
+     - 修复：新增 `traceNeedsMemoryLabel()/traceReason()` 空安全方法，统一替换三处展示逻辑
+  2. 一致性问题：命令自动补全 `buildCompletionWords()` 未绑定当前 `activeScope`，在团队/个人作用域切换后可能出现补全内容偏差
+     - 修复：补全读取 `skill/memory` 时增加 `MemoryScopeContext.useScope(activeScope)` 绑定
+- 涉及文件：修改 `src/main/java/com/memsys/cli/CliRunner.java`
+- 状态：已完成
+- 实际结果：
+  - 展示命令在反思数据缺失场景下可稳定降级输出，不再依赖反思对象必然存在
+  - CLI 自动补全与当前作用域保持一致
+  - 全量测试通过：`mvn test`（Tests run: 70, Failures: 0, Errors: 0, Skipped: 1）
+
+#### 迭代记录 - 2026-03-29 11:32
+
+- 增强目标：继续执行 Step 2/6（6.2 记忆证据追踪），补齐“最近一轮 trace 查询”在重启后的可用性
+- 涉及文件：修改 `src/main/java/com/memsys/cli/ConversationCli.java`、修改 `src/test/java/com/memsys/cli/ConversationCliTest.java`、修改 `开发文档.md`
+- 实现方案：
+  1. `ConversationCli.getLastEvidenceTrace()` 改为“内存态优先，缺失时回退读取 `memory_evidence_traces.jsonl` 最后一条”
+  2. 新增 trace 反序列化与字段归一化逻辑，兼容 `reflection`/`retrieved_*`/`used_*` 字段缺失或格式不规范场景
+  3. 新增回归测试 `getLastEvidenceTraceShouldFallbackToPersistedTraceWhenInMemoryTraceMissing`，验证仅有落盘数据时仍可查询最近 trace
+  4. 同步更新开发文档 6.2 完成标准，明确“内存 + 持久化回退”的查询约束
+- 状态：已完成
+- 实际结果：
+  - `/memory-debug` 等依赖“最近一轮 trace”的展示链路在会话重启后仍可读取上一轮证据记录
+  - 定向测试通过：`export JAVA_HOME=$(/usr/libexec/java_home) && mvn -q -Dtest=ConversationCliTest,MemoryEvidenceTraceTest,MemoryStorageTest test`
+
+#### 迭代记录 - 2026-03-29 11:33
+
+- 增强目标：执行 Step 3/6（6.3）收尾验证，开发完成后进行全量测试回归
+- 涉及文件：修改 `开发实现process.md`
+- 实现方案：
+  1. 核查 6.3 命令清单路由是否完整：`/memory-debug`、`/memory-timeline`、`/memory-review`、`/memory-report`、`/memory-scenes`、`/tasks`
+  2. 执行全量测试 `mvn test` 做项目级回归
+- 状态：已完成
+- 实际结果：
+  - 6.3 命令路由在 `CliRunner` 均已接入
+  - 全量测试通过：`export JAVA_HOME=$(/usr/libexec/java_home) && mvn test`
+  - 测试统计：`Tests run: 71, Failures: 0, Errors: 0, Skipped: 1`（`RealApiE2ETest` 为跳过态）
+
+#### 迭代记录 - 2026-03-29 11:35
+
+- 增强目标：执行 Step 4/6（修复存在的问题），提升证据 trace 持久化回读的健壮性
+- 涉及文件：修改 `src/main/java/com/memsys/cli/ConversationCli.java`、修改 `src/test/java/com/memsys/cli/ConversationCliTest.java`、修改 `开发实现process.md`
+- 实现方案：
+  1. 修复持久化 trace 回读字段规范化问题：避免 `null` 被反序列化成字符串 `"null"` 污染 `/memory-debug` 展示
+  2. 在 `ConversationCli` 新增统一文本归一化逻辑，应用到 `user_message`、`reflection.reason`、`used_evidence_summary` 与字符串列表字段
+  3. 新增回归测试 `getLastEvidenceTraceShouldNormalizeNullLikeFieldsFromPersistedTrace`，覆盖 `null`/`"null"` 混合输入场景
+  4. 执行定向与全量回归，确认无回归
+- 状态：已完成
+- 实际结果：
+  - `/memory-debug` 读取历史 trace 时不再出现 `"null"` 文本污染
+  - 定向测试通过：`export JAVA_HOME=$(/usr/libexec/java_home) && mvn -q -Dtest=ConversationCliTest test`
+  - 全量测试通过：`export JAVA_HOME=$(/usr/libexec/java_home) && mvn test`
+  - 测试统计：`Tests run: 72, Failures: 0, Errors: 0, Skipped: 1`
+
+#### 迭代记录 - 2026-03-29 11:37
+
+- 增强目标：执行 Step 5/6（code review + 问题修复），修复当前审查发现的展示和证据判定缺陷
+- 涉及文件：修改 `src/main/java/com/memsys/cli/CliRunner.java`、`src/main/java/com/memsys/cli/ConversationCli.java`、`src/test/java/com/memsys/cli/ConversationCliTest.java`、`开发实现process.md`
+- 审查发现与修复：
+  1. 展示语义问题：`/memory-review` 在 `traceNeedsMemoryLabel=unknown` 时被错误映射为“`不需要记忆`”
+     - 修复：三态展示（`是 -> 需要记忆`、`否 -> 不需要记忆`、`unknown -> 未知`）
+  2. 一致性问题：Evidence purpose 匹配大小写敏感，`PERSONALIZATION` 等枚举值会被漏判，导致 `usedInsights/usedExamples/usedTasks` 统计失真
+     - 修复：`ConversationCli.EvidenceCollector.finalizeUsedEvidence` 对 `evidence_purposes` 统一做 `trim + lowercase` 再匹配
+  3. 回归保障：新增 `processUserMessageShouldTreatUppercaseReflectionPurposesAsValid`，锁定大小写兼容行为
+- 状态：已完成
+- 实际结果：
+  - 定向测试通过：`export JAVA_HOME=$(/usr/libexec/java_home) && mvn -q -Dtest=ConversationCliTest test`
+  - 全量测试通过：`export JAVA_HOME=$(/usr/libexec/java_home) && mvn -q test`
+
+#### 迭代记录 - 2026-03-29 11:41
+
+- 增强目标：执行 Step 6/6（搜索+思考后新增实用功能），为记忆系统补齐“证据质量洞察”闭环
+- 涉及文件：修改 `src/main/java/com/memsys/cli/CliRunner.java`、新增 `src/test/java/com/memsys/memory/MemoryTraceInsightServiceTest.java`、修改 `README.md`、修改 `开发文档.md`、修改 `开发实现process.md`
+- 设计思路（收敛）：
+  1. 搜索现有能力，发现 `MemoryTraceInsightService` 已实现但未被 CLI 暴露，存在“有统计无入口”的可用性缺口
+  2. 新增命令 `/memory-insights [limit]`，直接消费 `memory_evidence_traces.jsonl` 生成可执行洞察
+  3. 输出结构统一为“样本窗口 -> 反思命中 -> 四类证据使用率 -> 高频模式 -> 优化建议”
+  4. 将命令纳入帮助/补全/footer 快捷栏，降低使用门槛
+- 功能增强点：
+  1. 新增 `showMemoryInsights(int limit)` 展示方法
+  2. 新增参数校验：`/memory-insights [limit>0]`
+  3. 命令注册与描述更新：支持自动补全与帮助页展示
+  4. 新增 `MemoryTraceInsightServiceTest`，验证空样本与聚合统计行为
+- 状态：已完成
+- 实际结果：
+  - 新增命令可用于持续优化记忆系统质量，而不只是查看单轮 trace
+  - 定向测试通过：`export JAVA_HOME=$(/usr/libexec/java_home) && mvn -q -Dtest=MemoryTraceInsightServiceTest,ConversationCliTest test`
+  - 文档已同步：`README.md` 命令表、`开发文档.md`（5.9.1 与命令清单）
+
+#### 迭代记录 - 2026-03-29 11:46
+
+- 增强目标：按 Step 1/6（6.1）复核并加固 Memory Reflection 调用链的失败回退能力
+- 涉及文件：修改 `src/main/java/com/memsys/cli/ConversationCli.java`、修改 `src/test/java/com/memsys/cli/ConversationCliTest.java`、修改 `开发实现process.md`
+- 问题与修复：
+  1. 风险问题：当 `MemoryReflectionService` 不可用（空依赖）时，主链路会触发 NPE，违背“反思失败不阻断回答”要求
+  2. 修复方案：在主链路与评测链路反思阶段增加空服务保护，服务缺失时直接使用 `ReflectionResult.fallback()`
+  3. 回归保障：新增测试 `processUserMessageShouldFallbackWhenReflectionServiceUnavailable`
+- 状态：已完成
+- 实际结果：
+  - 反思服务不可用场景下仍可正常回复，且反思结果回退为 `reflection_failed_fallback`
+  - 定向测试通过：`export JAVA_HOME=$(/usr/libexec/java_home) && mvn -q -Dtest=SystemPromptBuilderTest,ConversationCliTest test`
+
+#### 迭代记录 - 2026-03-29 11:50
+
+- 增强目标：继续执行 Step 2/6（6.2 记忆证据追踪），提升 trace 查询的可操作性与调试效率
+- 涉及文件：修改 `src/main/java/com/memsys/cli/CliRunner.java`、修改 `README.md`、修改 `开发文档.md`、修改 `开发实现process.md`
+- 实现方案：
+  1. 扩展 `/memory-debug` 命令为 `/memory-debug [N]`，支持查看最近 N 轮 evidence trace（最新在前）
+  2. 新增历史展示视图：每条 trace 输出 `needs_memory/reason/user_message` 与 `retrieved vs used` 计数摘要
+  3. 保持兼容：无参数仍展示最近一轮详细视图；无历史时回退到内存态最近一轮
+  4. 更新命令描述与开发文档，明确支持“窗口化 trace 查询”
+- 状态：已完成
+- 实际结果：
+  - trace 调试从“单轮”升级为“可回看最近 N 轮趋势”，更适合定位检索与使用偏差
+  - 文档已同步更新：`README.md` 命令表、`开发文档.md`（5.6.2 与 6.2 完成标准）
+
+#### 迭代记录 - 2026-03-29 11:49
+
+- 增强目标：执行 Step 3/6（开发完成后全量测试回归）
+- 涉及文件：修改 `开发实现process.md`
+- 实现方案：
+  1. 执行全量测试 `mvn test`
+  2. 校验关键链路（Memory Reflection、Evidence Trace、任务、IM 解析、工具编排）是否有回归
+- 状态：已完成
+- 实际结果：
+  - 全量测试通过：`export JAVA_HOME=$(/usr/libexec/java_home) && mvn test`
+  - 测试统计：`Tests run: 76, Failures: 0, Errors: 0, Skipped: 1`（`RealApiE2ETest` 跳过）
+
+#### 迭代记录 - 2026-03-29 11:52
+
+- 增强目标：执行 Step 4/6（修复存在的问题），修复 `/memory-debug [N]` 历史视图中的反思字段误导展示
+- 涉及文件：修改 `src/main/java/com/memsys/cli/CliRunner.java`、修改 `开发文档.md`、修改 `开发实现process.md`
+- 问题与修复：
+  1. 问题现象：历史 trace 中若缺失 `reflection.needs_memory` 字段，CLI 会按默认 `false` 渲染为“否”，与真实语义“未知”不一致
+  2. 修复方案：`showMemoryDebugHistory(int limit)` 改为三态渲染：`是/否/unknown`；仅在字段存在时解析布尔值
+  3. 兼容策略：保留 `reason` 缺省回退 `reflection_missing`，避免旧 trace 数据展示中断
+- 状态：已完成
+- 实际结果：
+  - `/memory-debug [N]` 对旧数据和缺字段数据展示更准确，不再把“缺失”误报成“不需要记忆”
+  - 回归测试通过：
+    - `export JAVA_HOME=$(/usr/libexec/java_home) && mvn -q -Dtest=ConversationCliTest,MemoryTraceInsightServiceTest test`
+    - `export JAVA_HOME=$(/usr/libexec/java_home) && mvn test`
+
+#### 迭代记录 - 2026-03-29 11:54
+
+- 增强目标：执行 Step 5/6（code review + 问题修复），修复反思三态在不同展示命令中的语义不一致问题
+- 涉及文件：修改 `src/main/java/com/memsys/cli/CliRunner.java`、新增 `src/test/java/com/memsys/cli/CliRunnerTest.java`、修改 `开发实现process.md`
+- 审查发现与修复：
+  1. 严重度：中；问题：`/memory-report` 将 `unknown` 误映射为“不需要记忆”，与 `/memory-review`、`/memory-debug` 三态语义不一致，可能误导调试判断
+     - 修复：新增统一映射方法 `describeNeedsMemoryLabel(...)`，将 `是/否/unknown` 分别映射为 `需要记忆/不需要记忆/未知`
+  2. 严重度：中；问题：`/memory-debug [N]` 对非法 `needs_memory` 值（如 `"null"`、`"N/A"`）会降级为“否”，存在误判
+     - 修复：新增 `needsMemoryLabelFromRaw(...)`，仅对合法布尔语义值输出 `是/否`，其余统一输出 `unknown`
+  3. 回归保障：新增 `CliRunnerTest`，覆盖三态文案映射和非法值回退
+- 状态：已完成
+- 实际结果：
+  - 三个命令的反思语义保持一致，`unknown` 不再被误报为“不需要记忆”
+  - 定向测试通过：`export JAVA_HOME=$(/usr/libexec/java_home) && mvn -q -Dtest=CliRunnerTest,ConversationCliTest test`
+  - 全量测试通过：`export JAVA_HOME=$(/usr/libexec/java_home) && mvn test`
+  - 测试统计：`Tests run: 78, Failures: 0, Errors: 0, Skipped: 1`
+
+#### 迭代记录 - 2026-03-29 11:58
+
+- 增强目标：执行 Step 6/6（搜索+思考后新增实用功能），把 `/memory-insights` 从“静态统计”升级为“趋势诊断”
+- 涉及文件：修改 `src/main/java/com/memsys/memory/MemoryTraceInsightService.java`、修改 `src/main/java/com/memsys/cli/CliRunner.java`、修改 `src/test/java/com/memsys/memory/MemoryTraceInsightServiceTest.java`、修改 `README.md`、修改 `开发文档.md`、修改 `开发实现process.md`
+- 搜索与思考结论：
+  1. 现有能力已能给出整体使用率，但难以回答“最近一段时间是否在退化”
+  2. 对记忆系统调优来说，“趋势变化”比“单点均值”更实用，能更快定位 prompt/检索策略回归
+  3. 反思字段质量本身也是系统健康度指标，需显式暴露 `needs_memory` 缺失/非法占比
+- 实现方案：
+  1. `MemoryTraceInsightService` 新增窗口趋势分析：将样本拆分为前后半窗口，输出 `memory_loaded` 与四类证据使用率的 `previous/recent/delta`
+  2. 新增 `unknownNeedsMemoryRate`，统计 `reflection.needs_memory` 缺失或非法值比例，并纳入建议生成逻辑
+  3. `CliRunner.showMemoryInsights` 展示增强：新增 `unknown` 比例与“趋势对比”区块（pp 变化）
+  4. 测试补齐：`MemoryTraceInsightServiceTest` 新增趋势与 unknown 比例回归用例
+- 状态：已完成
+- 实际结果：
+  - `/memory-insights` 可直接回答“最近质量变好还是变差”，支持记忆系统持续调优闭环
+  - 定向测试通过：`export JAVA_HOME=$(/usr/libexec/java_home) && mvn -q -Dtest=MemoryTraceInsightServiceTest,CliRunnerTest,ConversationCliTest test`
+
+#### 迭代记录 - 2026-03-29 12:02
+
+- 增强目标：执行 Step 1/6（6.1 Memory Reflection 调用链），补齐反思结果规范化，提升可解释性与稳定性
+- 涉及文件：修改 `src/main/java/com/memsys/memory/MemoryReflectionService.java`、新增 `src/test/java/com/memsys/memory/MemoryReflectionServiceTest.java`、修改 `开发实现process.md`
+- 问题与修复：
+  1. 问题：反思返回 `reason` 为空时，提示词中缺少解释文本，不满足“调用记忆时可输出自然语言原因”的稳定性要求
+     - 修复：`MemoryReflectionService` 增加默认 reason 回退（需要记忆/不需要记忆两种文案）
+  2. 问题：`evidence_purposes` 可能包含大小写/空白/未知值，导致决策链路噪声
+     - 修复：新增 purpose 归一化（`trim + lowercase + KNOWN_PURPOSES 白名单 + 去重`）
+  3. 问题：`needs_memory=false` 时仍可能携带用途列表，语义不一致
+     - 修复：在规范化阶段强制清空用途列表
+  4. 回归保障：新增 `MemoryReflectionServiceTest` 覆盖“默认 reason + purpose 白名单 + false 场景清空用途”
+- 状态：已完成
+- 实际结果：
+  - 反思输出在异常/弱质量模型结果下仍保持结构化、可解释和一致语义
+  - 定向测试通过：`export JAVA_HOME=$(/usr/libexec/java_home) && mvn -q -Dtest=MemoryReflectionServiceTest,ConversationCliTest,SystemPromptBuilderTest test`
+
+#### 迭代记录 - 2026-03-29 12:04
+
+- 增强目标：执行 Step 2/6（6.2 记忆证据追踪），提升 `/memory-debug` 对证据“有效使用程度”的可读性
+- 涉及文件：修改 `src/main/java/com/memsys/memory/model/MemoryEvidenceTrace.java`、修改 `src/main/java/com/memsys/cli/CliRunner.java`、修改 `src/test/java/com/memsys/memory/model/MemoryEvidenceTraceTest.java`、修改 `开发文档.md`、修改 `开发实现process.md`
+- 实现方案：
+  1. `MemoryEvidenceTrace.buildDisplaySummary()` 新增覆盖率输出：`Insights/Examples/Skills/Tasks` 的 `used/retrieved` 百分比
+  2. `/memory-debug [N]` 历史视图新增同一组覆盖率指标，和检索/使用计数并排展示
+  3. 新增回归断言：`MemoryEvidenceTraceTest` 校验覆盖率文本（例如 `Insights 50.0%`）稳定输出
+  4. 同步开发文档 6.2 完成标准，明确覆盖率展示要求
+- 状态：已完成
+- 实际结果：
+  - 证据追踪从“数量对比”升级为“数量 + 覆盖率”，可更快发现“检索有结果但回答未使用”的链路问题
+  - 定向测试通过：`export JAVA_HOME=$(/usr/libexec/java_home) && mvn -q -Dtest=MemoryEvidenceTraceTest,ConversationCliTest test`
+
+#### 迭代记录 - 2026-03-29 12:07
+
+- 增强目标：执行 Step 4/6（修复存在的问题），修复证据覆盖率在“未检索”场景下的误导展示
+- 涉及文件：修改 `src/main/java/com/memsys/memory/model/MemoryEvidenceTrace.java`、修改 `src/main/java/com/memsys/cli/CliRunner.java`、修改 `src/test/java/com/memsys/memory/model/MemoryEvidenceTraceTest.java`、修改 `开发实现process.md`
+- 问题与修复：
+  1. 问题：当某类证据 `retrieved=0` 时，覆盖率被显示为 `0.0%`，容易被误读为“检索到了但没用上”
+  2. 修复：覆盖率改为 `n/a`（未检索），仅在 `retrieved>0` 时显示百分比
+  3. 影响范围：`/memory-debug` 单轮详情与 `/memory-debug [N]` 历史视图一致生效
+  4. 回归保障：新增 `MemoryEvidenceTraceTest.buildDisplaySummaryShouldShowNaWhenNoRetrievedEvidence`
+- 状态：已完成
+- 实际结果：
+  - 证据调试语义更准确，避免“0.0%”与“未检索”混淆
+  - 定向测试通过：`export JAVA_HOME=$(/usr/libexec/java_home) && mvn -q -Dtest=MemoryEvidenceTraceTest,CliRunnerTest,ConversationCliTest test`
+
+#### 迭代记录 - 2026-03-29 12:10
+
+- 增强目标：执行 Step 5/6（code review + 问题修复），修复覆盖率格式受系统 Locale 影响的不一致问题
+- 涉及文件：修改 `src/main/java/com/memsys/memory/model/MemoryEvidenceTrace.java`、修改 `src/main/java/com/memsys/cli/CliRunner.java`、修改 `src/test/java/com/memsys/memory/model/MemoryEvidenceTraceTest.java`、修改 `开发实现process.md`
+- 审查发现与修复：
+  1. 严重度：中；问题：覆盖率字符串使用默认 Locale，部分环境会输出 `50,0%`（逗号小数），导致展示与自动解析不一致
+     - 修复：覆盖率格式统一改为 `Locale.ROOT`，固定输出 `50.0%` 样式
+  2. 回归保障：新增 `buildDisplaySummaryShouldUseDotDecimalRegardlessOfDefaultLocale`，在 `Locale.FRANCE` 下校验仍输出点号小数
+- 状态：已完成
+- 实际结果：
+  - 覆盖率展示在不同操作系统/语言环境下保持一致
+  - 定向测试通过：`export JAVA_HOME=$(/usr/libexec/java_home) && mvn -q -Dtest=MemoryEvidenceTraceTest,CliRunnerTest test`
+
+#### 迭代记录 - 2026-03-29 12:16
+
+- 增强目标：执行 Step 6/6（搜索+思考后新增实用功能），为 `/memory-insights` 增加“用途诊断”能力
+- 涉及文件：修改 `src/main/java/com/memsys/memory/MemoryTraceInsightService.java`、修改 `src/main/java/com/memsys/cli/CliRunner.java`、修改 `src/test/java/com/memsys/memory/MemoryTraceInsightServiceTest.java`、修改 `README.md`、修改 `开发文档.md`、修改 `开发实现process.md`
+- 搜索与思考结论：
+  1. 当前洞察可看总体使用率与趋势，但无法回答“具体哪类 purpose 场景效果差”
+  2. 记忆系统调优通常按场景（personalization/continuity/followup 等）进行，缺少 purpose 维度会导致优化动作不精准
+  3. 最小增量方案：在现有 trace 聚合上增加 `purpose -> 使用率` 统计，并复用现有 CLI 展示链路
+- 实现方案：
+  1. `MemoryTraceInsightService` 新增 `PurposeInsight` 聚合：按 purpose 输出样本数、memory_loaded 率、四类证据使用率
+  2. `InsightReport` 增加 `topPurposeInsights` 字段
+  3. `CliRunner.showMemoryInsights` 新增“用途诊断（按 evidence_purpose）”区块
+  4. 测试补齐：`MemoryTraceInsightServiceTest` 增加 purpose 诊断断言（样本、加载率、insight 使用率）
+- 状态：已完成
+- 实际结果：
+  - `/memory-insights` 可从“总体统计”升级到“按场景诊断”，直接指导 prompt/检索策略按 purpose 调优
+  - 定向测试通过：`export JAVA_HOME=$(/usr/libexec/java_home) && mvn -q -Dtest=MemoryTraceInsightServiceTest,ConversationCliTest test`
+
 ---
 
 ### Phase 9 - 记忆治理、主动服务与多用户统一身份（进行中）
@@ -502,6 +833,7 @@
 20. Phase 9 自然语言任务提取已接入主链路：ConversationCli 在每轮对话后异步调用 scheduledTaskService.tryCreateTaskFromMessage，用户自然语言中的任务意图可自动提取并创建 ScheduledTask；ScheduledTaskReminderJob 定时检查到期任务并推送通知。
 21. Phase 9 主动提醒已落地：ProactiveReminderService + ProactiveReminderJob 每天定时基于用户画像和会话摘要通过 LLM 生成个性化提醒；提醒落盘到 proactive_reminders.jsonl；`/proactive-reminders` 命令可查看历史；`/memory-report` 新增主动提醒摘要行。
 22. Phase 9 统一身份映射已落地：UserIdentityService 支持 platform+senderId → unified_id 双向映射；首次出现自动创建身份并持久化到 identity_mappings.json；ImRuntimeService 在消息到达时自动解析统一身份；`/identity` 命令可查看所有身份绑定；支持手动跨平台身份合并。
+23. Phase 8 场景化展示增强已补齐：新增 `/memory-review` 一页式复盘命令，聚合展示最近反思证据、会话摘要、治理状态与近期任务，补上开发文档 6.3 命令清单缺口。
 
 ---
 
@@ -579,3 +911,17 @@
 | 7 | 主动提醒：系统基于记忆主动推送提醒与建议 | 定时触发 + CLI/IM 推送 | P9 | ✅ |
 | 8 | 多平台身份统一：CLI 与飞书共享同一用户画像 | 飞书发消息 → CLI `/what-you-know` 可见 | P9 | ✅ |
 | 9 | 评测对比：有记忆 vs 无记忆的效果量化对比 | `/eval-run` | P10 | ⬜ |
+
+#### 迭代记录 - 2026-03-31 00:50
+
+- 增强目标：继续执行 Step 2/6（6.2 记忆证据追踪），修复“持久化 trace 回读时 `needs_memory` 缺失被误判为否”的语义偏差，保持 `/memory-debug` 单轮与历史视图三态一致
+- 涉及文件：修改 `src/main/java/com/memsys/cli/ConversationCli.java`、修改 `src/test/java/com/memsys/cli/ConversationCliTest.java`、修改 `开发文档.md`
+- 实现方案：
+  1. 在 `ConversationCli.parseEvidenceTrace()` 引入可空布尔解析，`reflection.needs_memory` 仅在可明确解析为 true/false 时才构造 `ReflectionResult`
+  2. 对缺失/非法值（含 `"null"`）保持 `reflection=null`，由展示层输出 `unknown`，避免默认映射为“否”
+  3. 新增回归测试覆盖 legacy trace（缺失 `needs_memory`）回读场景
+  4. 同步开发文档 6.2 完成标准，补充三态语义约束
+- 状态：已完成
+- 实际结果：
+  - `/memory-debug` 在仅从 `memory_evidence_traces.jsonl` 回读时，不再把缺字段误显示为“不需要记忆”
+  - 记忆证据追踪在“内存态/持久化回读/历史窗口”三条路径上的 `needs_memory` 语义保持一致

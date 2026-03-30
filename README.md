@@ -10,6 +10,14 @@
 - 架构基线：**四层记忆架构**（本仓库唯一架构基线）
 - 毕设方向：在不改变 `Memory-System` 核心定位的前提下，扩展为“可记忆、可检索、可治理、可评测、可主动服务”的智能记忆体系统
 
+### 文件即记忆（Memory as Filesystem）
+
+为避免被误读为“聊天+工具”系统，本项目明确采用以下定义：
+
+1. 记忆载体统一为文件（含 `json/jsonl/md`）。
+2. `run_shell_command` 在本项目中属于记忆操作原语，本质是对文件记忆进行 CRUD、检索与治理（读/写/改/检索/归档）。
+3. 系统核心贡献是“面向文件记忆体的提取、组织、检索、治理、评测闭环”。
+
 ## 毕设升级方向（2026-03-24）
 
 当前项目已经具备四层记忆、RAG、Skill、CLI、IM 和 Tool 调用能力。作为毕业设计，建议继续沿着“记忆系统”主线扩展，而不是转成泛 Agent 平台或普通聊天系统。
@@ -290,6 +298,8 @@ java -jar target/memory-box-1.0.0.jar --cli.enabled=false
 - 飞书 webhook（可选）：`POST /webhooks/feishu/event`
 - Telegram webhook：`POST /webhooks/telegram`
 - 主动发送接口: `POST /im/send`
+- IM 对话 JSON 接口（含过程步骤）: `POST /im/chat`
+- IM 对话 SSE 接口（process/final 事件流）: `POST /im/chat/stream`
 
 接收消息后会直接调用现有对话主流程 `ConversationCli.processUserMessage()`，再回发文本消息。
 当用户提出提醒/日程需求时，模型会按需调用 `create_task(...)` 工具创建任务；
@@ -375,6 +385,35 @@ curl -X POST http://localhost:8080/im/send \
   }'
 ```
 
+### IM 对话接口示例（含过程收起）
+
+```bash
+curl -X POST http://localhost:8080/im/chat \
+  -H "Content-Type: application/json" \
+  -d '{
+    "platform": "telegram",
+    "conversationId": "123456789",
+    "senderId": "123456789",
+    "text": "帮我总结本周重点",
+    "temporary": false
+  }'
+```
+
+### IM 对话 SSE 示例（流式过程输出）
+
+```bash
+curl -N -X POST http://localhost:8080/im/chat/stream \
+  -H "Content-Type: application/json" \
+  -H "Accept: text/event-stream" \
+  -d '{
+    "platform": "telegram",
+    "conversationId": "123456789",
+    "senderId": "123456789",
+    "text": "帮我总结本周重点",
+    "temporary": false
+  }'
+```
+
 ## CLI 命令
 
 | 命令 | 说明 |
@@ -390,10 +429,25 @@ curl -X POST http://localhost:8080/im/send \
 | `/controls` | 查看全局控制（memories/history） |
 | `/controls <项> <值>` | 修改全局控制（on/off） |
 | `/memory-update` | 手动触发隐式洞察提取 |
+| `/memory-debug [N]` | 展示最近一轮或最近 N 轮记忆反思与证据使用 |
+| `/memory-timeline` | 记忆系统时间线视图 |
+| `/memory-review` | 一页式记忆复盘（反思/摘要/治理/任务） |
+| `/memory-report` | 记忆系统综合状态报告 |
+| `/memory-scenes` | 按话题/场景分组展示记忆摘要 |
+| `/memory-insights [limit]` | 基于 evidence trace 输出证据质量洞察、用途诊断、窗口趋势变化与优化建议 |
+| `/memory-governance` | 查看记忆治理状态（冲突、待审核、归档） |
+| `/proactive-reminders` | 查看主动提醒历史 |
+| `/identity` | 查看统一身份映射 |
 | `/search <关键词>` | 语义搜索记忆（RAG） |
 | `/rag-stats` | 查看向量存储统计 |
 | `/rag-rebuild` | 重建向量索引 |
+| `/scope personal [unifiedId]` | 切换到个人记忆作用域 |
+| `/scope team <teamId>` | 切换到团队共享记忆作用域 |
+| `/team <teamId>` | 快速切换到团队作用域 |
+| `/weekly-report` | 生成当前作用域的每周复盘 |
 | `/exit` | 退出 |
+
+> 每周自动复盘：默认每周一 09:00 生成个人周报并尝试推送到飞书最近会话（可通过 `scheduling.weekly-review-*` 配置开关与时间）。
 
 ## 代码结构
 
@@ -406,6 +460,7 @@ com.memsys/
 ├── im/
 │   ├── ImRuntimeService.java              # IM 统一消息编排（收消息触发任务 + 发消息）
 │   ├── ImSendController.java              # 主动发送 HTTP 接口 `/im/send`
+│   ├── ImChatController.java              # 对话接口 `/im/chat` + SSE `/im/chat/stream`
 │   ├── feishu/
 │   │   ├── FeishuLongConnectionClient.java # 飞书长连接入口（官方 SDK）
 │   │   ├── FeishuWebhookController.java   # 飞书 webhook 入口（可选）

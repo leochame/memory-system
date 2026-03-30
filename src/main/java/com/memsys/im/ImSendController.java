@@ -15,7 +15,7 @@ import java.util.Map;
 @Slf4j
 @RestController
 @RequestMapping("/im")
-@ConditionalOnProperty(name = "im.api.enabled", havingValue = "true", matchIfMissing = true)
+@ConditionalOnProperty(name = "im.api.enabled", havingValue = "true")
 public class ImSendController {
 
     private final ImRuntimeService imRuntimeService;

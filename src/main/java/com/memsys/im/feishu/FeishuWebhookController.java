@@ -12,6 +12,7 @@ import org.springframework.web.bind.annotation.*;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Optional;
+import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * 飞书事件回调入口。
@@ -20,6 +21,9 @@ import java.util.Optional;
 @RestController
 @ConditionalOnProperty(prefix = "im.feishu", name = {"enabled", "webhook-enabled"}, havingValue = "true")
 public class FeishuWebhookController {
+    private static final long DEDUP_WINDOW_MILLIS = 5 * 60 * 1000L;
+    private static final int DEDUP_MAX_SIZE = 10_000;
+    private static final ConcurrentHashMap<String, Long> RECENT_MESSAGE_KEYS = new ConcurrentHashMap<>();
 
     private final FeishuInboundParser inboundParser;
     private final ImRuntimeService imRuntimeService;
@@ -38,15 +42,14 @@ public class FeishuWebhookController {
     @PostMapping("/webhooks/feishu/event")
     public ResponseEntity<Map<String, Object>> onEvent(@RequestBody Map<String, Object> payload) {
         try {
-            if ("url_verification".equals(trim(payload.get("type")))) {
-                return ResponseEntity.ok(Map.of("challenge", trim(payload.get("challenge"))));
-            }
-
             if (!verificationToken.isBlank() && !verificationTokenMatched(payload)) {
                 return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(Map.of(
                         "ok", false,
                         "error", "invalid feishu verification token"
                 ));
+            }
+            if ("url_verification".equals(trim(payload.get("type")))) {
+                return ResponseEntity.ok(Map.of("challenge", trim(payload.get("challenge"))));
             }
 
             Optional<IncomingImMessage> incoming = inboundParser.parseMessageEvent(payload);
@@ -54,11 +57,16 @@ public class FeishuWebhookController {
                 return ResponseEntity.ok(Map.of("ok", true, "ignored", true));
             }
 
-            String reply = imRuntimeService.handleIncomingAndReply(incoming.get());
+            IncomingImMessage in = incoming.get();
+            if (!shouldProcess(in)) {
+                return ResponseEntity.ok(Map.of("ok", true, "ignored", true, "duplicate", true));
+            }
+
+            String reply = imRuntimeService.handleIncomingAndReply(in);
             Map<String, Object> result = new LinkedHashMap<>();
             result.put("ok", true);
             result.put("platform", "feishu");
-            result.put("conversation_id", incoming.get().conversationId());
+            result.put("conversation_id", in.conversationId());
             result.put("reply_len", reply == null ? 0 : reply.length());
             return ResponseEntity.ok(result);
         } catch (Exception e) {
@@ -90,5 +98,23 @@ public class FeishuWebhookController {
 
     private String trim(Object value) {
         return value == null ? "" : String.valueOf(value).trim();
+    }
+
+    private boolean shouldProcess(IncomingImMessage incoming) {
+        String messageId = incoming == null ? "" : trim(incoming.messageId());
+        if (messageId.isBlank()) {
+            return true;
+        }
+        cleanupDedupCache(System.currentTimeMillis());
+        String key = "feishu:" + incoming.conversationId() + ":" + messageId;
+        return RECENT_MESSAGE_KEYS.putIfAbsent(key, System.currentTimeMillis()) == null;
+    }
+
+    private void cleanupDedupCache(long now) {
+        RECENT_MESSAGE_KEYS.entrySet().removeIf(entry -> now - entry.getValue() > DEDUP_WINDOW_MILLIS);
+        if (RECENT_MESSAGE_KEYS.size() <= DEDUP_MAX_SIZE) {
+            return;
+        }
+        RECENT_MESSAGE_KEYS.clear();
     }
 }

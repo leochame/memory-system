@@ -34,7 +34,7 @@ public class ShellCommandTool extends BaseTool {
     private final Path workspaceRoot;
 
     public ShellCommandTool(
-            @Value("${tool.shell-command.enabled:true}") boolean enabled,
+            @Value("${tool.shell-command.enabled:false}") boolean enabled,
             @Value("${tool.shell-command.shell:/bin/zsh}") String shell,
             @Value("${tool.shell-command.timeout-seconds:30}") int timeoutSeconds,
             @Value("${tool.shell-command.max-output-chars:12000}") int maxOutputChars,
@@ -80,6 +80,9 @@ public class ShellCommandTool extends BaseTool {
         if (!isCommandSafe(command)) {
             return "run_shell_command 拒绝执行：命令包含非法控制字符。";
         }
+        if (!ToolRuntimeContext.taskSourceContext().commandExecutionAllowed()) {
+            return "run_shell_command 拒绝执行：当前会话未明确授权命令执行。";
+        }
 
         Path workingDir = resolveWorkingDir(cwdArg);
         if (workingDir == null) {
@@ -91,15 +94,20 @@ public class ShellCommandTool extends BaseTool {
                     .directory(workingDir.toFile())
                     .redirectErrorStream(true)
                     .start();
+            ByteArrayOutputStream output = new ByteArrayOutputStream();
+            Thread outputReader = startOutputReader(process.getInputStream(), output, "shell-command-output-reader");
             boolean finished = process.waitFor(timeoutSeconds, TimeUnit.SECONDS);
             if (!finished) {
                 process.destroyForcibly();
+                process.waitFor(2, TimeUnit.SECONDS);
+                outputReader.join(2000);
                 return "run_shell_command 执行超时（" + timeoutSeconds + "s）。";
             }
+            outputReader.join(2000);
 
-            String output = readProcessOutput(process.getInputStream());
+            String outputText = output.toString(StandardCharsets.UTF_8);
             int exitCode = process.exitValue();
-            String limitedOutput = truncate(output, maxOutputChars);
+            String limitedOutput = truncate(outputText, maxOutputChars);
             String relativeCwd = workspaceRoot.equals(workingDir)
                     ? "."
                     : workspaceRoot.relativize(workingDir).toString();
@@ -108,6 +116,9 @@ public class ShellCommandTool extends BaseTool {
             return "exit_code=" + exitCode
                     + "\ncwd=" + relativeCwd
                     + "\noutput:\n" + limitedOutput;
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            return "run_shell_command 执行失败：执行被中断。";
         } catch (Exception e) {
             log.warn("run_shell_command execution failed: {}", command, e);
             return "run_shell_command 执行失败：" + e.getMessage();
@@ -140,10 +151,16 @@ public class ShellCommandTool extends BaseTool {
         return requested;
     }
 
-    private String readProcessOutput(InputStream inputStream) throws Exception {
-        try (inputStream; ByteArrayOutputStream output = new ByteArrayOutputStream()) {
-            inputStream.transferTo(output);
-            return output.toString(StandardCharsets.UTF_8);
-        }
+    private Thread startOutputReader(InputStream inputStream, ByteArrayOutputStream output, String threadName) {
+        Thread reader = new Thread(() -> {
+            try (inputStream; output) {
+                inputStream.transferTo(output);
+            } catch (Exception ignored) {
+                // Ignore reader exceptions; process exit status is the source of truth.
+            }
+        }, threadName);
+        reader.setDaemon(true);
+        reader.start();
+        return reader;
     }
 }

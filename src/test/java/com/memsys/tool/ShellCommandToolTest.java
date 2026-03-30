@@ -43,11 +43,14 @@ class ShellCommandToolTest {
         );
         LlmClient.ToolDefinition definition = tool.build(List.of()).orElseThrow();
 
-        String result = definition.executor().apply(ToolExecutionRequest.builder()
-                .id("1")
-                .name("run_shell_command")
-                .arguments("{\"command\":\"echo cmd-ok > result.txt\",\"cwd\":\".\"}")
-                .build());
+        String result;
+        try (ToolRuntimeContext.Scope ignored = ToolRuntimeContext.bindTaskSourceContext("", "", "", true)) {
+            result = definition.executor().apply(ToolExecutionRequest.builder()
+                    .id("1")
+                    .name("run_shell_command")
+                    .arguments("{\"command\":\"echo cmd-ok > result.txt\",\"cwd\":\".\"}")
+                    .build());
+        }
 
         assertThat(result).contains("exit_code=0");
         assertThat(Files.readString(tempDir.resolve("result.txt"))).contains("cmd-ok");
