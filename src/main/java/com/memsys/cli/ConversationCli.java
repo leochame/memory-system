@@ -1448,24 +1448,79 @@ public class ConversationCli {
         if (needsMemory == null) {
             return null;
         }
-        String memoryPurpose = normalizeText(reflectionMap.get("memory_purpose"));
+        String memoryPurpose = normalizeMemoryPurpose(normalizeText(reflectionMap.get("memory_purpose")), needsMemory);
         String reason = normalizeText(reflectionMap.get("reason"));
         double confidence = parseOptionalDouble(reflectionMap.get("confidence"), 0.7d);
-        String retrievalHint = normalizeText(reflectionMap.get("retrieval_hint"));
-        List<String> evidenceTypes = normalizeStringList(reflectionMap.get("evidence_types"));
-        List<String> purposes = normalizeStringList(reflectionMap.get("evidence_purposes"));
+        String retrievalHint = normalizeRetrievalHint(normalizeText(reflectionMap.get("retrieval_hint")), needsMemory);
+        List<String> evidenceTypes = normalizeEvidenceTypes(normalizeStringList(reflectionMap.get("evidence_types")), needsMemory);
+        List<String> purposes = normalizeEvidencePurposes(normalizeStringList(reflectionMap.get("evidence_purposes")), needsMemory);
         if (purposes.isEmpty()) {
-            purposes = normalizeStringList(reflectionMap.get("evidence_purpose"));
+            purposes = normalizeEvidencePurposes(normalizeStringList(reflectionMap.get("evidence_purpose")), needsMemory);
         }
         return new ReflectionResult(
                 needsMemory,
-                memoryPurpose.isBlank() ? (needsMemory ? "CONTINUITY" : "NOT_NEEDED") : memoryPurpose,
+                memoryPurpose,
                 reason,
                 confidence,
                 retrievalHint,
                 evidenceTypes,
                 purposes
         );
+    }
+
+    private String normalizeMemoryPurpose(String memoryPurpose, boolean needsMemory) {
+        if (!needsMemory) {
+            return "NOT_NEEDED";
+        }
+        if (memoryPurpose == null || memoryPurpose.isBlank()) {
+            return "CONTINUITY";
+        }
+        String normalized = memoryPurpose.trim().toUpperCase(Locale.ROOT);
+        if ("NOT_NEEDED".equals(normalized)) {
+            return "CONTINUITY";
+        }
+        if (!ReflectionResult.KNOWN_MEMORY_PURPOSES.contains(normalized)) {
+            return "CONTINUITY";
+        }
+        return normalized;
+    }
+
+    private String normalizeRetrievalHint(String retrievalHint, boolean needsMemory) {
+        if (!needsMemory) {
+            return "";
+        }
+        if (retrievalHint == null || retrievalHint.isBlank()) {
+            return "优先检索与用户当前问题最相关的历史证据。";
+        }
+        return retrievalHint.trim();
+    }
+
+    private List<String> normalizeEvidenceTypes(List<String> evidenceTypes, boolean needsMemory) {
+        if (!needsMemory || evidenceTypes == null || evidenceTypes.isEmpty()) {
+            return List.of();
+        }
+        LinkedHashSet<String> normalized = evidenceTypes.stream()
+                .filter(Objects::nonNull)
+                .map(String::trim)
+                .filter(s -> !s.isBlank())
+                .map(s -> s.toUpperCase(Locale.ROOT))
+                .filter(ReflectionResult.KNOWN_EVIDENCE_TYPES::contains)
+                .collect(Collectors.toCollection(LinkedHashSet::new));
+        return List.copyOf(normalized);
+    }
+
+    private List<String> normalizeEvidencePurposes(List<String> evidencePurposes, boolean needsMemory) {
+        if (!needsMemory || evidencePurposes == null || evidencePurposes.isEmpty()) {
+            return List.of();
+        }
+        LinkedHashSet<String> normalized = evidencePurposes.stream()
+                .filter(Objects::nonNull)
+                .map(String::trim)
+                .filter(s -> !s.isBlank())
+                .map(s -> s.toLowerCase(Locale.ROOT))
+                .filter(ReflectionResult.KNOWN_PURPOSES::contains)
+                .collect(Collectors.toCollection(LinkedHashSet::new));
+        return List.copyOf(normalized);
     }
 
     private List<String> normalizeStringList(Object value) {

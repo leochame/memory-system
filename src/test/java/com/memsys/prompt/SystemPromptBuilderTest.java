@@ -228,6 +228,42 @@ class SystemPromptBuilderTest {
         assertThat(prompt).contains("needs_memory: false");
         assertThat(prompt).contains("memory_purpose: NOT_NEEDED");
         assertThat(prompt).doesNotContain("retrieval_hint:");
+        assertThat(prompt).doesNotContain("evidence_types:");
+        assertThat(prompt).doesNotContain("evidence_purposes:");
+    }
+
+    @Test
+    void buildSystemPromptShouldNormalizeEvidenceFieldsWhenNeedsMemoryIsTrue() {
+        String prompt = builder.buildSystemPrompt(
+                "",
+                null,
+                null,
+                new ReflectionResult(
+                        true,
+                        "CONTINUITY",
+                        "需要记忆",
+                        0.91d,
+                        "优先检索最近上下文",
+                        List.of(" user_insight ", "INVALID", "recent_history", "USER_INSIGHT"),
+                        List.of(" Continuity ", "INVALID", "experience", "continuity")
+                ),
+                List.<Map<String, Object>>of(),
+                null,
+                List.<String>of(),
+                false,
+                false,
+                false,
+                false,
+                false,
+                false,
+                List.<String>of(),
+                null,
+                List.<RagService.RelevantMemory>of(),
+                null
+        );
+
+        assertThat(prompt).contains("evidence_types: USER_INSIGHT, RECENT_HISTORY");
+        assertThat(prompt).contains("evidence_purposes: continuity, experience");
     }
 
     private void assertSectionOrder(String prompt, String... sections) {

@@ -4,9 +4,12 @@ import com.memsys.memory.model.ReflectionResult;
 import com.memsys.rag.RagService;
 import org.springframework.stereotype.Component;
 
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Objects;
+import java.util.Set;
 
 @Component
 public class SystemPromptBuilder {
@@ -65,6 +68,8 @@ public class SystemPromptBuilder {
             String reason = normalizeReason(reflectionResult.reason(), needsMemory);
             double confidence = normalizeConfidence(reflectionResult.confidence());
             String retrievalHint = normalizeRetrievalHint(reflectionResult.retrieval_hint(), needsMemory);
+            List<String> evidenceTypes = normalizeEvidenceTypes(reflectionResult.evidence_types(), needsMemory);
+            List<String> evidencePurposes = normalizeEvidencePurposes(reflectionResult.evidence_purposes(), needsMemory);
             prompt.append("## 3.5 记忆反思决策\n");
             prompt.append("- needs_memory: ").append(needsMemory).append("\n");
             if (!memoryPurpose.isBlank()) {
@@ -77,14 +82,14 @@ public class SystemPromptBuilder {
             if (!retrievalHint.isBlank()) {
                 prompt.append("- retrieval_hint: ").append(retrievalHint).append("\n");
             }
-            if (reflectionResult.evidence_types() != null && !reflectionResult.evidence_types().isEmpty()) {
+            if (!evidenceTypes.isEmpty()) {
                 prompt.append("- evidence_types: ")
-                        .append(String.join(", ", reflectionResult.evidence_types()))
+                        .append(String.join(", ", evidenceTypes))
                         .append("\n");
             }
-            if (reflectionResult.evidence_purposes() != null && !reflectionResult.evidence_purposes().isEmpty()) {
+            if (!evidencePurposes.isEmpty()) {
                 prompt.append("- evidence_purposes: ")
-                        .append(String.join(", ", reflectionResult.evidence_purposes()))
+                        .append(String.join(", ", evidencePurposes))
                         .append("\n");
             }
             prompt.append("\n");
@@ -253,6 +258,34 @@ public class SystemPromptBuilder {
                 || "undefined".equals(normalized)
                 || "n/a".equals(normalized)
                 || "none".equals(normalized);
+    }
+
+    private List<String> normalizeEvidenceTypes(List<String> evidenceTypes, boolean needsMemory) {
+        if (!needsMemory || evidenceTypes == null || evidenceTypes.isEmpty()) {
+            return List.of();
+        }
+        Set<String> normalized = evidenceTypes.stream()
+                .filter(Objects::nonNull)
+                .map(String::trim)
+                .filter(s -> !s.isBlank())
+                .map(s -> s.toUpperCase(Locale.ROOT))
+                .filter(ReflectionResult.KNOWN_EVIDENCE_TYPES::contains)
+                .collect(java.util.stream.Collectors.toCollection(LinkedHashSet::new));
+        return List.copyOf(normalized);
+    }
+
+    private List<String> normalizeEvidencePurposes(List<String> evidencePurposes, boolean needsMemory) {
+        if (!needsMemory || evidencePurposes == null || evidencePurposes.isEmpty()) {
+            return List.of();
+        }
+        Set<String> normalized = evidencePurposes.stream()
+                .filter(Objects::nonNull)
+                .map(String::trim)
+                .filter(s -> !s.isBlank())
+                .map(s -> s.toLowerCase(Locale.ROOT))
+                .filter(ReflectionResult.KNOWN_PURPOSES::contains)
+                .collect(java.util.stream.Collectors.toCollection(LinkedHashSet::new));
+        return List.copyOf(normalized);
     }
 
     public String buildTemporaryPrompt() {

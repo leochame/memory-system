@@ -1159,3 +1159,65 @@
 - 实际结果：
   - `/memory-debug` 与 `/memory-debug [N]` 在 legacy 迁移或外部写入导致的双层转义场景下仍可稳定解析 trace
   - 证据追踪链路的跨版本兼容性与可观测性进一步提升
+
+#### 迭代记录 - 2026-03-31 18:40
+
+- 增强目标：继续执行 Step 6/6（调研与文档收敛），围绕 Memory-System 进一步补齐“内容产品化执行细则”，从内容资产扩展到栏目矩阵与 12 周路线
+- 涉及文件：修改 `开发文档.md`、修改 `开发实现process.md`
+- 实现方案：
+  1. 在开发文档新增 `5.10.8 记忆系统内容产品矩阵`，按受众拆分四条内容线（builder/user/defense/research），并给出固定栏目建议
+  2. 在开发文档新增 `5.10.9 12 周内容执行路线`，按 1-4/5-8/9-12 周分阶段设定产出、回流、收敛目标与验收指标
+  3. 在开发文档新增 `6.12 需求十`，将内容产品线字段、12 周看板、栏目覆盖检查、L3 复现实验、`demo_ready` 筛选机制转化为可验收开发项
+- 状态：已完成
+- 实际结果：
+  - Step 6/6 从“内容资产沉淀”进一步升级为“栏目化生产 + 周期化执行 + 答辩可用筛选”的闭环体系
+  - 后续可直接按 12 周路线执行并跟踪结果，降低内容建设随机性与答辩前集中补料风险
+
+#### 迭代记录 - 2026-03-31 19:50
+
+- 增强目标：继续执行 Step 1/6（6.1 Memory Reflection 调用链）防御性加固，消除 `needs_memory=false` 场景下的提示词语义冲突风险
+- 涉及文件：修改 `src/main/java/com/memsys/prompt/SystemPromptBuilder.java`、修改 `src/test/java/com/memsys/prompt/SystemPromptBuilderTest.java`、修改 `开发实现process.md`
+- 实现方案：
+  1. `SystemPromptBuilder` 新增 `normalizeEvidenceTypes/normalizeEvidencePurposes`，统一清洗反思证据字段（去空白、大小写归一、白名单过滤、去重）
+  2. 当 `needs_memory=false` 时强制不输出 `evidence_types/evidence_purposes`，避免与 `NOT_NEEDED` 决策并存造成提示词自相矛盾
+  3. 新增回归测试：
+     - `buildSystemPromptShouldForceNotNeededPurposeWhenNeedsMemoryIsFalse` 补充断言，验证无记忆场景不再输出证据字段
+     - `buildSystemPromptShouldNormalizeEvidenceFieldsWhenNeedsMemoryIsTrue` 验证证据字段归一化行为
+- 状态：已完成
+- 实际结果：
+  - Step 1/6 在 Prompt 层进一步实现“决策与证据字段语义一致”，降低上游异常值透传到主提示词的风险
+  - 定向测试通过：`export JAVA_HOME=$(/usr/libexec/java_home) && mvn -q -Dtest=SystemPromptBuilderTest,MemoryReflectionServiceTest,ConversationCliTest test`
+
+#### 迭代记录 - 2026-03-31 20:00
+
+- 增强目标：继续执行 Step 2/6（6.2 记忆证据追踪），统一历史 trace 回读时反思字段归一化规则，消除 `/memory-debug` 的语义漂移
+- 涉及文件：修改 `src/main/java/com/memsys/cli/ConversationCli.java`、修改 `src/test/java/com/memsys/cli/ConversationCliTest.java`、修改 `开发文档.md`、修改 `开发实现process.md`
+- 实现方案：
+  1. 在 `ConversationCli.parseReflectionMap(...)` 接入结构化归一化：`memory_purpose/evidence_types/evidence_purposes`
+  2. 新增 `normalizeMemoryPurpose/normalizeEvidenceTypes/normalizeEvidencePurposes`：
+     - `memory_purpose` 统一大写并白名单过滤；`needs_memory=false` 强制 `NOT_NEEDED`；`needs_memory=true` 且非法值回退 `CONTINUITY`
+     - `evidence_types` 统一大写 + 白名单过滤 + 去重
+     - `evidence_purposes` 统一小写 + 白名单过滤 + 去重
+  3. 当 `needs_memory=false` 时，强制清空证据类型/用途，避免历史 trace 中出现“无需记忆但仍有证据用途”的展示冲突
+  4. 新增回归测试：
+     - `getLastEvidenceTraceShouldNormalizeReflectionEvidenceFields`
+     - `getLastEvidenceTraceShouldDropEvidenceFieldsWhenNeedsMemoryIsFalse`
+  5. 同步开发文档 6.2 完成标准，新增“反思字段统一归一化 + 无记忆场景证据清空”约束
+- 状态：已完成
+- 实际结果：
+  - `/memory-debug` 与 `/memory-debug [N]` 在历史 trace 回读时与主链路提示词保持同一反思语义规范，减少定位时的认知噪声
+  - 定向测试通过：`export JAVA_HOME=$(/usr/libexec/java_home) && mvn -q -Dtest=ConversationCliTest test`
+
+#### 迭代记录 - 2026-03-31 20:25
+
+- 增强目标：执行 Step 4/6（修复存在的问题），修复历史 trace 回读在 `needs_memory=false` 场景下的 `retrieval_hint` 误导展示
+- 涉及文件：修改 `src/main/java/com/memsys/cli/ConversationCli.java`、修改 `src/test/java/com/memsys/cli/ConversationCliTest.java`、修改 `开发实现process.md`
+- 问题与修复：
+  1. 问题：历史 trace 反序列化时直接透传 `retrieval_hint`，即使 `needs_memory=false` 也可能在 `/memory-debug` 显示“检索提示”，造成语义冲突
+  2. 修复：`ConversationCli.parseReflectionMap(...)` 接入 `normalizeRetrievalHint(...)`，在 `needs_memory=false` 时强制清空 `retrieval_hint`；`needs_memory=true` 且提示为空时提供稳定默认提示
+  3. 回归保障：扩展 `getLastEvidenceTraceShouldDropEvidenceFieldsWhenNeedsMemoryIsFalse`，新增断言验证 `retrieval_hint` 为空
+- 状态：已完成
+- 实际结果：
+  - `/memory-debug` 与 `/memory-debug [N]` 在“无需记忆”场景下不再出现检索提示，反思语义与展示一致
+  - 定向测试通过：`./scripts/run-tests.sh -q -Dtest=ConversationCliTest,SystemPromptBuilderTest test`
+  - 全量测试通过：`./scripts/run-tests.sh -q test`
