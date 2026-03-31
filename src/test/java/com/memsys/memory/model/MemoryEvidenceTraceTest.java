@@ -157,4 +157,36 @@ class MemoryEvidenceTraceTest {
         assertThat(summary).contains("unused_examples");
         assertThat(summary).contains("unused_skills");
     }
+
+    @Test
+    void buildDisplaySummaryShouldCompareUnusedEvidenceIgnoringCaseAndWhitespace() {
+        MemoryEvidenceTrace trace = new MemoryEvidenceTrace(
+                LocalDateTime.of(2026, 3, 31, 18, 0),
+                "检查未使用证据",
+                new ReflectionResult(
+                        true,
+                        "CONTINUITY",
+                        "需要参考历史上下文",
+                        0.8d,
+                        "优先检索相关证据",
+                        List.of("RECENT_HISTORY"),
+                        List.of("continuity")
+                ),
+                true,
+                List.of("Debug   Skill", "Case-A"),
+                List.of(" debug skill "),
+                List.of(),
+                List.of(),
+                List.of(),
+                List.of(),
+                List.of(),
+                List.of(),
+                "insights 1/2"
+        );
+
+        String summary = trace.buildDisplaySummary();
+        assertThat(summary).contains("unused_insights");
+        assertThat(summary).contains("Case-A");
+        assertThat(summary).doesNotContain("- unused_insights:\n  1) Debug   Skill");
+    }
 }

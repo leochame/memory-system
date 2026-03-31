@@ -111,4 +111,14 @@ class CliRunnerTest {
         );
         assertEquals("a; b ... +1", preview);
     }
+
+    @Test
+    void previewUnusedEvidenceShouldIgnoreCaseAndWhitespaceVariance() {
+        String preview = CliRunner.previewUnusedEvidence(
+                List.of("Debug  Skill", "Task-A", "Case-1"),
+                List.of(" debug skill ", "task-a"),
+                3
+        );
+        assertEquals("Case-1", preview);
+    }
 }

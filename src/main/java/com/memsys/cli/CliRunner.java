@@ -1980,9 +1980,10 @@ public class CliRunner implements CommandLineRunner {
         if (retrieved == null || retrieved.isEmpty() || maxItems <= 0) {
             return "";
         }
-        LinkedHashSet<String> usedSet = normalizeEvidenceItems(used);
-        List<String> unused = normalizeEvidenceItems(retrieved).stream()
-                .filter(item -> !usedSet.contains(item))
+        Set<String> usedKeys = normalizeEvidenceItems(used).keySet();
+        List<String> unused = normalizeEvidenceItems(retrieved).entrySet().stream()
+                .filter(entry -> !usedKeys.contains(entry.getKey()))
+                .map(Map.Entry::getValue)
                 .toList();
         if (unused.isEmpty()) {
             return "";
@@ -1995,8 +1996,8 @@ public class CliRunner implements CommandLineRunner {
         return preview;
     }
 
-    private static LinkedHashSet<String> normalizeEvidenceItems(List<String> items) {
-        LinkedHashSet<String> normalized = new LinkedHashSet<>();
+    private static LinkedHashMap<String, String> normalizeEvidenceItems(List<String> items) {
+        LinkedHashMap<String, String> normalized = new LinkedHashMap<>();
         if (items == null || items.isEmpty()) {
             return normalized;
         }
@@ -2004,8 +2005,17 @@ public class CliRunner implements CommandLineRunner {
                 .filter(Objects::nonNull)
                 .map(String::trim)
                 .filter(s -> !s.isBlank())
-                .forEach(normalized::add);
+                .forEach(item -> normalized.putIfAbsent(canonicalEvidenceKey(item), item));
         return normalized;
+    }
+
+    private static String canonicalEvidenceKey(String item) {
+        if (item == null) {
+            return "";
+        }
+        return item.trim()
+                .replaceAll("\\s+", " ")
+                .toLowerCase(Locale.ROOT);
     }
 
     private boolean parseBoolean(Object value, boolean defaultValue) {

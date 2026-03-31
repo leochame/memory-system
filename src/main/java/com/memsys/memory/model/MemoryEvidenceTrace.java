@@ -1,10 +1,11 @@
 package com.memsys.memory.model;
 
 import java.time.LocalDateTime;
-import java.util.LinkedHashSet;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Objects;
+import java.util.Set;
 
 /**
  * Memory Evidence Trace — 记录单轮回答中的记忆反思与证据使用情况。
@@ -170,9 +171,10 @@ public record MemoryEvidenceTrace(
         if (retrieved == null || retrieved.isEmpty() || maxItems <= 0) {
             return;
         }
-        LinkedHashSet<String> usedSet = normalizeSet(used);
-        List<String> unused = normalizeSet(retrieved).stream()
-                .filter(item -> !usedSet.contains(item))
+        Set<String> usedKeys = normalizeForDiff(used).keySet();
+        List<String> unused = normalizeForDiff(retrieved).entrySet().stream()
+                .filter(entry -> !usedKeys.contains(entry.getKey()))
+                .map(java.util.Map.Entry::getValue)
                 .toList();
         if (unused.isEmpty()) {
             return;
@@ -180,8 +182,8 @@ public record MemoryEvidenceTrace(
         appendList(sb, label, unused, maxItems);
     }
 
-    private LinkedHashSet<String> normalizeSet(List<String> items) {
-        LinkedHashSet<String> normalized = new LinkedHashSet<>();
+    private LinkedHashMap<String, String> normalizeForDiff(List<String> items) {
+        LinkedHashMap<String, String> normalized = new LinkedHashMap<>();
         if (items == null || items.isEmpty()) {
             return normalized;
         }
@@ -189,7 +191,16 @@ public record MemoryEvidenceTrace(
                 .filter(Objects::nonNull)
                 .map(String::trim)
                 .filter(s -> !s.isBlank())
-                .forEach(normalized::add);
+                .forEach(item -> normalized.putIfAbsent(canonicalEvidenceKey(item), item));
         return normalized;
+    }
+
+    private String canonicalEvidenceKey(String item) {
+        if (item == null) {
+            return "";
+        }
+        return item.trim()
+                .replaceAll("\\s+", " ")
+                .toLowerCase(Locale.ROOT);
     }
 }

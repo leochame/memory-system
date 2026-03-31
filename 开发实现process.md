@@ -1705,3 +1705,46 @@
 - 实际结果：
   - `/memory-debug` 历史回读不再展示 `null/undefined/n/a/none` 噪声证据，证据明细更可读
   - `/memory-insights` 与 `/memory-debug` 在 null-like 场景下保持一致统计口径，覆盖率与用途洞察更稳定
+
+#### 迭代记录 - 2026-03-31 17:55
+
+- 增强目标：继续执行 Step 6/6（调研与文档更新），围绕 Memory-System 打造“更多内容”的第十二层方案，将内容体系升级为“课程化训练 + 认证化输出”
+- 涉及文件：修改 `开发文档.md`、修改 `开发实现process.md`
+- 实现方案：
+  1. 将开发文档版本升级至 `v4.25`，在 `5.10` 新增 `5.10.22 Step 6/6 内容扩展蓝图（第十二层：课程化训练与认证化输出）`
+  2. 新增 8 类课程化内容资产：`十分钟上手实验卡`、`场景训练题单卡`、`误判纠偏练习卡`、`助教讲解脚本卡`、`评分量表卡`、`训练营周报卡`、`能力认证回执卡`、`新成员入门路径图`
+  3. 固化课程化执行机制（周训练资产/双周回放评分/月训练营周报）与新增索引字段：`training_asset_id/skill_track/difficulty_level/rubric_ref/pass_threshold/cert_status/cert_valid_until/mentor_feedback_ref`
+  4. 在开发文档新增 `6.24 需求二十二`，将训练目录规范、认证时效约束、训练反馈回流约束与对外能力声明约束转化为可验收条款
+- 状态：已完成
+- 实际结果：
+  - Step 6/6 从“选题智能编排 + 质量闸门”进一步升级为“训练与认证机制”，内容可用于新人培养、答辩演练与对外能力证明
+  - 围绕记忆系统形成“证据内容 -> 训练题单 -> 回放评分 -> 认证回执 -> 反馈回流”的持续闭环，降低内容体系只产出不传承的风险
+
+#### 迭代记录 - 2026-03-31 17:30
+
+- 增强目标：围绕 Step 1/6（6.1 Memory Reflection 调用链）执行文档对齐复核，确认当前实现满足最新开发文档 `v4.25` 的完成标准
+- 涉及文件：修改 `开发实现process.md`
+- 实现方案：
+  1. 逐项核查 Step 1/6 五项要求在主链路中的落点：结构化决策对象/schema、`ConversationCli` 反思阶段、按反思结果决定记忆加载、反思结果注入 `SystemPromptBuilder`、异常稳定回退
+  2. 核查 `memory_purpose` 与 `evidence_types/evidence_purposes` 的别名归一化与默认值派生是否按用途生效（避免统一回退 continuity）
+  3. 执行 Step 1/6 相关定向回归：`ReflectionResultTest`、`MemoryReflectionServiceTest`、`SystemPromptBuilderTest`、`ConversationCliTest`
+- 状态：已完成
+- 实际结果：
+  - 本轮未发现 Step 1/6 新增代码缺口，反思调用链保持完成态
+  - 主链路与提示词层在 `needs_memory` 分流、`memory_purpose` 归一化、证据字段默认派生、`retrieval_hint` null-like 回退方面行为一致
+  - 定向测试通过：`export JAVA_HOME=$(/usr/libexec/java_home) && mvn -q -Dtest=ReflectionResultTest,MemoryReflectionServiceTest,SystemPromptBuilderTest,ConversationCliTest test`
+
+#### 迭代记录 - 2026-03-31 18:25
+
+- 增强目标：继续执行 Step 2/6（6.2 记忆证据追踪），修复“未使用证据样例”在大小写/空白差异下的误判，避免 `/memory-debug` 诊断噪声
+- 涉及文件：修改 `src/main/java/com/memsys/cli/CliRunner.java`、修改 `src/main/java/com/memsys/memory/model/MemoryEvidenceTrace.java`、修改 `src/test/java/com/memsys/cli/CliRunnerTest.java`、修改 `src/test/java/com/memsys/memory/model/MemoryEvidenceTraceTest.java`、修改 `开发文档.md`、修改 `开发实现process.md`
+- 实现方案：
+  1. 在 `CliRunner.previewUnusedEvidence` 中将 `retrieved - used` 比对改为“规范键比较”（trim + 折叠连续空白 + 小写化），并保留原文展示
+  2. 在 `MemoryEvidenceTrace.appendUnusedList` 复用同级比较规则，确保单轮 `/memory-debug` 与历史 `/memory-debug [N]` 未使用样例口径一致
+  3. 新增 `previewUnusedEvidenceShouldIgnoreCaseAndWhitespaceVariance`，覆盖 `Debug  Skill` vs `debug skill` 误判场景
+  4. 新增 `buildDisplaySummaryShouldCompareUnusedEvidenceIgnoringCaseAndWhitespace`，覆盖单轮视图未使用样例去噪行为
+  5. 同步开发文档 `6.2` 完成标准新增第 30 条，明确未使用样例比对的格式兼容约束
+- 状态：已完成
+- 实际结果：
+  - `/memory-debug` 与 `/memory-debug [N]` 在证据文本仅存在大小写或空白差异时不再误报“未使用”，证据浪费诊断更准确
+  - 定向测试通过：`export JAVA_HOME=$(/usr/libexec/java_home) && mvn -q -Dtest=CliRunnerTest,MemoryEvidenceTraceTest test`
