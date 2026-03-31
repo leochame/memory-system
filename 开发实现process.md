@@ -1333,3 +1333,31 @@
 - 实际结果：
   - `/memory-debug [N]` 现在可在历史窗口直接看到 `evidence_types/evidence_purposes`，单轮与历史视图在反思证据语义上更一致
   - 定向测试通过：`./scripts/run-tests.sh -q -Dtest=CliRunnerTest,MemoryEvidenceTraceTest,ConversationCliTest test`
+
+#### 迭代记录 - 2026-03-31 23:59
+
+- 增强目标：继续执行 Step 6/6（调研与文档更新），围绕 Memory-System 扩展“更多内容”的第四层方案，将内容建设升级为“问题库化 + 专题化”长期机制
+- 涉及文件：修改 `开发文档.md`、修改 `开发实现process.md`
+- 实现方案：
+  1. 将开发文档版本升级至 `v4.11`，在 `5.10` 新增 `5.10.14 Step 6/6 内容扩展蓝图（第四层：问题库化与专题化）`
+  2. 新增 6 类内容方向：`Memory-System 100 问`、`反例与失效边界库`、`模块深潜专栏`、`对照实验周报`、`答辩问答弹药包`、`论文章节素材池`
+  3. 补齐 14 天冲刺执行方案，并定义索引字段 `topic_cluster/content_form/reuse_target/proof_level/next_refresh_at`
+  4. 在开发文档新增 `6.16 需求十四`，将问题库目录、专题目录、过期刷新机制、专题转 backlog 约束转化为可验收条款
+- 状态：已完成
+- 实际结果：
+  - Step 6/6 从“内容卡 -> 系列栏目 -> 资产包”进一步升级为“问题库化 + 专题化”第四层执行机制
+  - 围绕记忆系统形成“证据复盘 -> 系列产出 -> 资产打包 -> 问题库沉淀 -> 专题回流”的持续内容闭环，可直接服务开发迭代、答辩问答与论文章节组织
+
+#### 迭代记录 - 2026-03-31 13:25
+
+- 增强目标：继续执行 Step 2/6（6.2 记忆证据追踪），补齐历史 trace 在 `snake_case/camelCase` 字段命名差异下的兼容解析，避免 `/memory-debug` 跨版本回读丢字段
+- 涉及文件：修改 `src/main/java/com/memsys/cli/ConversationCli.java`、修改 `src/test/java/com/memsys/cli/ConversationCliTest.java`、修改 `开发文档.md`、修改 `开发实现process.md`
+- 实现方案：
+  1. `ConversationCli.parseEvidenceTrace(...)` 增加字段别名读取：`user_message/userMessage`、`memory_loaded/memoryLoaded`、`retrieved_* / used_*` 与对应 camelCase 版本、`used_evidence_summary/usedEvidenceSummary`
+  2. `parseReflectionMap(...)` 增加反思字段别名读取：`needs_memory/needsMemory`、`memory_purpose/memoryPurpose`、`retrieval_hint/retrievalHint`、`evidence_types/evidenceTypes`、`evidence_purposes/evidencePurposes`
+  3. 新增回归测试 `getLastEvidenceTraceShouldParseCamelCaseLegacyTraceFields`，覆盖 camelCase 历史 trace 的反思字段与证据字段解析
+  4. 同步开发文档 6.2 完成标准，新增“snake_case + camelCase 命名兼容”约束
+- 状态：已完成
+- 实际结果：
+  - `/memory-debug` 与 `/memory-debug [N]` 在跨版本 trace 字段命名不一致时仍能稳定展示反思语义与检索/使用证据
+  - 定向测试通过：`./scripts/run-tests.sh -q -Dtest=ConversationCliTest,CliRunnerTest test`

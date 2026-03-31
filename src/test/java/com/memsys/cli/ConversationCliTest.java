@@ -1649,6 +1649,80 @@ class ConversationCliTest {
     }
 
     @Test
+    void getLastEvidenceTraceShouldParseCamelCaseLegacyTraceFields() {
+        MemoryStorage storage = new MemoryStorage(tempDir.toString());
+        storage.writeMetadata(Map.of(
+                "global_controls", Map.of(
+                        "use_saved_memories", true,
+                        "use_chat_history", false
+                )
+        ));
+        SkillService skillService = new SkillService(tempDir.toString());
+        RecordingLlmClient llmClient = new RecordingLlmClient();
+        ConversationCli conversationCli = new ConversationCli(
+                llmClient,
+                storage,
+                new MemoryManager(storage, 100, 30, 15),
+                null,
+                alwaysNeedMemoryReflectionService(),
+                null,
+                null,
+                new AgentGuideService(tempDir.resolve("missing-Agent.md").toString(), tempDir.toString()),
+                new SystemPromptBuilder(),
+                new NoopMemoryAsyncService(),
+                null,
+                skillService,
+                null,
+                toolsWithoutRag(skillService),
+                40,
+                15,
+                false,
+                0.35,
+                5
+        );
+
+        Map<String, Object> traceRecord = new LinkedHashMap<>();
+        traceRecord.put("timestamp", LocalDateTime.now().toString());
+        traceRecord.put("userMessage", "camel case trace");
+        traceRecord.put("memoryLoaded", true);
+        traceRecord.put("reflection", Map.of(
+                "needsMemory", true,
+                "memoryPurpose", "continuity",
+                "reason", "legacy camel reflection",
+                "retrievalHint", "优先检索最近上下文",
+                "evidenceTypes", List.of("user_insight", "recent_history"),
+                "evidencePurposes", List.of("continuity")
+        ));
+        traceRecord.put("retrievedInsights", List.of("insight:a"));
+        traceRecord.put("usedInsights", List.of("insight:a"));
+        traceRecord.put("retrievedExamples", List.of("example:a"));
+        traceRecord.put("usedExamples", List.of("example:a"));
+        traceRecord.put("loadedSkills", List.of("debugging"));
+        traceRecord.put("usedSkills", List.of("debugging"));
+        traceRecord.put("retrievedTasks", List.of("task:a"));
+        traceRecord.put("usedTasks", List.of("task:a"));
+        traceRecord.put("usedEvidenceSummary", "all 1/1");
+        storage.appendMemoryEvidenceTrace(traceRecord);
+
+        MemoryEvidenceTrace trace = conversationCli.getLastEvidenceTrace();
+        assertThat(trace).isNotNull();
+        assertThat(trace.userMessage()).isEqualTo("camel case trace");
+        assertThat(trace.memoryLoaded()).isTrue();
+        assertThat(trace.reflection()).isNotNull();
+        assertThat(trace.reflection().needs_memory()).isTrue();
+        assertThat(trace.reflection().memory_purpose()).isEqualTo("CONTINUITY");
+        assertThat(trace.reflection().reason()).isEqualTo("legacy camel reflection");
+        assertThat(trace.reflection().retrieval_hint()).isEqualTo("优先检索最近上下文");
+        assertThat(trace.reflection().evidence_types()).containsExactly("USER_INSIGHT", "RECENT_HISTORY");
+        assertThat(trace.reflection().evidence_purposes()).containsExactly("continuity");
+        assertThat(trace.retrievedInsights()).containsExactly("insight:a");
+        assertThat(trace.usedInsights()).containsExactly("insight:a");
+        assertThat(trace.loadedSkills()).containsExactly("debugging");
+        assertThat(trace.usedSkills()).containsExactly("debugging");
+        assertThat(trace.usedEvidenceSummary()).isEqualTo("all 1/1");
+    }
+
+    @Test
     void getRecentEvidenceTracesShouldParseLegacyTimestampFormats() {
         MemoryStorage storage = new MemoryStorage(tempDir.toString());
         storage.writeMetadata(Map.of(

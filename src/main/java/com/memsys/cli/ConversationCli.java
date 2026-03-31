@@ -843,13 +843,13 @@ public class ConversationCli {
                 ? memoryManager.getTopOfMindMemories(topOfMindLimit)
                 : new ArrayList<>();
 
-        String userInsightsNarrative = shouldLoadMemory
+        String userInsightsNarrative = needsInsightEvidence
                 ? truncateForEvidence(storage.readUserInsightsNarrative(), BASE_PROFILE_MAX_CHARS)
                 : null;
 
         // Phase 8: 读取会话摘要，用于替代 olderUserMessages 压缩 prompt
         String sessionSummariesText = null;
-        if (useChatHistory && conversationSummaryService != null) {
+        if (useChatHistory && needsInsightEvidence && conversationSummaryService != null) {
             try {
                 List<Map<String, Object>> summaries = conversationSummaryService.getRecentSummaries(3);
                 if (summaries != null && !summaries.isEmpty()) {
@@ -1422,24 +1422,24 @@ public class ConversationCli {
         if (record == null || record.isEmpty()) {
             return null;
         }
-        LocalDateTime timestamp = parseTraceTimestamp(record.get("timestamp"));
+        LocalDateTime timestamp = parseTraceTimestamp(readFirstNonNull(record, "timestamp", "timeStamp"));
 
         ReflectionResult reflection = parseReflection(record);
 
         return new MemoryEvidenceTrace(
                 timestamp,
-                normalizeText(record.get("user_message")),
+                normalizeText(readFirstNonNull(record, "user_message", "userMessage")),
                 reflection,
-                parseBoolean(record.get("memory_loaded"), false),
-                normalizeStringList(record.get("retrieved_insights")),
-                normalizeStringList(record.get("used_insights")),
-                normalizeStringList(record.get("retrieved_examples")),
-                normalizeStringList(record.get("used_examples")),
-                normalizeStringList(record.get("loaded_skills")),
-                normalizeStringList(record.get("used_skills")),
-                normalizeStringList(record.get("retrieved_tasks")),
-                normalizeStringList(record.get("used_tasks")),
-                normalizeText(record.get("used_evidence_summary"))
+                parseBoolean(readFirstNonNull(record, "memory_loaded", "memoryLoaded"), false),
+                normalizeStringList(readFirstNonNull(record, "retrieved_insights", "retrievedInsights")),
+                normalizeStringList(readFirstNonNull(record, "used_insights", "usedInsights")),
+                normalizeStringList(readFirstNonNull(record, "retrieved_examples", "retrievedExamples")),
+                normalizeStringList(readFirstNonNull(record, "used_examples", "usedExamples")),
+                normalizeStringList(readFirstNonNull(record, "loaded_skills", "loadedSkills")),
+                normalizeStringList(readFirstNonNull(record, "used_skills", "usedSkills")),
+                normalizeStringList(readFirstNonNull(record, "retrieved_tasks", "retrievedTasks")),
+                normalizeStringList(readFirstNonNull(record, "used_tasks", "usedTasks")),
+                normalizeText(readFirstNonNull(record, "used_evidence_summary", "usedEvidenceSummary"))
         );
     }
 
@@ -1496,18 +1496,26 @@ public class ConversationCli {
         if (reflectionMap == null || reflectionMap.isEmpty()) {
             return null;
         }
-        Boolean needsMemory = parseOptionalBoolean(reflectionMap.get("needs_memory"));
+        Boolean needsMemory = parseOptionalBoolean(readFirstNonNull(reflectionMap, "needs_memory", "needsMemory"));
         if (needsMemory == null) {
             return null;
         }
-        String memoryPurpose = normalizeMemoryPurpose(normalizeText(reflectionMap.get("memory_purpose")), needsMemory);
-        String reason = normalizeText(reflectionMap.get("reason"));
-        double confidence = parseOptionalDouble(reflectionMap.get("confidence"), 0.7d);
-        String retrievalHint = normalizeRetrievalHint(normalizeText(reflectionMap.get("retrieval_hint")), needsMemory);
-        List<String> evidenceTypes = normalizeEvidenceTypes(normalizeStringList(reflectionMap.get("evidence_types")), needsMemory);
-        List<String> rawPurposes = normalizeStringList(reflectionMap.get("evidence_purposes"));
+        String memoryPurpose = normalizeMemoryPurpose(
+                normalizeText(readFirstNonNull(reflectionMap, "memory_purpose", "memoryPurpose")),
+                needsMemory);
+        String reason = normalizeText(readFirstNonNull(reflectionMap, "reason"));
+        double confidence = parseOptionalDouble(readFirstNonNull(reflectionMap, "confidence"), 0.7d);
+        String retrievalHint = normalizeRetrievalHint(
+                normalizeText(readFirstNonNull(reflectionMap, "retrieval_hint", "retrievalHint")),
+                needsMemory);
+        List<String> evidenceTypes = normalizeEvidenceTypes(
+                normalizeStringList(readFirstNonNull(reflectionMap, "evidence_types", "evidenceTypes")),
+                needsMemory);
+        List<String> rawPurposes = normalizeStringList(
+                readFirstNonNull(reflectionMap, "evidence_purposes", "evidencePurposes"));
         if (rawPurposes.isEmpty()) {
-            rawPurposes = normalizeStringList(reflectionMap.get("evidence_purpose"));
+            rawPurposes = normalizeStringList(
+                    readFirstNonNull(reflectionMap, "evidence_purpose", "evidencePurpose"));
         }
         List<String> purposes = normalizeEvidencePurposes(rawPurposes, needsMemory);
         return new ReflectionResult(
@@ -1519,6 +1527,22 @@ public class ConversationCli {
                 evidenceTypes,
                 purposes
         );
+    }
+
+    private Object readFirstNonNull(Map<String, Object> source, String... keys) {
+        if (source == null || source.isEmpty() || keys == null) {
+            return null;
+        }
+        for (String key : keys) {
+            if (key == null || key.isBlank()) {
+                continue;
+            }
+            Object value = source.get(key);
+            if (value != null) {
+                return value;
+            }
+        }
+        return null;
     }
 
     private String normalizeMemoryPurpose(String memoryPurpose, boolean needsMemory) {
