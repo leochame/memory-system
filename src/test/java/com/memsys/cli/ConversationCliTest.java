@@ -1405,7 +1405,7 @@ class ConversationCliTest {
         MemoryEvidenceTrace trace = conversationCli.getLastEvidenceTrace();
         assertThat(trace).isNotNull();
         assertThat(trace.reflection()).isNotNull();
-        assertThat(trace.reflection().evidence_types()).containsExactly("USER_INSIGHT", "RECENT_HISTORY");
+        assertThat(trace.reflection().evidence_types()).containsExactly("SESSION_SUMMARY", "USER_INSIGHT", "RECENT_HISTORY");
         assertThat(trace.reflection().evidence_purposes()).containsExactly("continuity");
     }
 
@@ -1591,7 +1591,7 @@ class ConversationCliTest {
         storage.appendMemoryEvidenceTrace(olderTrace);
 
         Map<String, Object> latestTrace = new LinkedHashMap<>();
-        latestTrace.put("timestamp", LocalDateTime.now().toString());
+        latestTrace.put("timestamp", LocalDateTime.now().minusSeconds(10).toString());
         latestTrace.put("user_message", "legacy percentage confidence");
         latestTrace.put("memory_loaded", true);
         latestTrace.put("reflection", Map.of(
@@ -1610,12 +1610,34 @@ class ConversationCliTest {
         latestTrace.put("used_evidence_summary", "none");
         storage.appendMemoryEvidenceTrace(latestTrace);
 
-        List<MemoryEvidenceTrace> traces = conversationCli.getRecentEvidenceTraces(2);
-        assertThat(traces).hasSize(2);
+        Map<String, Object> latestPercentStringTrace = new LinkedHashMap<>();
+        latestPercentStringTrace.put("timestamp", LocalDateTime.now().toString());
+        latestPercentStringTrace.put("user_message", "legacy percent-string confidence");
+        latestPercentStringTrace.put("memory_loaded", true);
+        latestPercentStringTrace.put("reflection", Map.of(
+                "needs_memory", true,
+                "reason", "percent-string confidence",
+                "confidence", "85%"
+        ));
+        latestPercentStringTrace.put("retrieved_insights", List.of());
+        latestPercentStringTrace.put("used_insights", List.of());
+        latestPercentStringTrace.put("retrieved_examples", List.of());
+        latestPercentStringTrace.put("used_examples", List.of());
+        latestPercentStringTrace.put("loaded_skills", List.of());
+        latestPercentStringTrace.put("used_skills", List.of());
+        latestPercentStringTrace.put("retrieved_tasks", List.of());
+        latestPercentStringTrace.put("used_tasks", List.of());
+        latestPercentStringTrace.put("used_evidence_summary", "none");
+        storage.appendMemoryEvidenceTrace(latestPercentStringTrace);
+
+        List<MemoryEvidenceTrace> traces = conversationCli.getRecentEvidenceTraces(3);
+        assertThat(traces).hasSize(3);
         assertThat(traces.get(0).reflection()).isNotNull();
         assertThat(traces.get(1).reflection()).isNotNull();
+        assertThat(traces.get(2).reflection()).isNotNull();
         assertThat(traces.get(0).reflection().confidence()).isEqualTo(1.0d);
         assertThat(traces.get(1).reflection().confidence()).isEqualTo(0.87d);
+        assertThat(traces.get(2).reflection().confidence()).isEqualTo(0.85d);
     }
 
     @Test

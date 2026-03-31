@@ -88,7 +88,7 @@ class MemoryReflectionServiceTest {
 
         assertThat(result.needs_memory()).isTrue();
         assertThat(result.memory_purpose()).isEqualTo("CONTINUITY");
-        assertThat(result.evidence_types()).containsExactly("USER_INSIGHT", "RECENT_HISTORY");
+        assertThat(result.evidence_types()).containsExactly("SESSION_SUMMARY", "USER_INSIGHT", "RECENT_HISTORY");
         assertThat(result.confidence()).isEqualTo(1.0d);
         assertThat(result.evidence_purposes()).containsExactly("continuity");
     }

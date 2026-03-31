@@ -1756,6 +1756,17 @@ public class ConversationCli {
         if (text.isBlank()) {
             return defaultValue;
         }
+        if (text.endsWith("%") || text.endsWith("％")) {
+            String numeric = text.substring(0, text.length() - 1).trim();
+            if (numeric.isBlank()) {
+                return defaultValue;
+            }
+            try {
+                return normalizeConfidence(Double.parseDouble(numeric), defaultValue);
+            } catch (NumberFormatException ignored) {
+                return defaultValue;
+            }
+        }
         try {
             return normalizeConfidence(Double.parseDouble(text), defaultValue);
         } catch (NumberFormatException ignored) {

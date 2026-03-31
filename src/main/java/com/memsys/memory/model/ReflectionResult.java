@@ -85,11 +85,12 @@ public record ReflectionResult(
         String normalized = normalizePurposeKey(memoryPurpose);
         return switch (normalized) {
             case "PERSONALIZATION" -> List.of("USER_INSIGHT", "RECENT_HISTORY");
+            case "CONTINUITY" -> List.of("SESSION_SUMMARY", "USER_INSIGHT", "RECENT_HISTORY");
             case "CONSTRAINT" -> List.of("USER_INSIGHT", "RECENT_HISTORY");
             case "EXPERIENCE_REUSE" -> List.of("EXAMPLE");
             case "ACTION_FOLLOWUP" -> List.of("TASK", "RECENT_HISTORY");
             case "NOT_NEEDED" -> List.of();
-            default -> List.of("USER_INSIGHT", "RECENT_HISTORY");
+            default -> List.of("SESSION_SUMMARY", "USER_INSIGHT", "RECENT_HISTORY");
         };
     }
 

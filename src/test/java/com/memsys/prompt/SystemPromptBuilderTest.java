@@ -132,7 +132,7 @@ class SystemPromptBuilderTest {
         assertThat(prompt).contains("reason: 需要调用长期记忆以保证回答质量。");
         assertThat(prompt).contains("confidence: 0.70");
         assertThat(prompt).contains("retrieval_hint: 优先检索与用户当前问题最相关的历史证据。");
-        assertThat(prompt).contains("evidence_types: USER_INSIGHT, RECENT_HISTORY");
+        assertThat(prompt).contains("evidence_types: SESSION_SUMMARY, USER_INSIGHT, RECENT_HISTORY");
         assertThat(prompt).contains("evidence_purposes: continuity");
     }
 

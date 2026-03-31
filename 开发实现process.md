@@ -1463,3 +1463,30 @@
   - `bash -n scripts/run-real-api-e2e.sh` 语法检查通过
   - 回归通过：`./scripts/run-tests.sh -q -Dtest=ConversationCliTest test`
   - Step 4/6 在运行环境错误可诊断性上补齐“提前失败 + 清晰提示”闭环，降低首次联调成本
+
+#### 迭代记录 - 2026-03-31 14:37
+
+- 增强目标：继续执行 Step 6/6（调研与文档更新），围绕 Memory-System 打造“更多内容”的第七层方案，将内容体系升级为“场景赛题化 + 公开挑战集”
+- 涉及文件：修改 `开发文档.md`、修改 `开发实现process.md`
+- 实现方案：
+  1. 将开发文档版本升级至 `v4.17`，在 `5.10` 新增 `5.10.17 Step 6/6 内容扩展蓝图（第七层：场景赛题化与公开挑战集）`
+  2. 新增 8 类挑战型内容资产：`场景挑战卡`、`回归闯关榜`、`误判样本周榜`、`挑战脚本包`、`修复前后对照卡`、`挑战讲解稿`、`外部复测回执卡`、`挑战赛季总览`
+  3. 固化挑战集执行机制（周新增/周回放/双周对照/月总览）与新增索引字段：`challenge_id/challenge_scene/expected_outcome/failure_signature/fix_commit_ref/replay_script_ref/external_retest_status/challenge_score`
+  4. 在开发文档新增 `6.19 需求十七`，将挑战目录规范、失败样本占比、修复前后对照约束与周度执行小结转化为可验收条款
+- 状态：已完成
+- 实际结果：
+  - Step 6/6 从“专题季化与对照评测产品化”进一步升级为“场景赛题化挑战集”，内容可被外部复测和持续对照，提升可验证性与展示说服力
+  - 围绕记忆系统形成“挑战场景 -> 回放验证 -> 修复对照 -> 外部复测 -> 回流开发”的新闭环，后续可稳定用于答辩演示与周度迭代评估
+
+#### 迭代记录 - 2026-03-31 17:05
+
+- 增强目标：继续执行 Step 2/6（6.2 记忆证据追踪），补齐历史 trace 在百分号字符串 `confidence` 下的兼容解析，避免 `/memory-debug` 置信度回退默认值
+- 涉及文件：修改 `src/main/java/com/memsys/cli/ConversationCli.java`、修改 `src/test/java/com/memsys/cli/ConversationCliTest.java`、修改 `开发文档.md`、修改 `开发实现process.md`
+- 实现方案：
+  1. 在 `ConversationCli.parseOptionalDouble(...)` 增加百分号字符串兼容：支持 `%` 与全角 `％`，先去掉百分号再走统一 `normalizeConfidence(...)` 归一化
+  2. 扩展回归测试 `getLastEvidenceTraceShouldNormalizeLegacyConfidenceScales`，新增 `"85%"` 场景并断言解析为 `0.85`
+  3. 同步开发文档 6.2 完成标准，新增“百分号字符串置信度兼容”约束
+- 状态：已完成
+- 实际结果：
+  - 历史 trace 中 `confidence="85%"` / `confidence="85 %"` / `confidence="85％"` 可稳定归一化为 `0.85`
+  - `/memory-debug` 与 `/memory-debug [N]` 在跨系统导出置信度格式下展示更稳定，减少默认值回退造成的诊断偏差
