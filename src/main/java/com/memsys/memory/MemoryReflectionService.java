@@ -107,16 +107,19 @@ public class MemoryReflectionService {
             return 0.7d;
         }
         double value = confidence;
-        if (value > 1.0d) {
-            value = value / 100.0d;
-        }
         if (value < 0.0d) {
             return 0.0d;
         }
-        if (value > 1.0d) {
+        if (value <= 1.0d) {
+            return value;
+        }
+        if (value <= 2.0d) {
             return 1.0d;
         }
-        return value;
+        if (value <= 100.0d) {
+            return value / 100.0d;
+        }
+        return 1.0d;
     }
 
     private String normalizeRetrievalHint(String retrievalHint, boolean needsMemory) {

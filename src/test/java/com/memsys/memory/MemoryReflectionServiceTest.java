@@ -158,4 +158,37 @@ class MemoryReflectionServiceTest {
 
         assertThat(result.confidence()).isEqualTo(0.7d);
     }
+
+    @Test
+    void reflectShouldNormalizeLegacyConfidenceScales() {
+        LlmExtractionService extractionService = mock(LlmExtractionService.class);
+        when(extractionService.reflectMemoryNeed(anyString()))
+                .thenReturn(
+                        new MemoryReflectionResult(
+                                true,
+                                "CONTINUITY",
+                                "需要历史信息",
+                                1.2d,
+                                "优先看最近上下文",
+                                List.of("RECENT_HISTORY"),
+                                List.of("continuity")
+                        ))
+                .thenReturn(
+                        new MemoryReflectionResult(
+                                true,
+                                "CONTINUITY",
+                                "需要历史信息",
+                                87d,
+                                "优先看最近上下文",
+                                List.of("RECENT_HISTORY"),
+                                List.of("continuity")
+                        ));
+
+        MemoryReflectionService service = new MemoryReflectionService(extractionService);
+        ReflectionResult minorOverflow = service.reflect("继续上次任务", "上次讨论了部署计划");
+        ReflectionResult percentageScale = service.reflect("继续上次任务", "上次讨论了部署计划");
+
+        assertThat(minorOverflow.confidence()).isEqualTo(1.0d);
+        assertThat(percentageScale.confidence()).isEqualTo(0.87d);
+    }
 }

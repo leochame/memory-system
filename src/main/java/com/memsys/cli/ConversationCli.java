@@ -1560,14 +1560,21 @@ public class ConversationCli {
         if (Double.isNaN(value) || Double.isInfinite(value)) {
             return defaultValue;
         }
-        double normalized = value > 1.0d ? value / 100.0d : value;
-        if (normalized < 0.0d) {
+        if (value < 0.0d) {
             return 0.0d;
         }
-        if (normalized > 1.0d) {
+        if (value <= 1.0d) {
+            return value;
+        }
+        // Align with system prompt confidence normalization:
+        // slight overflow on [0,1] scale -> clamp, percentage-style input -> divide by 100.
+        if (value <= 2.0d) {
             return 1.0d;
         }
-        return normalized;
+        if (value <= 100.0d) {
+            return value / 100.0d;
+        }
+        return 1.0d;
     }
 
     /**

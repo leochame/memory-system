@@ -1100,3 +1100,34 @@
   - 修复后提示词中的 `confidence` 字段不再出现不合理的过小值
   - 定向测试通过：`./scripts/run-tests.sh -q -Dtest=SystemPromptBuilderTest test`
   - 全量测试通过：`./scripts/run-tests.sh -q test`
+
+#### 迭代记录 - 2026-03-31 16:45
+
+- 增强目标：继续执行 Step 6/6（调研深化与文档更新），围绕 Memory-System 从“内容产出规范”升级为“内容增长飞轮 + 实验机制 + 资产治理”三位一体方案
+- 涉及文件：修改 `开发文档.md`、修改 `开发实现process.md`
+- 实现方案：
+  1. 扩展开发文档 5.10，新增 `5.10.5/5.10.6/5.10.7`，分别定义内容增长飞轮、内容实验框架、内容资产治理约束
+  2. 将内容来源与系统命令进行一对一映射（`/memory-insights`、`/memory-debug [N]`、`/memory-scenes`、`/tasks`），确保每类内容都有固定证据入口
+  3. 明确实验字段（`experiment_id/hypothesis/variant/success_metric/result`）与治理字段（`verification_status/stale_after/retraction_note`），降低“只产出不验证”风险
+  4. 在开发文档新增 `6.11 需求九`，把“实验频次、索引完整度、过期结论占比、回流数量”转化为可验收标准
+- 状态：已完成
+- 实际结果：
+  - Step 6/6 从“内容运营流程”进一步升级为“增长与治理并重”的执行框架，内容可持续性与可信度约束更完整
+  - 围绕记忆系统形成“证据采样 -> 内容产品化 -> 反馈回流 -> 开发验证”的稳定闭环，后续可直接按月度指标跟踪
+
+#### 迭代记录 - 2026-03-31 17:20
+
+- 增强目标：继续执行 Step 2/6（6.2 记忆证据追踪），修复历史 trace 回读时 `confidence` 量纲兼容缺口，避免 `/memory-debug` 展示异常低置信度
+- 涉及文件：修改 `src/main/java/com/memsys/cli/ConversationCli.java`、修改 `src/test/java/com/memsys/cli/ConversationCliTest.java`、修改 `开发文档.md`、修改 `开发实现process.md`
+- 实现方案：
+  1. 调整 `ConversationCli.normalizeConfidence(...)`，与 `SystemPromptBuilder` 保持一致：
+     - `0~1` 保持原值
+     - `1~2` 视为轻微越界并钳制为 `1.0`
+     - `2~100` 视为百分制并归一化为 `0~1`
+     - 非法/超范围值按安全边界回退
+  2. 新增回归测试 `getLastEvidenceTraceShouldNormalizeLegacyConfidenceScales`，验证 `1.2 -> 1.0`、`87 -> 0.87`
+  3. 同步开发文档 6.2 完成标准，补充“历史 confidence 量纲兼容”约束
+- 状态：已完成
+- 实际结果：
+  - `/memory-debug` 与 `/memory-debug [N]` 对 legacy trace 的置信度展示与主提示词归一化规则一致
+  - 规避了历史数据轻微越界值被误缩放到极低置信度的可观测偏差

@@ -1124,6 +1124,87 @@ class ConversationCliTest {
     }
 
     @Test
+    void getLastEvidenceTraceShouldNormalizeLegacyConfidenceScales() {
+        MemoryStorage storage = new MemoryStorage(tempDir.toString());
+        storage.writeMetadata(Map.of(
+                "global_controls", Map.of(
+                        "use_saved_memories", true,
+                        "use_chat_history", false
+                )
+        ));
+        SkillService skillService = new SkillService(tempDir.toString());
+        RecordingLlmClient llmClient = new RecordingLlmClient();
+        ConversationCli conversationCli = new ConversationCli(
+                llmClient,
+                storage,
+                new MemoryManager(storage, 100, 30, 15),
+                null,
+                alwaysNeedMemoryReflectionService(),
+                null,
+                null,
+                new AgentGuideService(tempDir.resolve("missing-Agent.md").toString(), tempDir.toString()),
+                new SystemPromptBuilder(),
+                new NoopMemoryAsyncService(),
+                null,
+                skillService,
+                null,
+                toolsWithoutRag(skillService),
+                40,
+                15,
+                false,
+                0.35,
+                5
+        );
+
+        Map<String, Object> olderTrace = new LinkedHashMap<>();
+        olderTrace.put("timestamp", LocalDateTime.now().minusMinutes(1).toString());
+        olderTrace.put("user_message", "legacy minor overflow");
+        olderTrace.put("memory_loaded", true);
+        olderTrace.put("reflection", Map.of(
+                "needs_memory", true,
+                "reason", "minor overflow confidence",
+                "confidence", 1.2d
+        ));
+        olderTrace.put("retrieved_insights", List.of());
+        olderTrace.put("used_insights", List.of());
+        olderTrace.put("retrieved_examples", List.of());
+        olderTrace.put("used_examples", List.of());
+        olderTrace.put("loaded_skills", List.of());
+        olderTrace.put("used_skills", List.of());
+        olderTrace.put("retrieved_tasks", List.of());
+        olderTrace.put("used_tasks", List.of());
+        olderTrace.put("used_evidence_summary", "none");
+        storage.appendMemoryEvidenceTrace(olderTrace);
+
+        Map<String, Object> latestTrace = new LinkedHashMap<>();
+        latestTrace.put("timestamp", LocalDateTime.now().toString());
+        latestTrace.put("user_message", "legacy percentage confidence");
+        latestTrace.put("memory_loaded", true);
+        latestTrace.put("reflection", Map.of(
+                "needs_memory", true,
+                "reason", "percentage confidence",
+                "confidence", 87
+        ));
+        latestTrace.put("retrieved_insights", List.of());
+        latestTrace.put("used_insights", List.of());
+        latestTrace.put("retrieved_examples", List.of());
+        latestTrace.put("used_examples", List.of());
+        latestTrace.put("loaded_skills", List.of());
+        latestTrace.put("used_skills", List.of());
+        latestTrace.put("retrieved_tasks", List.of());
+        latestTrace.put("used_tasks", List.of());
+        latestTrace.put("used_evidence_summary", "none");
+        storage.appendMemoryEvidenceTrace(latestTrace);
+
+        List<MemoryEvidenceTrace> traces = conversationCli.getRecentEvidenceTraces(2);
+        assertThat(traces).hasSize(2);
+        assertThat(traces.get(0).reflection()).isNotNull();
+        assertThat(traces.get(1).reflection()).isNotNull();
+        assertThat(traces.get(0).reflection().confidence()).isEqualTo(1.0d);
+        assertThat(traces.get(1).reflection().confidence()).isEqualTo(0.87d);
+    }
+
+    @Test
     void getRecentEvidenceTracesShouldReuseNormalizedParsingForHistoryView() {
         MemoryStorage storage = new MemoryStorage(tempDir.toString());
         storage.writeMetadata(Map.of(
