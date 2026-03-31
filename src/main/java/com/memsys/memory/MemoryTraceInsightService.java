@@ -585,8 +585,12 @@ public class MemoryTraceInsightService {
         String candidate = entryKey.trim();
         if (candidate.startsWith("#")) {
             String fragment = candidate.substring(1).stripLeading();
+            if (fragment.isBlank()) {
+                return null;
+            }
+            candidate = fragment;
             if (fragment.startsWith("/") || fragment.startsWith("\\")) {
-                candidate = fragment.substring(1);
+                candidate = fragment.substring(1).stripLeading();
             }
         } else if (candidate.startsWith("/") || candidate.startsWith("\\")) {
             candidate = candidate.substring(1);

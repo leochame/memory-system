@@ -2294,3 +2294,45 @@
   - Step 4/6 在 backslash-path 兼容性上补齐“分隔符空白清洗 + fragment 前缀归一化 + 统计一致”闭环
   - 定向测试通过：`export JAVA_HOME=$(/usr/libexec/java_home) && mvn -q -Dtest=ConversationCliTest,MemoryTraceInsightServiceTest test`
   - 全量测试通过：`./scripts/run-tests.sh`（191 passed, 0 failed, 1 skipped）
+
+#### 迭代记录 - 2026-03-31 23:20
+
+- 增强目标：继续执行 Step 6/6（调研与文档更新），围绕记忆系统补齐“跨周期叙事与季度主题计划”能力，确保内容资产可持续复用到开发、论文与答辩
+- 涉及文件：修改 `开发文档.md`、修改 `开发实现process.md`
+- 实现方案：
+  1. 将开发文档版本升级至 `v4.45`，并保持更新日期为 `2026-03-31`
+  2. 在 `5.10` 新增 `5.10.31 Step 6/6 内容扩展蓝图（第二十一层：记忆资产叙事引擎与季度主题计划）`
+  3. 新增“主题演进链路卡、跨版本收益账本卡、叙事证据锚点卡、季度主题总览卡”等内容资产方向
+  4. 补齐季度执行机制、索引字段与验收门槛，确保内容可回放、可对照、可复测
+- 状态：已完成
+- 实际结果：
+  - Step 6/6 从“单条内容产出”升级为“主题化叙事 + 季度化运营”框架，可系统回答“记忆系统在跨周期内如何持续改进”
+  - 新增索引字段（`theme_id/narrative_stage/version_window/anchor_evidence_refs/quarter_tag/defense_ready`）后，内容资产与答辩脚本可建立稳定映射
+  - 本次变更为文档调研更新，无代码逻辑改动，无需运行测试
+
+#### 迭代记录 - 2026-03-31 23:24
+
+- 增强目标：围绕 Step 1/6（6.1 Memory Reflection 调用链）按开发文档 `v4.45` 复核当前项目，确认“结构化决策 -> 主链路反思 -> 按决策加载记忆 -> Prompt 显式消费 -> 失败回退”闭环
+- 涉及文件：修改 `开发实现process.md`
+- 实现方案：
+  1. 对照 `开发文档.md` 第 `6.1` 条逐项核查 `LlmDtos/MemoryReflectionService/ConversationCli/SystemPromptBuilder` 的实现与归一化逻辑
+  2. 执行 Step 1/6 定向回归：`export JAVA_HOME=$(/usr/libexec/java_home) && mvn -q -Dtest=ReflectionResultTest,MemoryReflectionServiceTest,SystemPromptBuilderTest,ConversationCliTest test`
+- 状态：已完成
+- 实际结果：
+  - 当前实现与开发文档 `v4.45` 的 Step 1/6 要求保持一致，未发现需新增代码的缺口
+  - 定向回归通过，Step 1/6 维持完成态，可进入下一步
+
+#### 迭代记录 - 2026-03-31 23:17
+
+- 增强目标：继续执行 Step 2/6（6.2 记忆证据追踪），补齐历史 trace 在“JSONPath URI Fragment 扁平字段（`#$. ...`）”格式下的兼容解析，避免 `/memory-debug` 与 `/memory-insights` 在跨系统导出 JSONPath 片段路径时出现覆盖率误判
+- 涉及文件：修改 `src/main/java/com/memsys/cli/ConversationCli.java`、修改 `src/main/java/com/memsys/memory/MemoryTraceInsightService.java`、修改 `src/test/java/com/memsys/cli/ConversationCliTest.java`、修改 `src/test/java/com/memsys/memory/MemoryTraceInsightServiceTest.java`、修改 `开发文档.md`、修改 `开发实现process.md`
+- 实现方案：
+  1. 在 `ConversationCli.flattenedKeySuffix(...)` 调整 fragment 预处理：`#` 前缀统一先剥离为片段内容，再复用现有 JSONPath 入口解析（`$.` / `$[...]`）
+  2. 在 `MemoryTraceInsightService.flattenedKeySuffix(...)` 同步应用同级规则，确保 `/memory-insights` 与 `/memory-debug` 解析口径一致
+  3. 新增 `getLastEvidenceTraceShouldParseFlattenedJsonPathFragmentTraceFields`，覆盖 `/memory-debug` 在 `#$.reflection.needs_memory`、`#$['evidence']['retrieved']['insights'][0]`、`#$[loaded][skills][1]` 等场景下的回读
+  4. 新增 `analyzeRecentTracesShouldParseFlattenedJsonPathFragmentTraceFields`，覆盖 `/memory-insights` 在同场景下的 retrieved/used 统计一致性
+  5. 同步开发文档升级至 `v4.46`，并在 `6.2` 完成标准新增第 47 条，明确“JSONPath URI Fragment 扁平字段兼容”约束
+- 状态：已完成
+- 实际结果：
+  - `/memory-debug` 与 `/memory-insights` 可稳定回读 `#$.reflection.needs_memory`、`#$['evidence']['retrieved']['insights'][0]`、`#$.retrieved.examples[0]`、`#$[loaded][skills][1]` 等 `# + JSONPath` 组合字段，不再因 fragment 前缀导致路径丢失
+  - Step 2/6 的跨来源 trace 兼容能力从“JSONPath 路径”扩展到“JSONPath URI Fragment 路径”，进一步降低跨系统导入后的排障成本
