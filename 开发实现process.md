@@ -1131,3 +1131,31 @@
 - 实际结果：
   - `/memory-debug` 与 `/memory-debug [N]` 对 legacy trace 的置信度展示与主提示词归一化规则一致
   - 规避了历史数据轻微越界值被误缩放到极低置信度的可观测偏差
+
+#### 迭代记录 - 2026-03-31 17:40
+
+- 增强目标：执行 Step 1/6（6.1 Memory Reflection 调用链）防御性加固，避免提示词出现反思语义冲突
+- 涉及文件：修改 `src/main/java/com/memsys/prompt/SystemPromptBuilder.java`、修改 `src/test/java/com/memsys/prompt/SystemPromptBuilderTest.java`、修改 `开发实现process.md`
+- 实现方案：
+  1. `SystemPromptBuilder.normalizeMemoryPurpose(...)` 增强为严格规范化：`needs_memory=false` 时强制输出 `NOT_NEEDED`
+  2. 当 `needs_memory=true` 且上游返回非法/冲突 `memory_purpose`（如 `NOT_NEEDED`）时，统一回退到 `CONTINUITY`
+  3. 新增回归测试 `buildSystemPromptShouldForceNotNeededPurposeWhenNeedsMemoryIsFalse`，锁定无记忆场景的提示词稳定语义
+- 状态：已完成
+- 实际结果：
+  - Step 1/6 链路在 Prompt 层进一步具备容错能力，即使上游反思字段异常也不会输出矛盾语义
+  - 定向测试通过：`./scripts/run-tests.sh -q -Dtest=SystemPromptBuilderTest,MemoryReflectionServiceTest,ConversationCliTest test`
+
+#### 迭代记录 - 2026-03-31 18:05
+
+- 增强目标：继续执行 Step 2/6（6.2 记忆证据追踪），补齐“二次字符串化 JSON trace”兼容，避免 `/memory-debug` 在历史回读中展示原始转义字符串
+- 涉及文件：修改 `src/main/java/com/memsys/cli/ConversationCli.java`、修改 `src/test/java/com/memsys/cli/ConversationCliTest.java`、修改 `开发文档.md`、修改 `开发实现process.md`
+- 实现方案：
+  1. `ConversationCli` 新增 `unwrapJsonString(...)`，统一解包 `\"{...}\"` / `\"[...]\"` 形态字段
+  2. `parseReflectionFromJsonText(...)` 与 `parseStringListFromJsonText(...)` 统一先解包再解析，覆盖嵌套字符串化场景
+  3. 新增回归测试 `getLastEvidenceTraceShouldParseDoubleStringifiedReflectionAndListFields`，验证单轮回读兼容
+  4. 新增回归测试 `getRecentEvidenceTracesShouldParseDoubleStringifiedFieldsInHistoryView`，验证历史窗口与单轮视图一致
+  5. 同步开发文档 6.2 完成标准，新增“二次字符串化 JSON 兼容”约束
+- 状态：已完成
+- 实际结果：
+  - `/memory-debug` 与 `/memory-debug [N]` 在 legacy 迁移或外部写入导致的双层转义场景下仍可稳定解析 trace
+  - 证据追踪链路的跨版本兼容性与可观测性进一步提升

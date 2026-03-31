@@ -189,10 +189,20 @@ public class SystemPromptBuilder {
     }
 
     private String normalizeMemoryPurpose(String memoryPurpose, boolean needsMemory) {
-        if (memoryPurpose == null || memoryPurpose.isBlank()) {
-            return needsMemory ? "CONTINUITY" : "NOT_NEEDED";
+        if (!needsMemory) {
+            return "NOT_NEEDED";
         }
-        return memoryPurpose.trim();
+        if (memoryPurpose == null || memoryPurpose.isBlank()) {
+            return "CONTINUITY";
+        }
+        String normalized = memoryPurpose.trim().toUpperCase(Locale.ROOT);
+        if ("NOT_NEEDED".equals(normalized)) {
+            return "CONTINUITY";
+        }
+        if (ReflectionResult.KNOWN_MEMORY_PURPOSES.contains(normalized)) {
+            return normalized;
+        }
+        return "CONTINUITY";
     }
 
     private String normalizeReason(String reason, boolean needsMemory) {

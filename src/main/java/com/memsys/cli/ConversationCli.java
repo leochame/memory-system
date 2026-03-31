@@ -1491,10 +1491,10 @@ public class ConversationCli {
 
     @SuppressWarnings("unchecked")
     private ReflectionResult parseReflectionFromJsonText(String rawText) {
-        if (rawText == null) {
+        String text = unwrapJsonString(rawText);
+        if (text == null) {
             return null;
         }
-        String text = rawText.trim();
         if (text.isBlank() || !text.startsWith("{") || !text.endsWith("}")) {
             return null;
         }
@@ -1508,10 +1508,10 @@ public class ConversationCli {
     }
 
     private List<String> parseStringListFromJsonText(String rawText) {
-        if (rawText == null) {
+        String text = unwrapJsonString(rawText);
+        if (text == null) {
             return List.of();
         }
-        String text = rawText.trim();
         if (text.isBlank() || !text.startsWith("[") || !text.endsWith("]")) {
             return List.of();
         }
@@ -1525,6 +1525,32 @@ public class ConversationCli {
         } catch (Exception ignored) {
             return List.of();
         }
+    }
+
+    private String unwrapJsonString(String rawText) {
+        if (rawText == null) {
+            return null;
+        }
+        String text = rawText.trim();
+        if (text.isBlank()) {
+            return text;
+        }
+        if ((text.startsWith("{") && text.endsWith("}"))
+                || (text.startsWith("[") && text.endsWith("]"))) {
+            return text;
+        }
+        if (text.length() >= 2 && text.startsWith("\"") && text.endsWith("\"")) {
+            try {
+                String unwrapped = TRACE_PARSER.readValue(text, String.class);
+                if (unwrapped == null) {
+                    return null;
+                }
+                return unwrapped.trim();
+            } catch (Exception ignored) {
+                return text;
+            }
+        }
+        return text;
     }
 
     private String normalizeText(Object value) {

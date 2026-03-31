@@ -195,6 +195,41 @@ class SystemPromptBuilderTest {
         assertThat(percentagePrompt).contains("confidence: 0.87");
     }
 
+    @Test
+    void buildSystemPromptShouldForceNotNeededPurposeWhenNeedsMemoryIsFalse() {
+        String prompt = builder.buildSystemPrompt(
+                "",
+                null,
+                null,
+                new ReflectionResult(
+                        false,
+                        "PERSONALIZATION",
+                        "无需记忆",
+                        0.95d,
+                        "should be hidden",
+                        List.of("USER_INSIGHT"),
+                        List.of("personalization")
+                ),
+                List.<Map<String, Object>>of(),
+                null,
+                List.<String>of(),
+                false,
+                false,
+                false,
+                false,
+                false,
+                false,
+                List.<String>of(),
+                null,
+                List.<RagService.RelevantMemory>of(),
+                null
+        );
+
+        assertThat(prompt).contains("needs_memory: false");
+        assertThat(prompt).contains("memory_purpose: NOT_NEEDED");
+        assertThat(prompt).doesNotContain("retrieval_hint:");
+    }
+
     private void assertSectionOrder(String prompt, String... sections) {
         int lastIndex = -1;
         for (String section : sections) {

@@ -1124,6 +1124,67 @@ class ConversationCliTest {
     }
 
     @Test
+    void getLastEvidenceTraceShouldParseDoubleStringifiedReflectionAndListFields() {
+        MemoryStorage storage = new MemoryStorage(tempDir.toString());
+        storage.writeMetadata(Map.of(
+                "global_controls", Map.of(
+                        "use_saved_memories", true,
+                        "use_chat_history", false
+                )
+        ));
+        SkillService skillService = new SkillService(tempDir.toString());
+        RecordingLlmClient llmClient = new RecordingLlmClient();
+        ConversationCli conversationCli = new ConversationCli(
+                llmClient,
+                storage,
+                new MemoryManager(storage, 100, 30, 15),
+                null,
+                alwaysNeedMemoryReflectionService(),
+                null,
+                null,
+                new AgentGuideService(tempDir.resolve("missing-Agent.md").toString(), tempDir.toString()),
+                new SystemPromptBuilder(),
+                new NoopMemoryAsyncService(),
+                null,
+                skillService,
+                null,
+                toolsWithoutRag(skillService),
+                40,
+                15,
+                false,
+                0.35,
+                5
+        );
+
+        Map<String, Object> traceRecord = new LinkedHashMap<>();
+        traceRecord.put("timestamp", LocalDateTime.now().toString());
+        traceRecord.put("user_message", "继续追踪");
+        traceRecord.put("memory_loaded", true);
+        traceRecord.put("reflection", "\"{\\\"needs_memory\\\":true,\\\"reason\\\":\\\"double stringified reflection\\\",\\\"evidence_purposes\\\":[\\\"continuity\\\"]}\"");
+        traceRecord.put("retrieved_insights", "\"[\\\"food_preference: 不吃鱼\\\", \\\"project: memory-system\\\"]\"");
+        traceRecord.put("used_insights", "\"[\\\"project: memory-system\\\"]\"");
+        traceRecord.put("retrieved_examples", "\"[]\"");
+        traceRecord.put("used_examples", "\"[]\"");
+        traceRecord.put("loaded_skills", "\"[\\\"debugging\\\"]\"");
+        traceRecord.put("used_skills", "\"[\\\"debugging\\\"]\"");
+        traceRecord.put("retrieved_tasks", "\"[]\"");
+        traceRecord.put("used_tasks", "\"[]\"");
+        traceRecord.put("used_evidence_summary", "insights 1/2");
+        storage.appendMemoryEvidenceTrace(traceRecord);
+
+        MemoryEvidenceTrace trace = conversationCli.getLastEvidenceTrace();
+        assertThat(trace).isNotNull();
+        assertThat(trace.reflection()).isNotNull();
+        assertThat(trace.reflection().needs_memory()).isTrue();
+        assertThat(trace.reflection().reason()).isEqualTo("double stringified reflection");
+        assertThat(trace.reflection().evidence_purposes()).containsExactly("continuity");
+        assertThat(trace.retrievedInsights()).containsExactly("food_preference: 不吃鱼", "project: memory-system");
+        assertThat(trace.usedInsights()).containsExactly("project: memory-system");
+        assertThat(trace.loadedSkills()).containsExactly("debugging");
+        assertThat(trace.usedSkills()).containsExactly("debugging");
+    }
+
+    @Test
     void getLastEvidenceTraceShouldNormalizeLegacyConfidenceScales() {
         MemoryStorage storage = new MemoryStorage(tempDir.toString());
         storage.writeMetadata(Map.of(
@@ -1284,6 +1345,63 @@ class ConversationCliTest {
         assertThat(latest.userMessage()).isEmpty();
         assertThat(latest.retrievedInsights()).containsExactly("user_insights.md: 偏好简洁");
         assertThat(latest.usedEvidenceSummary()).isEmpty();
+    }
+
+    @Test
+    void getRecentEvidenceTracesShouldParseDoubleStringifiedFieldsInHistoryView() {
+        MemoryStorage storage = new MemoryStorage(tempDir.toString());
+        storage.writeMetadata(Map.of(
+                "global_controls", Map.of(
+                        "use_saved_memories", true,
+                        "use_chat_history", false
+                )
+        ));
+        SkillService skillService = new SkillService(tempDir.toString());
+        RecordingLlmClient llmClient = new RecordingLlmClient();
+        ConversationCli conversationCli = new ConversationCli(
+                llmClient,
+                storage,
+                new MemoryManager(storage, 100, 30, 15),
+                null,
+                alwaysNeedMemoryReflectionService(),
+                null,
+                null,
+                new AgentGuideService(tempDir.resolve("missing-Agent.md").toString(), tempDir.toString()),
+                new SystemPromptBuilder(),
+                new NoopMemoryAsyncService(),
+                null,
+                skillService,
+                null,
+                toolsWithoutRag(skillService),
+                40,
+                15,
+                false,
+                0.35,
+                5
+        );
+
+        Map<String, Object> traceRecord = new LinkedHashMap<>();
+        traceRecord.put("timestamp", LocalDateTime.now().toString());
+        traceRecord.put("user_message", "history double string");
+        traceRecord.put("memory_loaded", true);
+        traceRecord.put("reflection", "\"{\\\"needs_memory\\\":true,\\\"reason\\\":\\\"history double string\\\",\\\"evidence_purposes\\\":[\\\"continuity\\\"]}\"");
+        traceRecord.put("retrieved_insights", "\"[\\\"user_insights.md: 偏好简洁\\\"]\"");
+        traceRecord.put("used_insights", "\"[\\\"user_insights.md: 偏好简洁\\\"]\"");
+        traceRecord.put("retrieved_examples", "\"[]\"");
+        traceRecord.put("used_examples", "\"[]\"");
+        traceRecord.put("loaded_skills", "\"[]\"");
+        traceRecord.put("used_skills", "\"[]\"");
+        traceRecord.put("retrieved_tasks", "\"[]\"");
+        traceRecord.put("used_tasks", "\"[]\"");
+        traceRecord.put("used_evidence_summary", "insights 1/1");
+        storage.appendMemoryEvidenceTrace(traceRecord);
+
+        List<MemoryEvidenceTrace> traces = conversationCli.getRecentEvidenceTraces(1);
+        assertThat(traces).hasSize(1);
+        assertThat(traces.get(0).reflection()).isNotNull();
+        assertThat(traces.get(0).reflection().reason()).isEqualTo("history double string");
+        assertThat(traces.get(0).retrievedInsights()).containsExactly("user_insights.md: 偏好简洁");
+        assertThat(traces.get(0).usedInsights()).containsExactly("user_insights.md: 偏好简洁");
     }
 
     @Test
