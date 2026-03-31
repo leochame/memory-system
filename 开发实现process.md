@@ -2119,3 +2119,50 @@
   - `/memory-debug` 与 `/memory-insights` 可稳定回读 `#/reflection/needs_memory`、`#/evidence/retrieved/insights/0`、`#/retrieved/examples/0`、`#/loaded/skills/1` 等 URI Fragment 路径字段，不再因 `#/` 前缀导致证据统计缺失
   - Step 2/6 的跨来源 trace 兼容能力从“JSON Pointer 前导斜杠路径”扩展到“JSON Pointer URI Fragment 路径”，进一步降低跨系统导入后的排障成本
   - 定向测试通过：`export JAVA_HOME=$(/usr/libexec/java_home) && mvn -q -Dtest=ConversationCliTest,MemoryTraceInsightServiceTest test`
+
+#### 迭代记录 - 2026-03-31 21:06
+
+- 增强目标：围绕 Step 1/6（6.1 Memory Reflection 调用链）按开发文档 `v4.41` 执行本轮对齐复核，确认当前项目处于可交付状态
+- 涉及文件：修改 `开发实现process.md`
+- 实现方案：
+  1. 按开发文档 `6.1` 逐项复核 5 个实现要求在 `ReflectionResult -> MemoryReflectionService -> ConversationCli -> SystemPromptBuilder` 调用链中的落点
+  2. 重点核查完成标准 4/5：`needs_memory=true` 时默认值按 `memory_purpose` 派生，及 `recent-history/recentHistory`、`follow-up/followUp` 等别名归一化行为
+  3. 执行定向回归：`export JAVA_HOME=$(/usr/libexec/java_home) && mvn -q -Dtest=ReflectionResultTest,MemoryReflectionServiceTest,SystemPromptBuilderTest,ConversationCliTest test`
+- 状态：已完成
+- 实际结果：
+  - 本轮未发现 Step 1/6 新增代码缺口，调用链继续满足开发文档 `v4.41` 要求
+  - 反思结果注入 Prompt、按决策加载记忆、异常稳定回退、字段归一化均维持一致
+  - 定向测试通过（0 失败）
+
+#### 迭代记录 - 2026-03-31 21:18
+
+- 增强目标：继续执行 Step 2/6（6.2 记忆证据追踪），补齐历史 trace 在“扁平路径根键命名漂移”场景下的兼容解析，避免 `/memory-debug` 与 `/memory-insights` 在跨系统导出数据上因路径根键风格差异丢字段
+- 涉及文件：修改 `src/main/java/com/memsys/cli/ConversationCli.java`、修改 `src/main/java/com/memsys/memory/MemoryTraceInsightService.java`、修改 `src/test/java/com/memsys/cli/ConversationCliTest.java`、修改 `src/test/java/com/memsys/memory/MemoryTraceInsightServiceTest.java`、修改 `开发文档.md`、修改 `开发实现process.md`
+- 实现方案：
+  1. 重构 `flattenedKeySuffix(...)` 根键匹配逻辑：统一支持 `dot/bracket/slash/#/` 四类扁平路径入口，并按“仅字母数字+小写”归一化后匹配根键
+  2. 在 `ConversationCli` 与 `MemoryTraceInsightService` 同步应用同级规则，确保 `/memory-debug` 与 `/memory-insights` 的解析口径一致
+  3. 新增 `getLastEvidenceTraceShouldParseFlattenedPathRootWithNamingDrift`，覆盖 `#/REFLECTION-RESULT/NEEDS-MEMORY`、`#/RETRIEVED-INSIGHTS/0`、`#/RETRIEVED-SKILLS/0` 等路径根键漂移场景
+  4. 新增 `analyzeRecentTracesShouldParseFlattenedPathRootWithNamingDrift`，覆盖 `/memory-insights` 在同场景下的 retrieved/used 统计一致性
+  5. 同步开发文档 `6.2` 完成标准新增第 41 条，明确“扁平路径根键命名漂移兼容”约束
+- 状态：已完成
+- 实际结果：
+  - `/memory-debug` 与 `/memory-insights` 可稳定解析 `#/REFLECTION-RESULT/*`、`#/RETRIEVED-INSIGHTS/*`、`#/USED-SKILLS/*` 等根键大小写/分隔符漂移路径，不再因根键风格差异导致证据统计缺失
+  - Step 2/6 的跨来源 trace 兼容能力从“字段命名漂移”扩展到“扁平路径根键命名漂移”，进一步降低跨系统导出后的排障成本
+  - 定向测试通过：`export JAVA_HOME=$(/usr/libexec/java_home) && mvn -q -Dtest=ConversationCliTest,MemoryTraceInsightServiceTest test`
+
+#### 迭代记录 - 2026-03-31 21:26
+
+- 增强目标：执行 Step 4/6（修复存在的问题），修复历史 trace 回读在“扁平路径键名前后空白”场景下的解析失败，避免 `/memory-debug` 与 `/memory-insights` 漏统计
+- 涉及文件：修改 `src/main/java/com/memsys/cli/ConversationCli.java`、修改 `src/main/java/com/memsys/memory/MemoryTraceInsightService.java`、修改 `src/test/java/com/memsys/cli/ConversationCliTest.java`、修改 `src/test/java/com/memsys/memory/MemoryTraceInsightServiceTest.java`、修改 `开发文档.md`、修改 `开发实现process.md`
+- 实现方案：
+  1. 在 `ConversationCli.flattenedKeySuffix(...)` 增加扁平键 `trim()` 预处理，确保 `#/...` 路径在前后空白存在时仍可进入根键匹配逻辑
+  2. 在 `MemoryTraceInsightService.flattenedKeySuffix(...)` 同步复用同级规则，确保 `/memory-insights` 与 `/memory-debug` 解析口径一致
+  3. 新增 `getLastEvidenceTraceShouldParseFlattenedPathRootWithNamingDriftAndWhitespace`，覆盖 `/memory-debug` 在 `  #/REFLECTION-RESULT/NEEDS-MEMORY  `、`  #/RETRIEVED-INSIGHTS/0  ` 场景的回读
+  4. 新增 `analyzeRecentTracesShouldParseFlattenedPathRootWithNamingDriftAndWhitespace`，覆盖 `/memory-insights` 在同场景下的统计一致性
+  5. 同步开发文档 `6.2` 完成标准新增第 42 条，明确“扁平路径键前后空白兼容”约束
+- 状态：已完成
+- 实际结果：
+  - `/memory-debug` 与 `/memory-insights` 在扁平路径键包含前后空白时可稳定解析，不再因键名空白导致 `needs_memory`、`retrieved/used` 字段丢失
+  - Step 4/6 在跨系统导出数据的健壮性上补齐“键名去空白 + 归一化匹配”闭环，降低历史 trace 排障成本
+  - 定向测试通过：`export JAVA_HOME=$(/usr/libexec/java_home) && mvn -q -Dtest=ConversationCliTest,MemoryTraceInsightServiceTest test`
+  - 全量测试通过：`./scripts/run-tests.sh`（180 passed, 0 failed, 1 skipped）

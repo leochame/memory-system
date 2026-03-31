@@ -2694,6 +2694,127 @@ class ConversationCliTest {
     }
 
     @Test
+    void getLastEvidenceTraceShouldParseFlattenedPathRootWithNamingDrift() {
+        MemoryStorage storage = new MemoryStorage(tempDir.toString());
+        storage.writeMetadata(Map.of(
+                "global_controls", Map.of(
+                        "use_saved_memories", true,
+                        "use_chat_history", false
+                )
+        ));
+        SkillService skillService = new SkillService(tempDir.toString());
+        RecordingLlmClient llmClient = new RecordingLlmClient();
+        ConversationCli conversationCli = new ConversationCli(
+                llmClient,
+                storage,
+                new MemoryManager(storage, 100, 30, 15),
+                null,
+                alwaysNeedMemoryReflectionService(),
+                null,
+                null,
+                new AgentGuideService(tempDir.resolve("missing-Agent.md").toString(), tempDir.toString()),
+                new SystemPromptBuilder(),
+                new NoopMemoryAsyncService(),
+                null,
+                skillService,
+                null,
+                toolsWithoutRag(skillService),
+                40,
+                15,
+                false,
+                0.35,
+                5
+        );
+
+        Map<String, Object> traceRecord = new LinkedHashMap<>();
+        traceRecord.put("timestamp", LocalDateTime.now().toString());
+        traceRecord.put("user_message", "flattened path root naming drift evidence trace");
+        traceRecord.put("MEMORY-LOADED", "YES");
+        traceRecord.put("#/REFLECTION-RESULT/NEEDS-MEMORY", "Y");
+        traceRecord.put("#/REFLECTION-RESULT/MEMORY-PURPOSE", "action-followup");
+        traceRecord.put("#/REFLECTION-RESULT/REASON", "flat path root naming drift trace");
+        traceRecord.put("#/REFLECTION-RESULT/EVIDENCE-PURPOSE/0", "follow-up");
+        traceRecord.put("#/RETRIEVED-INSIGHTS/0", "insight-a");
+        traceRecord.put("#/RETRIEVED-INSIGHTS/1", "insight-b");
+        traceRecord.put("#/USED-INSIGHTS/0", "insight-a");
+        traceRecord.put("#/RETRIEVED-EXAMPLES/0", "example-a");
+        traceRecord.put("#/USED-EXAMPLES/0", "example-a");
+        traceRecord.put("#/RETRIEVED-SKILLS/0", "debugging");
+        traceRecord.put("#/RETRIEVED-SKILLS/1", "planner");
+        traceRecord.put("#/USED-SKILLS/0", "planner");
+        traceRecord.put("#/RETRIEVED-TASKS/0", "task-a");
+        traceRecord.put("#/RETRIEVED-TASKS/1", "task-b");
+        traceRecord.put("#/USED-TASKS/0", "task-b");
+        storage.appendMemoryEvidenceTrace(traceRecord);
+
+        MemoryEvidenceTrace trace = conversationCli.getLastEvidenceTrace();
+        assertThat(trace).isNotNull();
+        assertThat(trace.memoryLoaded()).isTrue();
+        assertThat(trace.reflection()).isNotNull();
+        assertThat(trace.reflection().needs_memory()).isTrue();
+        assertThat(trace.reflection().memory_purpose()).isEqualTo("ACTION_FOLLOWUP");
+        assertThat(trace.reflection().evidence_purposes()).containsExactly("followup");
+        assertThat(trace.retrievedInsights()).containsExactly("insight-a", "insight-b");
+        assertThat(trace.usedInsights()).containsExactly("insight-a");
+        assertThat(trace.retrievedExamples()).containsExactly("example-a");
+        assertThat(trace.usedExamples()).containsExactly("example-a");
+        assertThat(trace.loadedSkills()).containsExactly("debugging", "planner");
+        assertThat(trace.usedSkills()).containsExactly("planner");
+        assertThat(trace.retrievedTasks()).containsExactly("task-a", "task-b");
+        assertThat(trace.usedTasks()).containsExactly("task-b");
+    }
+
+    @Test
+    void getLastEvidenceTraceShouldParseFlattenedPathRootWithNamingDriftAndWhitespace() {
+        MemoryStorage storage = new MemoryStorage(tempDir.toString());
+        storage.writeMetadata(Map.of(
+                "global_controls", Map.of(
+                        "use_saved_memories", true,
+                        "use_chat_history", false
+                )
+        ));
+        SkillService skillService = new SkillService(tempDir.toString());
+        RecordingLlmClient llmClient = new RecordingLlmClient();
+        ConversationCli conversationCli = new ConversationCli(
+                llmClient,
+                storage,
+                new MemoryManager(storage, 100, 30, 15),
+                null,
+                alwaysNeedMemoryReflectionService(),
+                null,
+                null,
+                new AgentGuideService(tempDir.resolve("missing-Agent.md").toString(), tempDir.toString()),
+                new SystemPromptBuilder(),
+                new NoopMemoryAsyncService(),
+                null,
+                skillService,
+                null,
+                toolsWithoutRag(skillService),
+                40,
+                15,
+                false,
+                0.35,
+                5
+        );
+
+        Map<String, Object> traceRecord = new LinkedHashMap<>();
+        traceRecord.put("timestamp", LocalDateTime.now().toString());
+        traceRecord.put("user_message", "flattened path root naming drift with whitespace");
+        traceRecord.put("MEMORY-LOADED", "YES");
+        traceRecord.put("  #/REFLECTION-RESULT/NEEDS-MEMORY  ", "Y");
+        traceRecord.put("  #/RETRIEVED-INSIGHTS/0  ", "insight-a");
+        traceRecord.put("  #/USED-INSIGHTS/0  ", "insight-a");
+        storage.appendMemoryEvidenceTrace(traceRecord);
+
+        MemoryEvidenceTrace trace = conversationCli.getLastEvidenceTrace();
+        assertThat(trace).isNotNull();
+        assertThat(trace.reflection()).isNotNull();
+        assertThat(trace.reflection().needs_memory()).isTrue();
+        assertThat(trace.retrievedInsights()).containsExactly("insight-a");
+        assertThat(trace.usedInsights()).containsExactly("insight-a");
+    }
+
+    @Test
     void getLastEvidenceTraceShouldParseKebabAndUppercaseTraceFields() {
         MemoryStorage storage = new MemoryStorage(tempDir.toString());
         storage.writeMetadata(Map.of(

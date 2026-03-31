@@ -531,6 +531,67 @@ class MemoryTraceInsightServiceTest {
     }
 
     @Test
+    void analyzeRecentTracesShouldParseFlattenedPathRootWithNamingDrift() {
+        MemoryStorage storage = new MemoryStorage(tempDir.toString());
+        MemoryTraceInsightService service = new MemoryTraceInsightService(storage);
+
+        Map<String, Object> trace = new LinkedHashMap<>();
+        trace.put("MEMORY-LOADED", "YES");
+        trace.put("#/REFLECTION-RESULT/NEEDS-MEMORY", "Y");
+        trace.put("#/REFLECTION-RESULT/REASON", "flat path root naming drift trace");
+        trace.put("#/REFLECTION-RESULT/EVIDENCE-PURPOSE/0", "follow-up");
+        trace.put("#/RETRIEVED-INSIGHTS/0", "i-1");
+        trace.put("#/RETRIEVED-INSIGHTS/1", "i-2");
+        trace.put("#/USED-INSIGHTS/0", "i-2");
+        trace.put("#/RETRIEVED-EXAMPLES/0", "e-1");
+        trace.put("#/USED-EXAMPLES/0", "e-1");
+        trace.put("#/RETRIEVED-SKILLS/0", "s-1");
+        trace.put("#/RETRIEVED-SKILLS/1", "s-2");
+        trace.put("#/USED-SKILLS/0", "s-2");
+        trace.put("#/RETRIEVED-TASKS/0", "t-1");
+        trace.put("#/RETRIEVED-TASKS/1", "t-2");
+        trace.put("#/USED-TASKS/0", "t-2");
+        storage.appendMemoryEvidenceTrace(trace);
+
+        MemoryTraceInsightService.InsightReport report = service.analyzeRecentTraces(20);
+
+        assertThat(report.sampleSize()).isEqualTo(1);
+        assertThat(report.memoryLoadedRate()).isEqualTo(1.0d);
+        assertThat(report.needsMemoryRate()).isEqualTo(1.0d);
+        assertThat(report.unknownNeedsMemoryRate()).isZero();
+        assertThat(report.insightStat().retrieved()).isEqualTo(2);
+        assertThat(report.insightStat().used()).isEqualTo(1);
+        assertThat(report.exampleStat().retrieved()).isEqualTo(1);
+        assertThat(report.exampleStat().used()).isEqualTo(1);
+        assertThat(report.skillStat().retrieved()).isEqualTo(2);
+        assertThat(report.skillStat().used()).isEqualTo(1);
+        assertThat(report.taskStat().retrieved()).isEqualTo(2);
+        assertThat(report.taskStat().used()).isEqualTo(1);
+        assertThat(report.topUsedSkills()).containsExactly("s-2 (1)");
+        assertThat(report.topPurposes()).containsExactly("follow-up (1)");
+    }
+
+    @Test
+    void analyzeRecentTracesShouldParseFlattenedPathRootWithNamingDriftAndWhitespace() {
+        MemoryStorage storage = new MemoryStorage(tempDir.toString());
+        MemoryTraceInsightService service = new MemoryTraceInsightService(storage);
+
+        Map<String, Object> trace = new LinkedHashMap<>();
+        trace.put("MEMORY-LOADED", "YES");
+        trace.put("  #/REFLECTION-RESULT/NEEDS-MEMORY  ", "Y");
+        trace.put("  #/RETRIEVED-INSIGHTS/0  ", "i-1");
+        trace.put("  #/USED-INSIGHTS/0  ", "i-1");
+        storage.appendMemoryEvidenceTrace(trace);
+
+        MemoryTraceInsightService.InsightReport report = service.analyzeRecentTraces(20);
+
+        assertThat(report.sampleSize()).isEqualTo(1);
+        assertThat(report.needsMemoryRate()).isEqualTo(1.0d);
+        assertThat(report.insightStat().retrieved()).isEqualTo(1);
+        assertThat(report.insightStat().used()).isEqualTo(1);
+    }
+
+    @Test
     void analyzeRecentTracesShouldParseKebabAndUppercaseTraceFields() {
         MemoryStorage storage = new MemoryStorage(tempDir.toString());
         MemoryTraceInsightService service = new MemoryTraceInsightService(storage);

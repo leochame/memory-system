@@ -575,28 +575,42 @@ public class MemoryTraceInsightService {
     }
 
     private String flattenedKeySuffix(String entryKey, String key) {
-        if (entryKey.startsWith(key + ".")) {
-            return entryKey.substring(key.length() + 1);
+        if (entryKey == null || entryKey.isBlank() || key == null || key.isBlank()) {
+            return null;
         }
-        if (entryKey.startsWith(key + "[")) {
-            return entryKey.substring(key.length());
+        String normalizedKey = normalizeLookupKey(key);
+        if (normalizedKey.isBlank()) {
+            return null;
         }
-        if (entryKey.startsWith(key + "/")) {
-            return entryKey.substring(key.length() + 1);
+        String candidate = entryKey.trim();
+        if (candidate.startsWith("#/")) {
+            candidate = candidate.substring(2);
+        } else if (candidate.startsWith("/")) {
+            candidate = candidate.substring(1);
         }
-        if (entryKey.startsWith("/" + key + "/")) {
-            return entryKey.substring(key.length() + 2);
+        if (candidate.isBlank()) {
+            return null;
         }
-        if (entryKey.startsWith("/" + key + "[")) {
-            return entryKey.substring(key.length() + 1);
+        int delimiterIndex = -1;
+        for (int i = 0; i < candidate.length(); i++) {
+            char ch = candidate.charAt(i);
+            if (ch == '.' || ch == '[' || ch == '/') {
+                delimiterIndex = i;
+                break;
+            }
         }
-        if (entryKey.startsWith("#/" + key + "/")) {
-            return entryKey.substring(key.length() + 3);
+        if (delimiterIndex <= 0) {
+            return null;
         }
-        if (entryKey.startsWith("#/" + key + "[")) {
-            return entryKey.substring(key.length() + 2);
+        String root = candidate.substring(0, delimiterIndex);
+        if (!normalizedKey.equals(normalizeLookupKey(root))) {
+            return null;
         }
-        return null;
+        char delimiter = candidate.charAt(delimiterIndex);
+        if (delimiter == '[') {
+            return candidate.substring(delimiterIndex);
+        }
+        return candidate.substring(delimiterIndex + 1);
     }
 
     private List<String> splitFlattenedPath(String suffix) {
