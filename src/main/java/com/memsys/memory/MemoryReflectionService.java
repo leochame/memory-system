@@ -66,7 +66,7 @@ public class MemoryReflectionService {
     }
 
     private ReflectionResult normalizeResult(MemoryReflectionResult raw) {
-        boolean needsMemory = raw.needs_memory();
+        boolean needsMemory = normalizeNeedsMemory(raw.needs_memory());
         String memoryPurpose = normalizeMemoryPurpose(raw.memory_purpose(), needsMemory);
         String reason = normalizeReason(raw.reason(), needsMemory);
         double confidence = normalizeConfidence(raw.confidence());
@@ -74,6 +74,14 @@ public class MemoryReflectionService {
         List<String> evidenceTypes = normalizeEvidenceTypes(raw.evidence_types(), needsMemory, memoryPurpose);
         List<String> purposes = normalizePurposes(raw.evidence_purposes(), needsMemory, memoryPurpose);
         return new ReflectionResult(needsMemory, memoryPurpose, reason, confidence, retrievalHint, evidenceTypes, purposes);
+    }
+
+    private boolean normalizeNeedsMemory(Boolean needsMemory) {
+        if (needsMemory != null) {
+            return needsMemory;
+        }
+        log.warn("Memory reflection result missing needs_memory, defaulting to true for safe fallback");
+        return true;
     }
 
     private String normalizeMemoryPurpose(String memoryPurpose, boolean needsMemory) {

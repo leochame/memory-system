@@ -261,4 +261,29 @@ class MemoryReflectionServiceTest {
         assertThat(minorOverflow.confidence()).isEqualTo(1.0d);
         assertThat(percentageScale.confidence()).isEqualTo(0.87d);
     }
+
+    @Test
+    void reflectShouldFallbackToNeedsMemoryWhenNeedsMemoryFieldMissing() {
+        LlmExtractionService extractionService = mock(LlmExtractionService.class);
+        when(extractionService.reflectMemoryNeed(anyString())).thenReturn(
+                new MemoryReflectionResult(
+                        null,
+                        null,
+                        null,
+                        null,
+                        null,
+                        null,
+                        null
+                )
+        );
+
+        MemoryReflectionService service = new MemoryReflectionService(extractionService);
+        ReflectionResult result = service.reflect("继续上次计划", "上次讨论了阶段任务");
+
+        assertThat(result.needs_memory()).isTrue();
+        assertThat(result.memory_purpose()).isEqualTo("CONTINUITY");
+        assertThat(result.evidence_types()).containsExactly("SESSION_SUMMARY", "USER_INSIGHT", "RECENT_HISTORY");
+        assertThat(result.evidence_purposes()).containsExactly("continuity");
+        assertThat(result.retrieval_hint()).isEqualTo("优先检索与用户当前问题最相关的历史证据。");
+    }
 }

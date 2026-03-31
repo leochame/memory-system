@@ -834,6 +834,7 @@
 21. Phase 9 主动提醒已落地：ProactiveReminderService + ProactiveReminderJob 每天定时基于用户画像和会话摘要通过 LLM 生成个性化提醒；提醒落盘到 proactive_reminders.jsonl；`/proactive-reminders` 命令可查看历史；`/memory-report` 新增主动提醒摘要行。
 22. Phase 9 统一身份映射已落地：UserIdentityService 支持 platform+senderId → unified_id 双向映射；首次出现自动创建身份并持久化到 identity_mappings.json；ImRuntimeService 在消息到达时自动解析统一身份；`/identity` 命令可查看所有身份绑定；支持手动跨平台身份合并。
 23. Phase 8 场景化展示增强已补齐：新增 `/memory-review` 一页式复盘命令，聚合展示最近反思证据、会话摘要、治理状态与近期任务，补上开发文档 6.3 命令清单缺口。
+24. Step 1/6 调用链健壮性增强：`MemoryReflectionResult.needs_memory` 改为可空输入，`MemoryReflectionService` 在字段缺失时安全回退为 `needs_memory=true`，避免结构化输出缺字段导致误判为“无需记忆”。
 
 ---
 
@@ -2245,3 +2246,51 @@
   - Step 4/6 在 colon-path 兼容性上补齐“分隔符空白清洗 + 统计一致”闭环，进一步降低跨系统导入数据的排障成本
   - 定向测试通过：`export JAVA_HOME=$(/usr/libexec/java_home) && mvn -q -Dtest=ConversationCliTest,MemoryTraceInsightServiceTest test`
   - 全量测试通过：`./scripts/run-tests.sh`（186 passed, 0 failed, 1 skipped）
+
+#### 迭代记录 - 2026-03-31 22:52
+
+- 增强目标：围绕 Step 1/6（6.1 Memory Reflection 调用链）加固 `needs_memory` 缺失场景的稳定回退，避免结构化输出缺字段时误判为“无需记忆”
+- 涉及文件：修改 `src/main/java/com/memsys/llm/LlmDtos.java`、修改 `src/main/java/com/memsys/memory/MemoryReflectionService.java`、修改 `src/test/java/com/memsys/memory/MemoryReflectionServiceTest.java`、修改 `开发实现process.md`
+- 实现方案：
+  1. 将 `MemoryReflectionResult.needs_memory` 调整为 `Boolean`，显式区分“模型返回 false”与“字段缺失/null”
+  2. 在 `MemoryReflectionService.normalizeResult(...)` 增加空值保护：`needs_memory` 缺失时回退为 `true` 并继续走 Step 1/6 既有的 purpose/evidence 默认值派生链路
+  3. 新增定向测试覆盖 `needs_memory=null` 场景，验证不会误判为 `NOT_NEEDED`，且默认 evidence 语义保持 continuity
+- 状态：已完成
+- 实际结果：
+  - `MemoryReflectionResult.needs_memory` 现在可区分“显式 false”与“缺失/null”，避免 DTO 默认值把缺字段静默映射为 false
+  - `MemoryReflectionService` 在 `needs_memory` 缺失时会记录告警并安全回退到 `true`，后续 `memory_purpose/evidence_*` 默认值派生保持 continuity 语义一致
+  - 新增测试 `reflectShouldFallbackToNeedsMemoryWhenNeedsMemoryFieldMissing`，覆盖缺字段场景并验证回退语义
+  - 定向测试通过：`export JAVA_HOME=$(/usr/libexec/java_home) && mvn -q -Dtest=ReflectionResultTest,MemoryReflectionServiceTest,SystemPromptBuilderTest,ConversationCliTest test`
+  - 编译通过：`export JAVA_HOME=$(/usr/libexec/java_home) && mvn -q compile`
+
+#### 迭代记录 - 2026-03-31 23:06
+
+- 增强目标：继续执行 Step 2/6（6.2 记忆证据追踪），补齐历史 trace 在“反斜杠路径扁平字段”格式下的兼容解析，避免 `/memory-debug` 与 `/memory-insights` 在跨系统（含 Windows 导出）路径分隔符差异下出现覆盖率误判
+- 涉及文件：修改 `src/main/java/com/memsys/cli/ConversationCli.java`、修改 `src/main/java/com/memsys/memory/MemoryTraceInsightService.java`、修改 `src/test/java/com/memsys/cli/ConversationCliTest.java`、修改 `src/test/java/com/memsys/memory/MemoryTraceInsightServiceTest.java`、修改 `开发文档.md`、修改 `开发实现process.md`
+- 实现方案：
+  1. 在 `ConversationCli.flattenedKeySuffix(...)` 增加 `\\` 分隔符识别，并补充 `#\\` 与 `\\` 路径前缀兼容，确保根键匹配不受路径风格影响
+  2. 在 `ConversationCli.splitFlattenedPath(...)` 同步支持按 `\\` 切分路径 token，确保扁平字段可重建为嵌套结构
+  3. 在 `MemoryTraceInsightService` 同步复用同级 backslash-path 解析规则，保持 `/memory-insights` 与 `/memory-debug` 的兼容口径一致
+  4. 新增 `getLastEvidenceTraceShouldParseFlattenedBackslashPathTraceFields`，覆盖 `/memory-debug` 在 `reflection\\needs_memory`、`evidence\\retrieved\\insights\\0`、`loaded\\skills\\1` 等场景下的回读
+  5. 新增 `analyzeRecentTracesShouldParseFlattenedBackslashPathTraceFields`，覆盖 `/memory-insights` 在同场景下的 retrieved/used 统计一致性
+  6. 同步开发文档升级至 `v4.44`，并在 `6.2` 完成标准新增第 46 条，明确“反斜杠路径扁平字段兼容”约束
+- 状态：已完成
+- 实际结果：
+  - `/memory-debug` 与 `/memory-insights` 可稳定回读 `reflection\\needs_memory`、`evidence\\retrieved\\insights\\0`、`retrieved\\examples\\0`、`loaded\\skills\\1` 等 backslash-path 字段，不再因路径分隔符差异导致证据统计缺失
+  - Step 2/6 的跨来源 trace 兼容能力从“冒号路径 + 分隔符空白”扩展到“反斜杠路径”，进一步降低跨系统导入后的排障成本
+
+#### 迭代记录 - 2026-03-31 23:08
+
+- 增强目标：执行 Step 4/6（修复存在的问题），修复历史 trace 回读在“反斜杠路径分隔符两侧空白 + fragment 前缀空白”场景下的字段命中失败，避免 `/memory-debug` 与 `/memory-insights` 漏统计
+- 涉及文件：修改 `src/main/java/com/memsys/cli/ConversationCli.java`、修改 `src/main/java/com/memsys/memory/MemoryTraceInsightService.java`、修改 `src/test/java/com/memsys/cli/ConversationCliTest.java`、修改 `src/test/java/com/memsys/memory/MemoryTraceInsightServiceTest.java`、修改 `开发实现process.md`
+- 实现方案：
+  1. 在 `ConversationCli.flattenedKeySuffix(...)` 增强 fragment 前缀识别：支持 `# \\...` / `# /...`（`#` 后允许空白）后再进入根键匹配
+  2. 在 `MemoryTraceInsightService.flattenedKeySuffix(...)` 同步应用同级规则，保持 `/memory-insights` 与 `/memory-debug` 的解析口径一致
+  3. 新增 `getLastEvidenceTraceShouldParseFlattenedBackslashPathTraceFieldsWithDelimiterWhitespace`，覆盖 `/memory-debug` 在 `# \\ reflection \\ needs_memory`、`evidence \\ retrieved \\ insights \\ 0` 场景下的回读
+  4. 新增 `analyzeRecentTracesShouldParseFlattenedBackslashPathTraceFieldsWithDelimiterWhitespace`，覆盖 `/memory-insights` 在同场景下的 retrieved/used 统计一致性
+- 状态：已完成
+- 实际结果：
+  - `/memory-debug` 与 `/memory-insights` 在 `# \\ ...` fragment + backslash-path 分隔符含空白场景下可稳定解析，不再因前缀/分隔符空白导致字段命中失败
+  - Step 4/6 在 backslash-path 兼容性上补齐“分隔符空白清洗 + fragment 前缀归一化 + 统计一致”闭环
+  - 定向测试通过：`export JAVA_HOME=$(/usr/libexec/java_home) && mvn -q -Dtest=ConversationCliTest,MemoryTraceInsightServiceTest test`
+  - 全量测试通过：`./scripts/run-tests.sh`（191 passed, 0 failed, 1 skipped）

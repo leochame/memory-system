@@ -583,9 +583,12 @@ public class MemoryTraceInsightService {
             return null;
         }
         String candidate = entryKey.trim();
-        if (candidate.startsWith("#/")) {
-            candidate = candidate.substring(2);
-        } else if (candidate.startsWith("/")) {
+        if (candidate.startsWith("#")) {
+            String fragment = candidate.substring(1).stripLeading();
+            if (fragment.startsWith("/") || fragment.startsWith("\\")) {
+                candidate = fragment.substring(1);
+            }
+        } else if (candidate.startsWith("/") || candidate.startsWith("\\")) {
             candidate = candidate.substring(1);
         }
         if (candidate.startsWith("$")) {
@@ -607,7 +610,7 @@ public class MemoryTraceInsightService {
         int delimiterIndex = -1;
         for (int i = 0; i < candidate.length(); i++) {
             char ch = candidate.charAt(i);
-            if (ch == '.' || ch == '[' || ch == '/' || ch == ':') {
+            if (ch == '.' || ch == '[' || ch == '/' || ch == ':' || ch == '\\') {
                 delimiterIndex = i;
                 break;
             }
@@ -651,7 +654,7 @@ public class MemoryTraceInsightService {
         StringBuilder token = new StringBuilder();
         for (int i = 0; i < suffix.length(); i++) {
             char ch = suffix.charAt(i);
-            if (ch == '.' || ch == '/' || ch == ':') {
+            if (ch == '.' || ch == '/' || ch == ':' || ch == '\\') {
                 if (!token.isEmpty()) {
                     addDecodedPathToken(parts, token);
                     token.setLength(0);

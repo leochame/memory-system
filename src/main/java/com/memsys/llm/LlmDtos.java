@@ -68,7 +68,7 @@ public final class LlmDtos {
      * Memory Reflection 结构化输出：判断当前问题是否需要长期记忆。
      */
     public record MemoryReflectionResult(
-            boolean needs_memory,
+            Boolean needs_memory,
             String memory_purpose,
             String reason,
             Double confidence,
