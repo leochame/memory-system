@@ -27,6 +27,8 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
 import java.time.LocalDateTime;
+import java.time.OffsetDateTime;
+import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
 import java.util.*;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -1390,15 +1392,7 @@ public class ConversationCli {
         if (record == null || record.isEmpty()) {
             return null;
         }
-        LocalDateTime timestamp = null;
-        Object ts = record.get("timestamp");
-        if (ts != null) {
-            try {
-                timestamp = LocalDateTime.parse(String.valueOf(ts));
-            } catch (Exception ignored) {
-                // ignore malformed timestamp and keep null for resilient CLI display
-            }
-        }
+        LocalDateTime timestamp = parseTraceTimestamp(record.get("timestamp"));
 
         ReflectionResult reflection = parseReflection(record);
 
@@ -1417,6 +1411,34 @@ public class ConversationCli {
                 normalizeStringList(record.get("used_tasks")),
                 normalizeText(record.get("used_evidence_summary"))
         );
+    }
+
+    private LocalDateTime parseTraceTimestamp(Object value) {
+        if (value == null) {
+            return null;
+        }
+        String text = normalizeText(value);
+        if (text.isBlank()) {
+            return null;
+        }
+        try {
+            return LocalDateTime.parse(text);
+        } catch (Exception ignored) {
+            // keep trying legacy/offset formats
+        }
+        try {
+            return OffsetDateTime.parse(text)
+                    .atZoneSameInstant(ZoneId.systemDefault())
+                    .toLocalDateTime();
+        } catch (Exception ignored) {
+            // keep trying legacy/offset formats
+        }
+        try {
+            return LocalDateTime.parse(text, DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss"));
+        } catch (Exception ignored) {
+            // ignore malformed timestamp and keep null for resilient CLI display
+            return null;
+        }
     }
 
     @SuppressWarnings("unchecked")

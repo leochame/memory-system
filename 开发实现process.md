@@ -1221,3 +1221,43 @@
   - `/memory-debug` 与 `/memory-debug [N]` 在“无需记忆”场景下不再出现检索提示，反思语义与展示一致
   - 定向测试通过：`./scripts/run-tests.sh -q -Dtest=ConversationCliTest,SystemPromptBuilderTest test`
   - 全量测试通过：`./scripts/run-tests.sh -q test`
+
+#### 迭代记录 - 2026-03-31 21:05
+
+- 增强目标：继续执行 Step 6/6（调研深化），围绕 Memory-System 扩展“更多内容方向”并把调研结论固化为可执行开发文档
+- 涉及文件：修改 `开发文档.md`、修改 `开发实现process.md`
+- 实现方案：
+  1. 将 `开发文档.md` 版本升级至 `v4.7`，在 `5.10` 追加“扩展内容方向池”与“7 天落地方案”
+  2. 新增 8 类补充内容资产（对照实验、误判剖析、证据优化、治理决策、主动服务命中、时间线、答辩快照、论文局限），并绑定固定命令入口
+  3. 新增 `6.13 需求十一`，将扩展模板字段、周度看板、失败内容占比与证据复测机制转化为可验收条款
+- 状态：已完成
+- 实际结果：
+  - Step 6/6 从“内容资产沉淀”升级为“更多内容类型 + 周节奏执行 + 指标化验收”的落地方案
+  - 后续可直接按 Day 1~Day 7 执行并在 `index.md` 追踪内容覆盖、回流与复测状态
+
+#### 迭代记录 - 2026-03-31 21:20
+
+- 增强目标：围绕 Step 1/6（6.1 Memory Reflection 调用链）执行文档对齐复核，确认“结构化决策 -> 主链路反思 -> 按决策加载记忆 -> Prompt 显式消费 -> 失败回退”五项闭环
+- 涉及文件：修改 `开发实现process.md`
+- 复核结论：
+  1. 结构化对象与 schema 已落地：`ReflectionResult`、`LlmDtos.MemoryReflectionResult`、`Schemas.memoryReflectionResult()`
+  2. `ConversationCli` 已在主链路与评测链路插入反思阶段，并以 `shouldLoadMemory = useSavedMemories && reflection.needs_memory()` 控制证据加载
+  3. `SystemPromptBuilder` 已显式消费反思字段（`needs_memory/memory_purpose/reason/confidence/retrieval_hint/evidence_*`）
+  4. 失败与异常路径已具备稳定回退：`ReflectionResult.fallback()` 与 `ReflectionResult.memoryDisabled()`，空服务/空返回/异常均不阻断主链路
+- 验证结果：
+  - 定向测试通过：`export JAVA_HOME=$(/usr/libexec/java_home) && mvn -q -Dtest=MemoryReflectionServiceTest,SystemPromptBuilderTest,ConversationCliTest test`
+  - 本次复核未发现新增代码缺口，Step 1/6 维持完成态
+
+#### 迭代记录 - 2026-03-31 21:45
+
+- 增强目标：继续执行 Step 2/6（6.2 记忆证据追踪），补齐历史 trace 时间戳兼容解析，避免 `/memory-debug [N]` 在跨版本数据下出现大量 `(unknown)` 时间
+- 涉及文件：修改 `src/main/java/com/memsys/cli/ConversationCli.java`、修改 `src/test/java/com/memsys/cli/ConversationCliTest.java`、修改 `开发文档.md`、修改 `开发实现process.md`
+- 实现方案：
+  1. `ConversationCli.parseEvidenceTrace(...)` 抽取 `parseTraceTimestamp(...)`，统一解析 trace 时间戳
+  2. 解析顺序扩展为：`ISO_LOCAL_DATE_TIME` -> `ISO_OFFSET_DATE_TIME` -> `yyyy-MM-dd HH:mm:ss`，仅在三者均失败时回退 `null`
+  3. 新增回归测试 `getRecentEvidenceTracesShouldParseLegacyTimestampFormats`，覆盖 offset 时间戳与 legacy 空格分隔时间戳
+  4. 同步开发文档 6.2 完成标准，新增“多格式时间戳兼容”约束
+- 状态：已完成
+- 实际结果：
+  - `/memory-debug [N]` 历史视图在 `2026-03-31T18:30:00+08:00` 与 `2026-03-31 18:31:05` 两类历史时间戳上可稳定展示时间线
+  - Step 2/6 在历史 trace 跨版本可读性与可诊断性上进一步增强

@@ -1533,6 +1533,147 @@ class ConversationCliTest {
     }
 
     @Test
+    void getRecentEvidenceTracesShouldParseLegacyTimestampFormats() {
+        MemoryStorage storage = new MemoryStorage(tempDir.toString());
+        storage.writeMetadata(Map.of(
+                "global_controls", Map.of(
+                        "use_saved_memories", true,
+                        "use_chat_history", false
+                )
+        ));
+        SkillService skillService = new SkillService(tempDir.toString());
+        RecordingLlmClient llmClient = new RecordingLlmClient();
+        ConversationCli conversationCli = new ConversationCli(
+                llmClient,
+                storage,
+                new MemoryManager(storage, 100, 30, 15),
+                null,
+                alwaysNeedMemoryReflectionService(),
+                null,
+                null,
+                new AgentGuideService(tempDir.resolve("missing-Agent.md").toString(), tempDir.toString()),
+                new SystemPromptBuilder(),
+                new NoopMemoryAsyncService(),
+                null,
+                skillService,
+                null,
+                toolsWithoutRag(skillService),
+                40,
+                15,
+                false,
+                0.35,
+                5
+        );
+
+        Map<String, Object> offsetTrace = new LinkedHashMap<>();
+        offsetTrace.put("timestamp", "2026-03-31T18:30:00+08:00");
+        offsetTrace.put("user_message", "offset ts");
+        offsetTrace.put("memory_loaded", true);
+        offsetTrace.put("reflection", Map.of("needs_memory", true, "reason", "offset"));
+        offsetTrace.put("retrieved_insights", List.of());
+        offsetTrace.put("used_insights", List.of());
+        offsetTrace.put("retrieved_examples", List.of());
+        offsetTrace.put("used_examples", List.of());
+        offsetTrace.put("loaded_skills", List.of());
+        offsetTrace.put("used_skills", List.of());
+        offsetTrace.put("retrieved_tasks", List.of());
+        offsetTrace.put("used_tasks", List.of());
+        offsetTrace.put("used_evidence_summary", "none");
+        storage.appendMemoryEvidenceTrace(offsetTrace);
+
+        Map<String, Object> legacyTrace = new LinkedHashMap<>();
+        legacyTrace.put("timestamp", "2026-03-31 18:31:05");
+        legacyTrace.put("user_message", "legacy ts");
+        legacyTrace.put("memory_loaded", true);
+        legacyTrace.put("reflection", Map.of("needs_memory", true, "reason", "legacy"));
+        legacyTrace.put("retrieved_insights", List.of());
+        legacyTrace.put("used_insights", List.of());
+        legacyTrace.put("retrieved_examples", List.of());
+        legacyTrace.put("used_examples", List.of());
+        legacyTrace.put("loaded_skills", List.of());
+        legacyTrace.put("used_skills", List.of());
+        legacyTrace.put("retrieved_tasks", List.of());
+        legacyTrace.put("used_tasks", List.of());
+        legacyTrace.put("used_evidence_summary", "none");
+        storage.appendMemoryEvidenceTrace(legacyTrace);
+
+        List<MemoryEvidenceTrace> traces = conversationCli.getRecentEvidenceTraces(2);
+        assertThat(traces).hasSize(2);
+        assertThat(traces.get(0).timestamp()).isEqualTo(LocalDateTime.of(2026, 3, 31, 18, 30, 0));
+        assertThat(traces.get(1).timestamp()).isEqualTo(LocalDateTime.of(2026, 3, 31, 18, 31, 5));
+    }
+
+    @Test
+    void getRecentEvidenceTracesShouldNormalizeOffsetTimestampsByInstant() {
+        MemoryStorage storage = new MemoryStorage(tempDir.toString());
+        storage.writeMetadata(Map.of(
+                "global_controls", Map.of(
+                        "use_saved_memories", true,
+                        "use_chat_history", false
+                )
+        ));
+        SkillService skillService = new SkillService(tempDir.toString());
+        RecordingLlmClient llmClient = new RecordingLlmClient();
+        ConversationCli conversationCli = new ConversationCli(
+                llmClient,
+                storage,
+                new MemoryManager(storage, 100, 30, 15),
+                null,
+                alwaysNeedMemoryReflectionService(),
+                null,
+                null,
+                new AgentGuideService(tempDir.resolve("missing-Agent.md").toString(), tempDir.toString()),
+                new SystemPromptBuilder(),
+                new NoopMemoryAsyncService(),
+                null,
+                skillService,
+                null,
+                toolsWithoutRag(skillService),
+                40,
+                15,
+                false,
+                0.35,
+                5
+        );
+
+        Map<String, Object> utcTrace = new LinkedHashMap<>();
+        utcTrace.put("timestamp", "2026-03-31T10:30:00Z");
+        utcTrace.put("user_message", "utc ts");
+        utcTrace.put("memory_loaded", true);
+        utcTrace.put("reflection", Map.of("needs_memory", true, "reason", "utc"));
+        utcTrace.put("retrieved_insights", List.of());
+        utcTrace.put("used_insights", List.of());
+        utcTrace.put("retrieved_examples", List.of());
+        utcTrace.put("used_examples", List.of());
+        utcTrace.put("loaded_skills", List.of());
+        utcTrace.put("used_skills", List.of());
+        utcTrace.put("retrieved_tasks", List.of());
+        utcTrace.put("used_tasks", List.of());
+        utcTrace.put("used_evidence_summary", "none");
+        storage.appendMemoryEvidenceTrace(utcTrace);
+
+        Map<String, Object> cstTrace = new LinkedHashMap<>();
+        cstTrace.put("timestamp", "2026-03-31T18:30:00+08:00");
+        cstTrace.put("user_message", "cst ts");
+        cstTrace.put("memory_loaded", true);
+        cstTrace.put("reflection", Map.of("needs_memory", true, "reason", "cst"));
+        cstTrace.put("retrieved_insights", List.of());
+        cstTrace.put("used_insights", List.of());
+        cstTrace.put("retrieved_examples", List.of());
+        cstTrace.put("used_examples", List.of());
+        cstTrace.put("loaded_skills", List.of());
+        cstTrace.put("used_skills", List.of());
+        cstTrace.put("retrieved_tasks", List.of());
+        cstTrace.put("used_tasks", List.of());
+        cstTrace.put("used_evidence_summary", "none");
+        storage.appendMemoryEvidenceTrace(cstTrace);
+
+        List<MemoryEvidenceTrace> traces = conversationCli.getRecentEvidenceTraces(2);
+        assertThat(traces).hasSize(2);
+        assertThat(traces.get(0).timestamp()).isEqualTo(traces.get(1).timestamp());
+    }
+
+    @Test
     void getRecentEvidenceTracesShouldIncludeInMemoryLatestWhenPersistedWriteLagging() {
         MemoryStorage storage = new MemoryStorage(tempDir.toString());
         storage.writeMetadata(Map.of(
