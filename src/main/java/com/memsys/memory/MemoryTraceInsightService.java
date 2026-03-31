@@ -612,10 +612,19 @@ public class MemoryTraceInsightService {
             return null;
         }
         int delimiterIndex = -1;
+        boolean doubleUnderscoreDelimiter = false;
+        int doubleUnderscoreDelimiterLength = 0;
         for (int i = 0; i < candidate.length(); i++) {
             char ch = candidate.charAt(i);
             if (ch == '.' || ch == '[' || ch == '/' || ch == ':' || ch == '\\') {
                 delimiterIndex = i;
+                break;
+            }
+            int delimiterLength = matchDoubleUnderscoreDelimiter(candidate, i);
+            if (delimiterLength > 0) {
+                delimiterIndex = i;
+                doubleUnderscoreDelimiter = true;
+                doubleUnderscoreDelimiterLength = delimiterLength;
                 break;
             }
         }
@@ -647,6 +656,9 @@ public class MemoryTraceInsightService {
         if (delimiter == '[') {
             return candidate.substring(delimiterIndex);
         }
+        if (doubleUnderscoreDelimiter) {
+            return candidate.substring(delimiterIndex + doubleUnderscoreDelimiterLength);
+        }
         return candidate.substring(delimiterIndex + 1);
     }
 
@@ -663,6 +675,15 @@ public class MemoryTraceInsightService {
                     addDecodedPathToken(parts, token);
                     token.setLength(0);
                 }
+                continue;
+            }
+            int delimiterLength = matchDoubleUnderscoreDelimiter(suffix, i);
+            if (delimiterLength > 0) {
+                if (!token.isEmpty()) {
+                    addDecodedPathToken(parts, token);
+                    token.setLength(0);
+                }
+                i += delimiterLength - 1;
                 continue;
             }
             if (ch == '[') {
@@ -686,6 +707,24 @@ public class MemoryTraceInsightService {
             addDecodedPathToken(parts, token);
         }
         return parts;
+    }
+
+    private int matchDoubleUnderscoreDelimiter(String value, int start) {
+        if (value == null || start < 0 || start >= value.length() || value.charAt(start) != '_') {
+            return 0;
+        }
+        int index = start + 1;
+        while (index < value.length() && Character.isWhitespace(value.charAt(index))) {
+            index++;
+        }
+        if (index >= value.length() || value.charAt(index) != '_') {
+            return 0;
+        }
+        index++;
+        while (index < value.length() && Character.isWhitespace(value.charAt(index))) {
+            index++;
+        }
+        return index - start;
     }
 
     private void addDecodedPathToken(List<String> parts, StringBuilder token) {

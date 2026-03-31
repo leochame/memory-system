@@ -683,6 +683,82 @@ class MemoryTraceInsightServiceTest {
     }
 
     @Test
+    void analyzeRecentTracesShouldParseFlattenedDoubleUnderscorePathTraceFields() {
+        MemoryStorage storage = new MemoryStorage(tempDir.toString());
+        MemoryTraceInsightService service = new MemoryTraceInsightService(storage);
+
+        Map<String, Object> trace = new LinkedHashMap<>();
+        trace.put("memory_loaded", true);
+        trace.put("reflection__needs_memory", true);
+        trace.put("reflection__reason", "flat double underscore path trace");
+        trace.put("reflection__evidence_purposes__0", "followup");
+        trace.put("evidence__retrieved__insights__0", "i-1");
+        trace.put("evidence__retrieved__insights__1", "i-2");
+        trace.put("evidence__used__insights__0", "i-2");
+        trace.put("retrieved__examples__0", "e-1");
+        trace.put("used__examples__0", "e-1");
+        trace.put("loaded__skills__0", "s-1");
+        trace.put("loaded__skills__1", "s-2");
+        trace.put("used__skills__0", "s-2");
+        trace.put("retrieved__tasks__0", "t-1");
+        trace.put("retrieved__tasks__1", "t-2");
+        trace.put("used__tasks__0", "t-2");
+        storage.appendMemoryEvidenceTrace(trace);
+
+        MemoryTraceInsightService.InsightReport report = service.analyzeRecentTraces(20);
+
+        assertThat(report.sampleSize()).isEqualTo(1);
+        assertThat(report.insightStat().retrieved()).isEqualTo(2);
+        assertThat(report.insightStat().used()).isEqualTo(1);
+        assertThat(report.exampleStat().retrieved()).isEqualTo(1);
+        assertThat(report.exampleStat().used()).isEqualTo(1);
+        assertThat(report.skillStat().retrieved()).isEqualTo(2);
+        assertThat(report.skillStat().used()).isEqualTo(1);
+        assertThat(report.taskStat().retrieved()).isEqualTo(2);
+        assertThat(report.taskStat().used()).isEqualTo(1);
+        assertThat(report.topUsedSkills()).containsExactly("s-2 (1)");
+        assertThat(report.topPurposes()).containsExactly("followup (1)");
+    }
+
+    @Test
+    void analyzeRecentTracesShouldParseFlattenedDoubleUnderscorePathTraceFieldsWithDelimiterWhitespace() {
+        MemoryStorage storage = new MemoryStorage(tempDir.toString());
+        MemoryTraceInsightService service = new MemoryTraceInsightService(storage);
+
+        Map<String, Object> trace = new LinkedHashMap<>();
+        trace.put("memory_loaded", true);
+        trace.put("reflection _ _ needs_memory", true);
+        trace.put("reflection _ _ reason", "flat double underscore path trace with delimiter whitespace");
+        trace.put("reflection _ _ evidence_purposes _ _ 0", "followup");
+        trace.put("evidence _ _ retrieved _ _ insights _ _ 0", "i-1");
+        trace.put("evidence _ _ retrieved _ _ insights _ _ 1", "i-2");
+        trace.put("evidence _ _ used _ _ insights _ _ 0", "i-2");
+        trace.put("retrieved _ _ examples _ _ 0", "e-1");
+        trace.put("used _ _ examples _ _ 0", "e-1");
+        trace.put("loaded _ _ skills _ _ 0", "s-1");
+        trace.put("loaded _ _ skills _ _ 1", "s-2");
+        trace.put("used _ _ skills _ _ 0", "s-2");
+        trace.put("retrieved _ _ tasks _ _ 0", "t-1");
+        trace.put("retrieved _ _ tasks _ _ 1", "t-2");
+        trace.put("used _ _ tasks _ _ 0", "t-2");
+        storage.appendMemoryEvidenceTrace(trace);
+
+        MemoryTraceInsightService.InsightReport report = service.analyzeRecentTraces(20);
+
+        assertThat(report.sampleSize()).isEqualTo(1);
+        assertThat(report.insightStat().retrieved()).isEqualTo(2);
+        assertThat(report.insightStat().used()).isEqualTo(1);
+        assertThat(report.exampleStat().retrieved()).isEqualTo(1);
+        assertThat(report.exampleStat().used()).isEqualTo(1);
+        assertThat(report.skillStat().retrieved()).isEqualTo(2);
+        assertThat(report.skillStat().used()).isEqualTo(1);
+        assertThat(report.taskStat().retrieved()).isEqualTo(2);
+        assertThat(report.taskStat().used()).isEqualTo(1);
+        assertThat(report.topUsedSkills()).containsExactly("s-2 (1)");
+        assertThat(report.topPurposes()).containsExactly("followup (1)");
+    }
+
+    @Test
     void analyzeRecentTracesShouldParseFlattenedBackslashPathTraceFields() {
         MemoryStorage storage = new MemoryStorage(tempDir.toString());
         MemoryTraceInsightService service = new MemoryTraceInsightService(storage);

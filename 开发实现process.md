@@ -2336,3 +2336,48 @@
 - 实际结果：
   - `/memory-debug` 与 `/memory-insights` 可稳定回读 `#$.reflection.needs_memory`、`#$['evidence']['retrieved']['insights'][0]`、`#$.retrieved.examples[0]`、`#$[loaded][skills][1]` 等 `# + JSONPath` 组合字段，不再因 fragment 前缀导致路径丢失
   - Step 2/6 的跨来源 trace 兼容能力从“JSONPath 路径”扩展到“JSONPath URI Fragment 路径”，进一步降低跨系统导入后的排障成本
+
+#### 迭代记录 - 2026-04-01 00:18
+
+- 增强目标：继续执行 Step 6/6（调研与文档更新），围绕记忆系统补齐“节目化栏目与发布编排”能力，确保内容扩展从“可沉淀”升级到“可连续发布 + 可回流验证”
+- 涉及文件：修改 `开发文档.md`、修改 `开发实现process.md`
+- 实现方案：
+  1. 将开发文档版本升级至 `v4.47`，并更新日期为 `2026-04-01`
+  2. 在 `5.10` 新增 `5.10.32 Step 6/6 内容扩展蓝图（第二十二层：记忆场景节目化与发布编排台）`
+  3. 新增 8 类节目化内容资产：`周主题节目单卡`、`三分钟演示脚本卡`、`失败复盘专栏卡`、`指标快讯卡`、`问答拆解卡`、`版本迁移提醒卡`、`反馈回流工单卡`、`月度节目收官卡`
+  4. 在开发文档新增 `6.33 需求三十一`，把索引字段、目录规范、周节奏、双周回放复核与反馈回流约束转为可验收条款
+- 状态：已完成
+- 实际结果：
+  - Step 6/6 从“季度主题叙事”进一步升级为“栏目化连续发布”机制，可稳定回答“这周发布了什么、哪条可回放、哪条已回流修复”
+  - 新增索引字段（`show_id/episode_id/content_track/publish_window/audience_type/feedback_ticket_refs/replay_check_status/next_episode_hook`）后，内容发布、反馈回流与下期策划可在同一索引链路管理
+  - 本次变更为文档调研更新，无代码逻辑改动，无需运行测试
+
+#### 迭代记录 - 2026-04-01 03:40
+
+- 增强目标：围绕 Step 1/6（6.1 Memory Reflection 调用链）按开发文档 `v4.47` 复核当前项目，确认“结构化决策 -> 主链路反思 -> 按决策加载记忆 -> Prompt 显式消费 -> 失败回退”闭环与新增条款保持一致
+- 涉及文件：修改 `开发实现process.md`
+- 实现方案：
+  1. 对照 `开发文档.md` 第 `6.1` 条逐项核查 `LlmDtos/MemoryReflectionService/ConversationCli/SystemPromptBuilder/ReflectionResult` 的归一化与默认值派生逻辑
+  2. 重点复核 `v4.47` 新增约束：`needs_memory=true` 时 `evidence_types/evidence_purposes` 缺失或非法必须按 `memory_purpose` 派生默认值；`recent-history/recentHistory`、`follow-up/followUp` 等别名必须归一化为标准枚举值
+  3. 执行 Step 1/6 定向回归：`export JAVA_HOME=$(/usr/libexec/java_home) && mvn -q -Dtest=ReflectionResultTest,MemoryReflectionServiceTest,SystemPromptBuilderTest,ConversationCliTest test`
+- 状态：已完成
+- 实际结果：
+  - 当前实现与开发文档 `v4.47` 的 Step 1/6 要求保持一致，未发现需新增代码的缺口
+  - `MemoryReflectionService`、`ConversationCli`、`SystemPromptBuilder` 在 `needs_memory=true` 且证据字段缺失/非法时均按 `memory_purpose` 进行默认值派生，不会统一错误回退为 continuity
+  - 反思主链路与提示词层均已支持 evidence 别名归一化（如 `recent-history/recentHistory`、`follow-up/followUp`）
+  - 定向回归通过，可继续进入下一步
+
+#### 迭代记录 - 2026-04-01 04:10
+
+- 增强目标：继续执行 Step 2/6（6.2 记忆证据追踪），补齐历史 trace 在“双下划线路径扁平字段”格式下的兼容解析，避免 `/memory-debug` 与 `/memory-insights` 在跨系统自定义扁平导出数据上出现覆盖率误判
+- 涉及文件：修改 `src/main/java/com/memsys/cli/ConversationCli.java`、修改 `src/main/java/com/memsys/memory/MemoryTraceInsightService.java`、修改 `src/test/java/com/memsys/cli/ConversationCliTest.java`、修改 `src/test/java/com/memsys/memory/MemoryTraceInsightServiceTest.java`、修改 `开发文档.md`、修改 `开发实现process.md`
+- 实现方案：
+  1. 在 `ConversationCli.flattenedKeySuffix(...)` 增加 `__` 分隔符识别，并在 `splitFlattenedPath(...)` 支持按“双下划线”切分路径 token（保留单下划线作为普通字符）
+  2. 在 `MemoryTraceInsightService` 同步应用同级规则，保持 `/memory-insights` 与 `/memory-debug` 的解析口径一致
+  3. 新增 `getLastEvidenceTraceShouldParseFlattenedDoubleUnderscorePathTraceFields`，覆盖 `/memory-debug` 在 `reflection__needs_memory`、`evidence__retrieved__insights__0`、`loaded__skills__1` 等场景下的回读
+  4. 新增 `analyzeRecentTracesShouldParseFlattenedDoubleUnderscorePathTraceFields`，覆盖 `/memory-insights` 在同场景下的 retrieved/used 统计一致性
+  5. 同步开发文档升级至 `v4.48`，并在 `6.2` 完成标准新增第 48 条，明确“双下划线路径扁平字段兼容”约束
+- 状态：已完成
+- 实际结果：
+  - `/memory-debug` 与 `/memory-insights` 可稳定回读 `reflection__needs_memory`、`evidence__retrieved__insights__0`、`retrieved__examples__0`、`loaded__skills__1` 等 double-underscore 风格字段，不再因分隔符差异导致证据统计缺失
+  - Step 2/6 的跨来源 trace 兼容能力从“JSONPath URI Fragment 路径”扩展到“double-underscore 路径”，进一步降低跨系统导入后的排障成本
