@@ -414,7 +414,9 @@ public class ConversationCli {
         long evidenceMs = 0L;
         long llmMs = 0L;
         // Memory Reflection：在加载记忆前先判断是否需要
-        ReflectionResult reflection = ReflectionResult.fallback();
+        ReflectionResult reflection = useSavedMemories
+                ? ReflectionResult.fallback()
+                : ReflectionResult.memoryDisabled();
         if (useSavedMemories) {
             emitProgress(progressListener, "reflection_started", "正在判断是否需要加载长期记忆。");
             long reflectionStartNs = System.nanoTime();
@@ -553,7 +555,9 @@ public class ConversationCli {
                                                        boolean useChatHistory,
                                                        List<ChatMessage> messages,
                                                        String startupMap) {
-        ReflectionResult reflection = ReflectionResult.fallback();
+        ReflectionResult reflection = useSavedMemories
+                ? ReflectionResult.fallback()
+                : ReflectionResult.memoryDisabled();
         if (useSavedMemories) {
             try {
                 if (memoryReflectionService != null) {
@@ -788,7 +792,7 @@ public class ConversationCli {
 
         // Phase 8: 读取会话摘要，用于替代 olderUserMessages 压缩 prompt
         String sessionSummariesText = null;
-        if (useChatHistory) {
+        if (useChatHistory && conversationSummaryService != null) {
             try {
                 List<Map<String, Object>> summaries = conversationSummaryService.getRecentSummaries(3);
                 if (summaries != null && !summaries.isEmpty()) {
@@ -1267,27 +1271,68 @@ public class ConversationCli {
 
     /**
      * 获取最近 N 轮的 Memory Evidence Trace（按时间顺序），供 /memory-debug [N] 使用。
-     * 解析失败的记录会被跳过；当持久化记录为空时，回退内存态最近一轮。
+     * 解析失败的记录会被跳过；结果遵循“内存态优先 + 持久化补齐”。
      */
     public List<MemoryEvidenceTrace> getRecentEvidenceTraces(int limit) {
         int effectiveLimit = limit <= 0 ? 1 : limit;
+        List<MemoryEvidenceTrace> traces = new ArrayList<>();
         try {
-            List<Map<String, Object>> records = storage.readMemoryEvidenceTraces(effectiveLimit);
-            List<MemoryEvidenceTrace> traces = records.stream()
+            List<Map<String, Object>> records = storage.readMemoryEvidenceTraces(effectiveLimit + 1);
+            traces = records.stream()
                     .map(this::parseEvidenceTrace)
                     .filter(Objects::nonNull)
-                    .toList();
-            if (!traces.isEmpty()) {
-                return traces;
-            }
+                    .collect(Collectors.toCollection(ArrayList::new));
         } catch (Exception e) {
             log.debug("Failed to load recent evidence traces from storage: {}", e.getMessage());
         }
 
-        if (lastEvidenceTrace != null) {
-            return List.of(lastEvidenceTrace);
+        MemoryEvidenceTrace inMemoryTrace = lastEvidenceTrace;
+        if (inMemoryTrace != null) {
+            boolean alreadyPersisted = traces.stream().anyMatch(trace -> sameTrace(trace, inMemoryTrace));
+            if (!alreadyPersisted) {
+                traces.add(inMemoryTrace);
+            }
         }
-        return List.of();
+
+        if (traces.size() > effectiveLimit) {
+            return traces.subList(traces.size() - effectiveLimit, traces.size());
+        }
+
+        return traces;
+    }
+
+    private boolean sameTrace(MemoryEvidenceTrace left, MemoryEvidenceTrace right) {
+        if (left == right) {
+            return true;
+        }
+        if (left == null || right == null) {
+            return false;
+        }
+        return Objects.equals(left.timestamp(), right.timestamp())
+                && Objects.equals(left.userMessage(), right.userMessage())
+                && Objects.equals(left.memoryLoaded(), right.memoryLoaded())
+                && sameReflection(left.reflection(), right.reflection())
+                && Objects.equals(left.retrievedInsights(), right.retrievedInsights())
+                && Objects.equals(left.usedInsights(), right.usedInsights())
+                && Objects.equals(left.retrievedExamples(), right.retrievedExamples())
+                && Objects.equals(left.usedExamples(), right.usedExamples())
+                && Objects.equals(left.loadedSkills(), right.loadedSkills())
+                && Objects.equals(left.usedSkills(), right.usedSkills())
+                && Objects.equals(left.retrievedTasks(), right.retrievedTasks())
+                && Objects.equals(left.usedTasks(), right.usedTasks())
+                && Objects.equals(left.usedEvidenceSummary(), right.usedEvidenceSummary());
+    }
+
+    private boolean sameReflection(ReflectionResult left, ReflectionResult right) {
+        if (left == right) {
+            return true;
+        }
+        if (left == null || right == null) {
+            return false;
+        }
+        return left.needs_memory() == right.needs_memory()
+                && Objects.equals(left.reason(), right.reason())
+                && Objects.equals(left.evidence_purposes(), right.evidence_purposes());
     }
 
     @SuppressWarnings("unchecked")

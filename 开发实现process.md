@@ -939,3 +939,17 @@
 - 实际结果：
   - `/memory-debug [N]` 与 `/memory-debug` 的三态语义和字段清洗行为保持一致
   - 历史 trace 中的 `null` 字符串与缺失字段不会在历史视图中造成误导展示
+
+#### 迭代记录 - 2026-03-31 09:50
+
+- 增强目标：继续执行 Step 2/6（6.2 记忆证据追踪），修复异步落盘延迟下 `/memory-debug [N]` 历史窗口可能“看不到最新一轮”的可用性问题
+- 涉及文件：修改 `src/main/java/com/memsys/cli/ConversationCli.java`、修改 `src/test/java/com/memsys/cli/ConversationCliTest.java`、修改 `开发文档.md`、修改 `开发实现process.md`
+- 实现方案：
+  1. `ConversationCli.getRecentEvidenceTraces(int)` 调整为“内存态优先 + 持久化补齐”，先读持久化窗口并解析，再合并 `lastEvidenceTrace`
+  2. 新增 trace 去重判定，避免“已落盘 + 内存态”导致同一条记录重复展示
+  3. 保持返回顺序为时间顺序，兼容 `CliRunner` 现有历史展示逻辑（最新在前输出）
+  4. 新增回归测试覆盖“异步任务已接收但 trace 尚未写盘”的场景，验证历史窗口仍可看到最新一轮
+- 状态：已完成
+- 实际结果：
+  - `/memory-debug [N]` 在落盘延迟阶段也能展示最新一轮证据 trace，不再落后一轮
+  - 历史窗口支持去重，避免同一轮 trace 在持久化和内存态同时存在时重复输出

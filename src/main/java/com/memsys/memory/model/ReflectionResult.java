@@ -35,4 +35,11 @@ public record ReflectionResult(
     public static ReflectionResult fallback() {
         return new ReflectionResult(true, "反思阶段异常，默认加载长期记忆以保证回答稳定性。", List.of("continuity"));
     }
+
+    /**
+     * 记忆开关关闭时的默认结果：不需要记忆，且用途列表为空。
+     */
+    public static ReflectionResult memoryDisabled() {
+        return new ReflectionResult(false, "记忆开关已关闭，已跳过长期记忆反思与加载。", List.of());
+    }
 }

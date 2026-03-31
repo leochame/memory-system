@@ -640,6 +640,55 @@ class ConversationCliTest {
     }
 
     @Test
+    void processUserMessageShouldUseDisabledReflectionWhenMemoryControlOff() {
+        MemoryStorage storage = new MemoryStorage(tempDir.toString());
+        storage.writeMetadata(Map.of(
+                "global_controls", Map.of(
+                        "use_saved_memories", false,
+                        "use_chat_history", true
+                )
+        ));
+
+        SkillService skillService = new SkillService(tempDir.toString());
+        RecordingLlmClient llmClient = new RecordingLlmClient();
+        MemoryReflectionService reflectionService = alwaysNeedMemoryReflectionService();
+
+        ConversationCli conversationCli = new ConversationCli(
+                llmClient,
+                storage,
+                new MemoryManager(storage, 100, 30, 15),
+                null,
+                reflectionService,
+                null,
+                null,
+                new AgentGuideService(tempDir.resolve("missing-Agent.md").toString(), tempDir.toString()),
+                new SystemPromptBuilder(),
+                new NoopMemoryAsyncService(),
+                null,
+                skillService,
+                null,
+                toolsWithoutRag(skillService),
+                40,
+                15,
+                false,
+                0.35,
+                5
+        );
+
+        String reply = conversationCli.processUserMessage("继续");
+        assertThat(reply).isEqualTo("assistant reply");
+
+        verify(reflectionService, never()).reflect(anyString(), anyString());
+
+        ReflectionResult reflection = conversationCli.getLastReflectionResult();
+        assertThat(reflection).isNotNull();
+        assertThat(reflection.needs_memory()).isFalse();
+        assertThat(reflection.reason()).isEqualTo("记忆开关已关闭，已跳过长期记忆反思与加载。");
+        assertThat(reflection.evidence_purposes()).isEmpty();
+        assertThat(llmClient.capturedSystemPrompts.get(0)).contains("needs_memory: false");
+    }
+
+    @Test
     void processUserMessageShouldFallbackWhenReflectionServiceUnavailable() {
         MemoryStorage storage = new MemoryStorage(tempDir.toString());
         storage.writeMetadata(Map.of(
@@ -948,6 +997,67 @@ class ConversationCliTest {
         assertThat(latest.userMessage()).isEmpty();
         assertThat(latest.retrievedInsights()).containsExactly("user_insights.md: 偏好简洁");
         assertThat(latest.usedEvidenceSummary()).isEmpty();
+    }
+
+    @Test
+    void getRecentEvidenceTracesShouldIncludeInMemoryLatestWhenPersistedWriteLagging() {
+        MemoryStorage storage = new MemoryStorage(tempDir.toString());
+        storage.writeMetadata(Map.of(
+                "global_controls", Map.of(
+                        "use_saved_memories", true,
+                        "use_chat_history", false
+                )
+        ));
+        SkillService skillService = new SkillService(tempDir.toString());
+        RecordingLlmClient llmClient = new RecordingLlmClient();
+        ConversationCli conversationCli = new ConversationCli(
+                llmClient,
+                storage,
+                new MemoryManager(storage, 100, 30, 15),
+                null,
+                alwaysNeedMemoryReflectionService(),
+                null,
+                null,
+                new AgentGuideService(tempDir.resolve("missing-Agent.md").toString(), tempDir.toString()),
+                new SystemPromptBuilder(),
+                new NoopMemoryAsyncService(),
+                null,
+                skillService,
+                null,
+                toolsWithoutRag(skillService),
+                40,
+                15,
+                false,
+                0.35,
+                5
+        );
+
+        Map<String, Object> oldTrace = new LinkedHashMap<>();
+        oldTrace.put("timestamp", LocalDateTime.now().minusMinutes(10).toString());
+        oldTrace.put("user_message", "旧持久化 trace");
+        oldTrace.put("memory_loaded", true);
+        oldTrace.put("reflection", Map.of(
+                "needs_memory", true,
+                "reason", "需要历史偏好",
+                "evidence_purposes", List.of("personalization")
+        ));
+        oldTrace.put("retrieved_insights", List.of("food_preference: 不吃鱼"));
+        oldTrace.put("used_insights", List.of("food_preference: 不吃鱼"));
+        oldTrace.put("retrieved_examples", List.of());
+        oldTrace.put("used_examples", List.of());
+        oldTrace.put("loaded_skills", List.of());
+        oldTrace.put("used_skills", List.of());
+        oldTrace.put("retrieved_tasks", List.of());
+        oldTrace.put("used_tasks", List.of());
+        oldTrace.put("used_evidence_summary", "insights 1/1");
+        storage.appendMemoryEvidenceTrace(oldTrace);
+
+        conversationCli.processUserMessage("最新一轮只在内存");
+
+        List<MemoryEvidenceTrace> traces = conversationCli.getRecentEvidenceTraces(2);
+        assertThat(traces).hasSize(2);
+        assertThat(traces.get(0).userMessage()).isEqualTo("旧持久化 trace");
+        assertThat(traces.get(1).userMessage()).isEqualTo("最新一轮只在内存");
     }
 
     private List<BaseTool> toolsWithoutRag(SkillService skillService) {
