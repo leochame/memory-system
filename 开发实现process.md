@@ -2074,3 +2074,48 @@
 - 实际结果：
   - `/memory-debug` 与 `/memory-insights` 可稳定回读 `/reflection/needs_memory`、`/evidence/retrieved/insights/0`、`/retrieved/examples/0`、`/loaded/skills/1` 等前导斜杠路径字段，不再因路径前缀差异导致证据统计缺失
   - Step 2/6 的跨来源 trace 兼容能力从“斜杠路径”扩展到“JSON Pointer 前导斜杠路径 + `~1/~0` 转义”，进一步降低跨系统导入后的排障成本
+
+#### 迭代记录 - 2026-03-31 21:02
+
+- 增强目标：继续执行 Step 6/6（调研与文档更新），围绕 Memory-System 打造“更多内容”的第二十层方案，将内容体系升级为“跨作用域连续性叙事 + 统一身份链路内容化”。
+- 涉及文件：修改 `开发文档.md`、修改 `开发实现process.md`
+- 实现方案：
+  1. 将开发文档版本升级至 `v4.41`，在 `5.10` 新增 `5.10.30 Step 6/6 内容扩展蓝图（第二十层：跨作用域连续性叙事与身份链路内容化）`。
+  2. 基于现有系统能力（`personal/team:*` 作用域、`/identity` 统一身份、IM 多平台、主动提醒、任务闭环）补齐 8 类连续性内容资产。
+  3. 固化执行约束（周度作用域对照、跨平台身份抽查、异常回流、双周跨渠道演示剧本复核）并新增索引字段：`continuity_case_id/scope_pair/unified_id_ref/channel_set/consistency_state/governance_decision_ref/continuity_risk_level/retest_due`。
+  4. 在开发文档新增 `6.32 需求三十`，将目录规范、字段约束、对照规则、回流时限与验收门槛转为可执行条款。
+- 状态：已完成
+- 实际结果：
+  - Step 6/6 从“场景基准题单复用”进一步升级为“跨作用域与跨平台连续性证明”，能系统化回答“同一用户在不同渠道/作用域是否保持一致记忆行为”。
+  - 围绕记忆系统形成“作用域对照 -> 身份抽查 -> 异常回流 -> 复测验证 -> 演示复用”的内容闭环，可直接支撑答辩与论文中的一致性论证。
+
+#### 迭代记录 - 2026-03-31 20:46
+
+- 增强目标：围绕 Step 1/6（6.1 Memory Reflection 调用链）按开发文档 `v4.41` 复核当前项目，并完成本轮验证闭环
+- 涉及文件：修改 `开发实现process.md`
+- 实现方案：
+  1. 对照开发文档 `6.1` 的 5 项“需要完成”，逐项核查 `LlmDtos/Schemas/MemoryReflectionService/ConversationCli/SystemPromptBuilder` 调用链落点
+  2. 对照完成标准 4/5 重点复核：`needs_memory=true` 时默认值按 `memory_purpose` 派生（不得统一回退 continuity），以及 `recent-history/recentHistory`、`follow-up/followUp` 等别名归一化
+  3. 执行 Step 1/6 定向回归：`export JAVA_HOME=$(/usr/libexec/java_home) && mvn -q -Dtest=ReflectionResultTest,MemoryReflectionServiceTest,SystemPromptBuilderTest,ConversationCliTest test`
+  4. 执行编译校验：`export JAVA_HOME=$(/usr/libexec/java_home) && mvn -q compile`
+- 状态：已完成
+- 实际结果：
+  - 当前实现与开发文档 `v4.41` 的 Step 1/6 要求保持一致，本轮未发现需新增代码的缺口
+  - 反思主链路、提示词层与评测链路在“反思结果注入 + 按 `memory_purpose` 派生默认值 + 失败稳定回退 + 别名归一化”语义上保持一致
+  - 定向测试与编译均通过
+
+#### 迭代记录 - 2026-03-31 20:52
+
+- 增强目标：继续执行 Step 2/6（6.2 记忆证据追踪），补齐历史 trace 在“JSON Pointer URI Fragment 路径（`#/...`）”格式下的兼容解析，避免 `/memory-debug` 与 `/memory-insights` 在跨系统导出数据上出现覆盖率误判
+- 涉及文件：修改 `src/main/java/com/memsys/cli/ConversationCli.java`、修改 `src/main/java/com/memsys/memory/MemoryTraceInsightService.java`、修改 `src/test/java/com/memsys/cli/ConversationCliTest.java`、修改 `src/test/java/com/memsys/memory/MemoryTraceInsightServiceTest.java`、修改 `开发文档.md`、修改 `开发实现process.md`
+- 实现方案：
+  1. 在 `ConversationCli.flattenedKeySuffix(...)` 增加 `"#/" + key + "/"` 与 `"#/" + key + "["` 前缀识别，兼容 `#/reflection/needs_memory`、`#/retrieved/examples/0` 等 URI Fragment 扁平键
+  2. 在 `MemoryTraceInsightService.flattenedKeySuffix(...)` 同步增加同级识别规则，确保 `/memory-insights` 与 `/memory-debug` 的解析口径一致
+  3. 新增 `getLastEvidenceTraceShouldParseFlattenedJsonPointerFragmentTraceFields`，覆盖 `/memory-debug` 在 `#/...` 路径下的反思字段与四类证据解析
+  4. 新增 `analyzeRecentTracesShouldParseFlattenedJsonPointerFragmentTraceFields`，覆盖 `/memory-insights` 在 `#/...` 路径下的 retrieved/used 统计一致性
+  5. 同步开发文档 `6.2` 完成标准新增第 40 条，明确“JSON Pointer URI Fragment 路径兼容”约束
+- 状态：已完成
+- 实际结果：
+  - `/memory-debug` 与 `/memory-insights` 可稳定回读 `#/reflection/needs_memory`、`#/evidence/retrieved/insights/0`、`#/retrieved/examples/0`、`#/loaded/skills/1` 等 URI Fragment 路径字段，不再因 `#/` 前缀导致证据统计缺失
+  - Step 2/6 的跨来源 trace 兼容能力从“JSON Pointer 前导斜杠路径”扩展到“JSON Pointer URI Fragment 路径”，进一步降低跨系统导入后的排障成本
+  - 定向测试通过：`export JAVA_HOME=$(/usr/libexec/java_home) && mvn -q -Dtest=ConversationCliTest,MemoryTraceInsightServiceTest test`

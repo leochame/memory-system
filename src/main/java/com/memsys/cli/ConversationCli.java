@@ -1827,6 +1827,12 @@ public class ConversationCli {
         if (entryKey.startsWith("/" + key + "[")) {
             return entryKey.substring(key.length() + 1);
         }
+        if (entryKey.startsWith("#/" + key + "/")) {
+            return entryKey.substring(key.length() + 3);
+        }
+        if (entryKey.startsWith("#/" + key + "[")) {
+            return entryKey.substring(key.length() + 2);
+        }
         return null;
     }
 
