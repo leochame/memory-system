@@ -831,6 +831,52 @@ class ConversationCliTest {
     }
 
     @Test
+    void processUserMessageShouldNormalizeNullLikeRetrievalHintWhenNeedsMemory() {
+        MemoryStorage storage = new MemoryStorage(tempDir.toString());
+        storage.writeMetadata(Map.of(
+                "global_controls", Map.of(
+                        "use_saved_memories", true,
+                        "use_chat_history", false
+                )
+        ));
+        SkillService skillService = new SkillService(tempDir.toString());
+        RecordingLlmClient llmClient = new RecordingLlmClient();
+
+        ConversationCli conversationCli = new ConversationCli(
+                llmClient,
+                storage,
+                new MemoryManager(storage, 100, 30, 15),
+                null,
+                nullLikeHintReflectionService(),
+                null,
+                null,
+                new AgentGuideService(tempDir.resolve("missing-Agent.md").toString(), tempDir.toString()),
+                new SystemPromptBuilder(),
+                new NoopMemoryAsyncService(),
+                null,
+                skillService,
+                null,
+                toolsWithoutRag(skillService),
+                40,
+                15,
+                false,
+                0.35,
+                5
+        );
+
+        String reply = conversationCli.processUserMessage("继续");
+        assertThat(reply).isEqualTo("assistant reply");
+
+        ReflectionResult reflection = conversationCli.getLastReflectionResult();
+        assertThat(reflection).isNotNull();
+        assertThat(reflection.needs_memory()).isTrue();
+        assertThat(reflection.retrieval_hint()).isEqualTo("优先检索与用户当前问题最相关的历史证据。");
+
+        String systemPrompt = llmClient.capturedSystemPrompts.get(0);
+        assertThat(systemPrompt).contains("retrieval_hint: 优先检索与用户当前问题最相关的历史证据。");
+    }
+
+    @Test
     void processUserMessageWithMemoryForEvalShouldFallbackWhenReflectionServiceReturnsNull() {
         MemoryStorage storage = new MemoryStorage(tempDir.toString());
         storage.writeMetadata(Map.of(
@@ -2128,6 +2174,21 @@ class ConversationCliTest {
                         "legacy hint should be dropped",
                         List.of("TASK"),
                         List.of("followup")
+                ));
+        return reflectionService;
+    }
+
+    private MemoryReflectionService nullLikeHintReflectionService() {
+        MemoryReflectionService reflectionService = mock(MemoryReflectionService.class);
+        when(reflectionService.reflect(anyString(), anyString()))
+                .thenReturn(new ReflectionResult(
+                        true,
+                        "CONTINUITY",
+                        "需要历史上下文",
+                        0.91d,
+                        "N/A",
+                        List.of("RECENT_HISTORY"),
+                        List.of("continuity")
                 ));
         return reflectionService;
     }

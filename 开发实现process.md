@@ -1405,3 +1405,17 @@
 - 实际结果：
   - `/memory-debug` 与 `/memory-debug [N]` 在“已检索但未使用/使用偏低”场景下可直接看到未使用证据样例，定位链路从“看比例”提升到“看对象”
   - Step 2/6 诊断维度从计数级扩展到样例级，排查证据浪费时无需手工比对 retrieved/used 两组列表
+
+#### 迭代记录 - 2026-03-31 14:20
+
+- 增强目标：继续执行 Step 2/6（6.2 记忆证据追踪），修复 `retrieval_hint` 在 null-like 值下的语义漂移，避免主链路与 `/memory-debug` 出现空提示或无效提示
+- 涉及文件：修改 `src/main/java/com/memsys/cli/ConversationCli.java`、修改 `src/test/java/com/memsys/cli/ConversationCliTest.java`、修改 `开发文档.md`、修改 `开发实现process.md`
+- 实现方案：
+  1. 在 `ConversationCli.normalizeRetrievalHint(...)` 中统一使用 `isNullLike(...)` 判断（覆盖 `null/undefined/n/a/none`），而非仅判断空串
+  2. 新增回归测试 `processUserMessageShouldNormalizeNullLikeRetrievalHintWhenNeedsMemory`，覆盖 `needs_memory=true` 且 `retrieval_hint=N/A` 的兜底行为
+  3. 同步开发文档 6.2 完成标准，新增 null-like `retrieval_hint` 默认回退约束，确保 trace 展示与提示词语义一致
+- 状态：已完成
+- 实际结果：
+  - 当反思结果返回 null-like `retrieval_hint` 时，系统稳定回退为默认检索提示“优先检索与用户当前问题最相关的历史证据。”
+  - 主链路提示词与证据追踪链路对 `retrieval_hint` 的语义保持一致，降低排障误判风险
+  - 定向测试通过：`./scripts/run-tests.sh -q -Dtest=ConversationCliTest,CliRunnerTest,MemoryEvidenceTraceTest test`

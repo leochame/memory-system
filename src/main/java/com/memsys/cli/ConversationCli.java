@@ -1567,7 +1567,7 @@ public class ConversationCli {
         if (!needsMemory) {
             return "";
         }
-        if (retrievalHint == null || retrievalHint.isBlank()) {
+        if (isNullLike(retrievalHint)) {
             return "优先检索与用户当前问题最相关的历史证据。";
         }
         return retrievalHint.trim();
