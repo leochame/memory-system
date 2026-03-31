@@ -53,7 +53,17 @@ public record MemoryEvidenceTrace(
             sb.append("判断理由: reflection_missing\n");
         } else {
             sb.append("需要记忆: ").append(reflection.needs_memory() ? "是" : "否").append("\n");
+            if (reflection.memory_purpose() != null && !reflection.memory_purpose().isBlank()) {
+                sb.append("记忆目的: ").append(reflection.memory_purpose().trim()).append("\n");
+            }
             sb.append("判断理由: ").append(reflection.reason()).append("\n");
+            sb.append("判断置信度: ").append(String.format(Locale.ROOT, "%.2f", reflection.confidence())).append("\n");
+            if (reflection.retrieval_hint() != null && !reflection.retrieval_hint().isBlank()) {
+                sb.append("检索提示: ").append(reflection.retrieval_hint().trim()).append("\n");
+            }
+            if (reflection.evidence_types() != null && !reflection.evidence_types().isEmpty()) {
+                sb.append("证据类型: ").append(String.join(", ", reflection.evidence_types())).append("\n");
+            }
             if (reflection.evidence_purposes() != null && !reflection.evidence_purposes().isEmpty()) {
                 sb.append("证据用途: ").append(String.join(", ", reflection.evidence_purposes())).append("\n");
             }
@@ -83,6 +93,7 @@ public record MemoryEvidenceTrace(
                 coverage(sizeOf(usedExamples), sizeOf(retrievedExamples)),
                 coverage(sizeOf(usedSkills), sizeOf(loadedSkills)),
                 coverage(sizeOf(usedTasks), sizeOf(retrievedTasks))));
+        appendCoverageDiagnostics(sb);
         appendList(sb, "used_insights", usedInsights, 3);
         appendList(sb, "used_examples", usedExamples, 3);
         appendList(sb, "used_skills", usedSkills, 5);
@@ -107,6 +118,28 @@ public record MemoryEvidenceTrace(
             return "n/a";
         }
         return String.format(Locale.ROOT, "%.1f%%", (used * 100.0d) / retrieved);
+    }
+
+    private void appendCoverageDiagnostics(StringBuilder sb) {
+        appendCoverageDiagnostic(sb, "Insights", sizeOf(usedInsights), sizeOf(retrievedInsights));
+        appendCoverageDiagnostic(sb, "Examples", sizeOf(usedExamples), sizeOf(retrievedExamples));
+        appendCoverageDiagnostic(sb, "Skills", sizeOf(usedSkills), sizeOf(loadedSkills));
+        appendCoverageDiagnostic(sb, "Tasks", sizeOf(usedTasks), sizeOf(retrievedTasks));
+    }
+
+    private void appendCoverageDiagnostic(StringBuilder sb, String label, int used, int retrieved) {
+        if (retrieved <= 0) {
+            return;
+        }
+        if (used <= 0) {
+            sb.append("诊断: ").append(label).append(" 已检索但未使用（0/").append(retrieved).append("）\n");
+            return;
+        }
+        double ratio = used * 1.0d / retrieved;
+        if (ratio < 0.5d) {
+            sb.append("诊断: ").append(label).append(" 使用偏低（")
+                    .append(used).append("/").append(retrieved).append("）\n");
+        }
     }
 
     private void appendList(StringBuilder sb, String label, List<String> items, int maxItems) {

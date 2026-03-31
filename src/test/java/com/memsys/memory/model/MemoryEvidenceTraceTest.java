@@ -38,6 +38,7 @@ class MemoryEvidenceTraceTest {
 
         String summary = trace.buildDisplaySummary();
         assertThat(summary)
+                .contains("记忆目的: ACTION_FOLLOWUP")
                 .contains("== Evidence Retrieved ==")
                 .contains("retrieved_insights")
                 .contains("retrieved_examples")
@@ -117,5 +118,40 @@ class MemoryEvidenceTraceTest {
         } finally {
             Locale.setDefault(previous);
         }
+    }
+
+    @Test
+    void buildDisplaySummaryShouldAppendCoverageDiagnosticsWhenUsageIsLow() {
+        MemoryEvidenceTrace trace = new MemoryEvidenceTrace(
+                LocalDateTime.of(2026, 3, 31, 16, 0),
+                "继续诊断记忆召回",
+                new ReflectionResult(
+                        true,
+                        "CONTINUITY",
+                        "需要结合历史上下文",
+                        0.88d,
+                        "优先检索最近一周相关任务",
+                        List.of("TASK", "USER_INSIGHT"),
+                        List.of("continuity")
+                ),
+                true,
+                List.of("i1", "i2"),
+                List.of(),
+                List.of("e1", "e2", "e3"),
+                List.of("e1"),
+                List.of("s1"),
+                List.of(),
+                List.of("t1"),
+                List.of("t1"),
+                "insights 0/2, examples 1/3, skills 0/1, tasks 1/1"
+        );
+
+        String summary = trace.buildDisplaySummary();
+        assertThat(summary).contains("判断置信度: 0.88");
+        assertThat(summary).contains("检索提示: 优先检索最近一周相关任务");
+        assertThat(summary).contains("证据类型: TASK, USER_INSIGHT");
+        assertThat(summary).contains("诊断: Insights 已检索但未使用（0/2）");
+        assertThat(summary).contains("诊断: Examples 使用偏低（1/3）");
+        assertThat(summary).contains("诊断: Skills 已检索但未使用（0/1）");
     }
 }

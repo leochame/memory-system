@@ -98,6 +98,103 @@ class SystemPromptBuilderTest {
         assertThat(prompt).doesNotContain("search_rag(query)");
     }
 
+    @Test
+    void buildSystemPromptShouldFallbackReflectionFieldsWhenInvalid() {
+        String prompt = builder.buildSystemPrompt(
+                "",
+                null,
+                null,
+                new ReflectionResult(
+                        true,
+                        "",
+                        "null",
+                        Double.NaN,
+                        "N/A",
+                        List.of(),
+                        List.of()
+                ),
+                List.<Map<String, Object>>of(),
+                null,
+                List.<String>of(),
+                false,
+                false,
+                false,
+                false,
+                false,
+                false,
+                List.<String>of(),
+                null,
+                List.<RagService.RelevantMemory>of(),
+                null
+        );
+
+        assertThat(prompt).contains("memory_purpose: CONTINUITY");
+        assertThat(prompt).contains("reason: 需要调用长期记忆以保证回答质量。");
+        assertThat(prompt).contains("confidence: 0.70");
+        assertThat(prompt).contains("retrieval_hint: 优先检索与用户当前问题最相关的历史证据。");
+    }
+
+    @Test
+    void buildSystemPromptShouldNormalizeOutOfRangeConfidence() {
+        String slightOverflowPrompt = builder.buildSystemPrompt(
+                "",
+                null,
+                null,
+                new ReflectionResult(
+                        true,
+                        "CONTINUITY",
+                        "需要记忆",
+                        1.2d,
+                        "优先检索相关证据",
+                        List.of(),
+                        List.of()
+                ),
+                List.<Map<String, Object>>of(),
+                null,
+                List.<String>of(),
+                false,
+                false,
+                false,
+                false,
+                false,
+                false,
+                List.<String>of(),
+                null,
+                List.<RagService.RelevantMemory>of(),
+                null
+        );
+        assertThat(slightOverflowPrompt).contains("confidence: 1.00");
+
+        String percentagePrompt = builder.buildSystemPrompt(
+                "",
+                null,
+                null,
+                new ReflectionResult(
+                        true,
+                        "CONTINUITY",
+                        "需要记忆",
+                        87d,
+                        "优先检索相关证据",
+                        List.of(),
+                        List.of()
+                ),
+                List.<Map<String, Object>>of(),
+                null,
+                List.<String>of(),
+                false,
+                false,
+                false,
+                false,
+                false,
+                false,
+                List.<String>of(),
+                null,
+                List.<RagService.RelevantMemory>of(),
+                null
+        );
+        assertThat(percentagePrompt).contains("confidence: 0.87");
+    }
+
     private void assertSectionOrder(String prompt, String... sections) {
         int lastIndex = -1;
         for (String section : sections) {

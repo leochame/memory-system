@@ -5,6 +5,7 @@ import com.memsys.rag.RagService;
 import org.springframework.stereotype.Component;
 
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 
 @Component
@@ -59,17 +60,22 @@ public class SystemPromptBuilder {
 
         // 3.5 Memory Reflection Decision
         if (reflectionResult != null) {
+            boolean needsMemory = reflectionResult.needs_memory();
+            String memoryPurpose = normalizeMemoryPurpose(reflectionResult.memory_purpose(), needsMemory);
+            String reason = normalizeReason(reflectionResult.reason(), needsMemory);
+            double confidence = normalizeConfidence(reflectionResult.confidence());
+            String retrievalHint = normalizeRetrievalHint(reflectionResult.retrieval_hint(), needsMemory);
             prompt.append("## 3.5 记忆反思决策\n");
-            prompt.append("- needs_memory: ").append(reflectionResult.needs_memory()).append("\n");
-            if (reflectionResult.memory_purpose() != null && !reflectionResult.memory_purpose().isBlank()) {
-                prompt.append("- memory_purpose: ").append(reflectionResult.memory_purpose().trim()).append("\n");
+            prompt.append("- needs_memory: ").append(needsMemory).append("\n");
+            if (!memoryPurpose.isBlank()) {
+                prompt.append("- memory_purpose: ").append(memoryPurpose).append("\n");
             }
-            if (reflectionResult.reason() != null && !reflectionResult.reason().isBlank()) {
-                prompt.append("- reason: ").append(reflectionResult.reason().trim()).append("\n");
+            if (!reason.isBlank()) {
+                prompt.append("- reason: ").append(reason).append("\n");
             }
-            prompt.append("- confidence: ").append(String.format(java.util.Locale.ROOT, "%.2f", reflectionResult.confidence())).append("\n");
-            if (reflectionResult.retrieval_hint() != null && !reflectionResult.retrieval_hint().isBlank()) {
-                prompt.append("- retrieval_hint: ").append(reflectionResult.retrieval_hint().trim()).append("\n");
+            prompt.append("- confidence: ").append(String.format(Locale.ROOT, "%.2f", confidence)).append("\n");
+            if (!retrievalHint.isBlank()) {
+                prompt.append("- retrieval_hint: ").append(retrievalHint).append("\n");
             }
             if (reflectionResult.evidence_types() != null && !reflectionResult.evidence_types().isEmpty()) {
                 prompt.append("- evidence_types: ")
@@ -180,6 +186,63 @@ public class SystemPromptBuilder {
         prompt.append("\n请基于以上背景信息和 messages 列表中的实际对话内容，与用户进行对话。\n");
 
         return prompt.toString();
+    }
+
+    private String normalizeMemoryPurpose(String memoryPurpose, boolean needsMemory) {
+        if (memoryPurpose == null || memoryPurpose.isBlank()) {
+            return needsMemory ? "CONTINUITY" : "NOT_NEEDED";
+        }
+        return memoryPurpose.trim();
+    }
+
+    private String normalizeReason(String reason, boolean needsMemory) {
+        if (!isNullLike(reason)) {
+            return reason.trim();
+        }
+        return needsMemory ? "需要调用长期记忆以保证回答质量。" : "当前问题可直接回答，无需调用长期记忆。";
+    }
+
+    private double normalizeConfidence(double confidence) {
+        if (!Double.isFinite(confidence)) {
+            return 0.70d;
+        }
+        if (confidence < 0.0d) {
+            return 0.0d;
+        }
+        if (confidence <= 1.0d) {
+            return confidence;
+        }
+        // Handle two common bad-shape inputs:
+        // 1) slight overflow from [0,1] scale (e.g. 1.02) -> clamp to 1.0
+        // 2) percentage-style scale (e.g. 85) -> map to 0.85
+        if (confidence <= 2.0d) {
+            return 1.0d;
+        }
+        if (confidence <= 100.0d) {
+            return confidence / 100.0d;
+        }
+        return 1.0d;
+    }
+
+    private String normalizeRetrievalHint(String retrievalHint, boolean needsMemory) {
+        if (!needsMemory) {
+            return "";
+        }
+        if (!isNullLike(retrievalHint)) {
+            return retrievalHint.trim();
+        }
+        return "优先检索与用户当前问题最相关的历史证据。";
+    }
+
+    private boolean isNullLike(String value) {
+        if (value == null || value.isBlank()) {
+            return true;
+        }
+        String normalized = value.trim().toLowerCase(Locale.ROOT);
+        return "null".equals(normalized)
+                || "undefined".equals(normalized)
+                || "n/a".equals(normalized)
+                || "none".equals(normalized);
     }
 
     public String buildTemporaryPrompt() {

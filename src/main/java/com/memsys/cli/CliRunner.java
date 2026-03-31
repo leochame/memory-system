@@ -953,6 +953,9 @@ public class CliRunner implements CommandLineRunner {
             String userMessage = truncateForDisplay(trace.userMessage(), 80);
             String needsMemoryLabel = traceNeedsMemoryLabel(trace);
             String reason = traceReason(trace);
+            String purpose = traceMemoryPurpose(trace);
+            String confidence = traceConfidence(trace);
+            String retrievalHint = traceRetrievalHint(trace);
 
             List<String> retrievedInsights = trace.retrievedInsights();
             List<String> retrievedExamples = trace.retrievedExamples();
@@ -966,7 +969,12 @@ public class CliRunner implements CommandLineRunner {
 
             sb.append(String.format("── #%d %s ──\n", rank, timestamp));
             sb.append(String.format("  需要记忆: %s\n", needsMemoryLabel));
+            sb.append(String.format("  记忆目的: %s\n", purpose));
             sb.append(String.format("  判断理由: %s\n", reason));
+            sb.append(String.format("  置信度: %s\n", confidence));
+            if (!retrievalHint.isBlank()) {
+                sb.append(String.format("  检索提示: %s\n", truncateForDisplay(retrievalHint, 120)));
+            }
             sb.append(String.format("  用户消息: %s\n", userMessage.isBlank() ? "(empty)" : userMessage));
             sb.append(String.format("  检索: Insights %d | Examples %d | Skills %d | Tasks %d\n",
                     retrievedInsights.size(), retrievedExamples.size(), loadedSkills.size(), retrievedTasks.size()));
@@ -977,6 +985,10 @@ public class CliRunner implements CommandLineRunner {
                     usageCoverage(usedExamples.size(), retrievedExamples.size()),
                     usageCoverage(usedSkills.size(), loadedSkills.size()),
                     usageCoverage(usedTasks.size(), retrievedTasks.size())));
+            appendCoverageDiagnosis(sb, "Insights", usedInsights.size(), retrievedInsights.size());
+            appendCoverageDiagnosis(sb, "Examples", usedExamples.size(), retrievedExamples.size());
+            appendCoverageDiagnosis(sb, "Skills", usedSkills.size(), loadedSkills.size());
+            appendCoverageDiagnosis(sb, "Tasks", usedTasks.size(), retrievedTasks.size());
             if (!usedSummary.isBlank()) {
                 sb.append(String.format("  摘要: %s\n", truncateForDisplay(usedSummary, 120)));
             }
@@ -1825,6 +1837,20 @@ public class CliRunner implements CommandLineRunner {
         return String.format(Locale.ROOT, "%.1f%%", used * 100.0d / retrieved);
     }
 
+    private void appendCoverageDiagnosis(StringBuilder sb, String label, int used, int retrieved) {
+        if (retrieved <= 0) {
+            return;
+        }
+        if (used <= 0) {
+            sb.append(String.format("  诊断: %s 已检索但未使用（0/%d）\n", label, retrieved));
+            return;
+        }
+        double ratio = used * 1.0d / retrieved;
+        if (ratio < 0.5d) {
+            sb.append(String.format("  诊断: %s 使用偏低（%d/%d）\n", label, used, retrieved));
+        }
+    }
+
     private String traceNeedsMemoryLabel(MemoryEvidenceTrace trace) {
         if (trace == null || trace.reflection() == null) {
             return "unknown";
@@ -1867,6 +1893,28 @@ public class CliRunner implements CommandLineRunner {
             return "reflection_missing";
         }
         return trace.reflection().reason();
+    }
+
+    private String traceMemoryPurpose(MemoryEvidenceTrace trace) {
+        if (trace == null || trace.reflection() == null || trace.reflection().memory_purpose() == null) {
+            return "(unknown)";
+        }
+        String purpose = trace.reflection().memory_purpose().trim();
+        return purpose.isBlank() ? "(unknown)" : purpose;
+    }
+
+    private String traceConfidence(MemoryEvidenceTrace trace) {
+        if (trace == null || trace.reflection() == null) {
+            return "(unknown)";
+        }
+        return String.format(Locale.ROOT, "%.2f", trace.reflection().confidence());
+    }
+
+    private String traceRetrievalHint(MemoryEvidenceTrace trace) {
+        if (trace == null || trace.reflection() == null || trace.reflection().retrieval_hint() == null) {
+            return "";
+        }
+        return trace.reflection().retrieval_hint().trim();
     }
 
     private boolean parseBoolean(Object value, boolean defaultValue) {

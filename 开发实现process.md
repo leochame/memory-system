@@ -1055,3 +1055,48 @@
 - 实际结果：
   - 反思阶段即使返回 `null`，`/memory-debug` 与 trace 持久化仍可获得稳定、可解释的反思结果
   - Step 2/6 在“反思异常 + 证据追踪”联合链路上的健壮性进一步提升，降低线上不可观测风险
+
+#### 迭代记录 - 2026-03-31 15:10
+
+- 增强目标：继续执行 Step 6/6（调研深化与文档更新），围绕 Memory-System 把“内容资产沉淀”扩展为“可发布内容漏斗 + 反馈回流闭环”
+- 涉及文件：修改 `开发文档.md`、修改 `开发实现process.md`
+- 实现方案：
+  1. 在开发文档 5.10 新增“5.10.4 对外内容产品化（30 天执行版）”，补齐内容分层（L1/L2/L3）、30 天选题排期、统一发布模板与 KPI
+  2. 在开发文档 6 章节新增“6.10 需求八：补齐内容发布漏斗与反馈回流”，把内容运营要求转成可验收开发需求
+  3. 将 Step 6/6 的落地目标从“内部复盘”升级为“内部证据 -> 对外内容 -> 反馈驱动迭代”的完整闭环
+- 状态：已完成
+- 实际结果：
+  - 围绕记忆系统的内容建设从“模板化记录”升级为“可发布、可复测、可回流”的执行体系
+  - 后续可直接按 30 天排期持续输出案例内容，并把反馈稳定转化为 backlog 与验证任务
+
+#### 迭代记录 - 2026-03-31 16:05
+
+- 增强目标：继续执行 Step 2/6（6.2 记忆证据追踪），提升 `/memory-debug` 的可诊断性，减少“检索到了但没用上”问题的排查成本
+- 涉及文件：修改 `src/main/java/com/memsys/memory/model/MemoryEvidenceTrace.java`、修改 `src/main/java/com/memsys/cli/CliRunner.java`、修改 `src/test/java/com/memsys/memory/model/MemoryEvidenceTraceTest.java`、修改 `开发文档.md`、修改 `开发实现process.md`
+- 实现方案：
+  1. `MemoryEvidenceTrace.buildDisplaySummary()` 补充反思关键字段展示：`memory_purpose`、`confidence`、`retrieval_hint`、`evidence_types`
+  2. 新增覆盖率诊断输出：当 `used=0 && retrieved>0` 标记“已检索但未使用”；当 `used/retrieved < 50%` 标记“使用偏低”
+  3. `CliRunner.showMemoryDebugHistory()` 同步展示记忆目的、置信度、检索提示，并输出分证据类型的低覆盖诊断
+  4. 新增 `MemoryEvidenceTraceTest` 回归用例，覆盖新增字段展示与诊断提示输出
+  5. 同步开发文档 6.2 完成标准，新增“反思关键字段 + 低覆盖诊断”约束
+- 状态：已完成
+- 实际结果：
+  - `/memory-debug` 与 `/memory-debug [N]` 对“为什么判定需要记忆、检索是否有效利用”的解释更完整
+  - 证据追踪从“计数展示”升级为“可诊断展示”，可直接定位低价值召回并驱动后续优化
+
+#### 迭代记录 - 2026-03-31 16:20
+
+- 增强目标：执行 Step 4/6（修复存在的问题），修复反思置信度归一化中的缩放错误，避免提示词出现异常低置信度
+- 涉及文件：修改 `src/main/java/com/memsys/prompt/SystemPromptBuilder.java`、修改 `src/test/java/com/memsys/prompt/SystemPromptBuilderTest.java`、修改 `开发实现process.md`
+- 问题与修复：
+  1. 问题：`normalizeConfidence()` 在 `confidence > 1` 时统一 `/100`，会把轻微越界值（如 `1.2`）错误缩放为 `0.012`
+  2. 修复：区分两类异常输入
+     - 轻微越界（`1.0~2.0`）按上限钳制为 `1.0`
+     - 百分制输入（`2.0~100`）按 `/100` 归一化
+     - 非法值/超大值保持安全回退（`NaN -> 0.70`，`>100 -> 1.0`）
+  3. 回归保障：新增 `buildSystemPromptShouldNormalizeOutOfRangeConfidence`，覆盖 `1.2 -> 1.00` 与 `87 -> 0.87`
+- 状态：已完成
+- 实际结果：
+  - 修复后提示词中的 `confidence` 字段不再出现不合理的过小值
+  - 定向测试通过：`./scripts/run-tests.sh -q -Dtest=SystemPromptBuilderTest test`
+  - 全量测试通过：`./scripts/run-tests.sh -q test`
