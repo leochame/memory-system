@@ -1419,3 +1419,47 @@
   - 当反思结果返回 null-like `retrieval_hint` 时，系统稳定回退为默认检索提示“优先检索与用户当前问题最相关的历史证据。”
   - 主链路提示词与证据追踪链路对 `retrieval_hint` 的语义保持一致，降低排障误判风险
   - 定向测试通过：`./scripts/run-tests.sh -q -Dtest=ConversationCliTest,CliRunnerTest,MemoryEvidenceTraceTest test`
+
+#### 迭代记录 - 2026-03-31 15:20
+
+- 增强目标：继续执行 Step 6/6（调研与文档更新），围绕 Memory-System 打造“更多内容”的第六层方案，将内容体系升级为“专题季化 + 跨版本对照评测产品化”
+- 涉及文件：修改 `开发文档.md`、修改 `开发实现process.md`
+- 实现方案：
+  1. 将开发文档版本升级至 `v4.15`，在 `5.10` 新增 `5.10.16 Step 6/6 内容扩展蓝图（第六层：专题季化与对照评测产品化）`
+  2. 新增 8 类专题季资产：`季度状态报告`、`跨版本对照评测集`、`失败模式周历`、`Evidence 质量榜单`、`主动服务命中季报`、`论文图表季更包`、`答辩演示季度脚本包`、`术语与口径手册`
+  3. 固化专题季执行机制（周/双周/月/季四层节奏）与新增索引字段：`season_id/season_track/baseline_version/compare_version/metric_delta/evidence_density/reusability_level/season_review_status`
+  4. 在开发文档新增 `6.18 需求十六`，将专题季目录规范、跨版本对照约束、失败素材占比、季报收敛机制转化为可验收条款
+- 状态：已完成
+- 实际结果：
+  - Step 6/6 从“渠道化分发 + 自动化生成”进一步升级为“专题季资产化运营”，内容可按季度形成可复用知识产品
+  - 围绕记忆系统形成“命令证据 -> 对照评测 -> 专题季报告 -> 回流开发验证”的稳定闭环，可持续支撑开发、答辩与论文三条线
+
+#### 迭代记录 - 2026-03-31 16:12
+
+- 增强目标：继续执行 Step 2/6（6.2 记忆证据追踪），补齐历史 trace 在 legacy 布尔字面量下的兼容解析，避免 `/memory-debug` 跨系统数据回读出现 `unknown/false` 误判
+- 涉及文件：修改 `src/main/java/com/memsys/cli/ConversationCli.java`、修改 `src/main/java/com/memsys/cli/CliRunner.java`、修改 `src/test/java/com/memsys/cli/ConversationCliTest.java`、修改 `src/test/java/com/memsys/cli/CliRunnerTest.java`、修改 `开发文档.md`、修改 `开发实现process.md`
+- 实现方案：
+  1. `ConversationCli` 的 persisted trace 解析增强：`parseBoolean/parseOptionalBoolean` 统一兼容 `yes/no/y/n/是/否`
+  2. `CliRunner.needsMemoryLabelFromRaw(...)` 同步增强同一组布尔别名，保持历史视图三态映射一致
+  3. 新增回归测试 `getLastEvidenceTraceShouldParseYesNoBooleanLegacyFields`，覆盖 `memory_loaded=yes` 与 `needs_memory=y` 场景
+  4. 扩展 `needsMemoryLabelFromRawShouldTreatInvalidValueAsUnknown`，补充 `yes/n/是/否` 断言
+  5. 同步开发文档 6.2 完成标准，新增“legacy 布尔字面量兼容”约束
+- 状态：已完成
+- 实际结果：
+  - `/memory-debug` 与 `/memory-debug [N]` 在跨系统导出的 `yes/no/y/n/是/否` 布尔字段上可稳定解析，不再误降级为 `unknown/false`
+  - Step 2/6 在历史 trace 跨来源兼容性上进一步增强，降低调试误判风险
+
+#### 迭代记录 - 2026-03-31 14:36
+
+- 增强目标：执行 Step 4/6（修复存在的问题），修复真实 API E2E 脚本在 `JAVA_HOME` 缺失场景下的错误提示不清晰问题，避免排障停留在 Maven 通用报错
+- 涉及文件：修改 `scripts/run-real-api-e2e.sh`、修改 `README.md`、修改 `开发实现process.md`
+- 问题与修复：
+  1. 问题：`./scripts/run-real-api-e2e.sh` 仅尝试兜底设置 `JAVA_HOME`，当本机无可用 JDK 时会继续执行 `mvn`，最终只暴露通用错误 `The JAVA_HOME environment variable is not defined correctly`
+  2. 修复：在脚本中新增 `resolve_java_home()` 并统一探测顺序（`JAVA_HOME` 现值 -> `/usr/libexec/java_home` -> Homebrew `opt` -> Homebrew `Cellar`）；若仍失败则明确报错并退出
+  3. 观测增强：E2E 报告头部新增 `JAVA_HOME` 输出，便于跨环境定位
+  4. 文档同步：README 的真实 API E2E 章节新增“脚本会自动兜底解析 JAVA_HOME、失败时提前退出”的说明
+- 状态：已完成
+- 实际结果：
+  - `bash -n scripts/run-real-api-e2e.sh` 语法检查通过
+  - 回归通过：`./scripts/run-tests.sh -q -Dtest=ConversationCliTest test`
+  - Step 4/6 在运行环境错误可诊断性上补齐“提前失败 + 清晰提示”闭环，降低首次联调成本

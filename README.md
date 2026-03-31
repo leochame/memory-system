@@ -576,6 +576,7 @@ export OPENAI_MODEL="gpt-4o-mini"                    # 可选
 
 说明：
 - 该脚本会设置 `MEMSYS_RUN_REAL_API_E2E=true` 并执行 `mvn -Dtest=RealApiE2ETest test`
+- 脚本会自动兜底解析 `JAVA_HOME`；若未检测到本地 JDK，会提前给出清晰错误并退出
 - 回归日志输出到 `logs/e2e/real-api-e2e.YYYY-MM-DD_HH-MM-SS.log`
 
 ## 文档

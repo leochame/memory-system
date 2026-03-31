@@ -365,12 +365,9 @@ public class ConversationCli {
         if (value instanceof Boolean bool) {
             return bool;
         }
-        String text = String.valueOf(value).trim();
-        if ("true".equalsIgnoreCase(text) || "on".equalsIgnoreCase(text) || "1".equals(text)) {
-            return true;
-        }
-        if ("false".equalsIgnoreCase(text) || "off".equalsIgnoreCase(text) || "0".equals(text)) {
-            return false;
+        Boolean parsed = parseBooleanText(String.valueOf(value));
+        if (parsed != null) {
+            return parsed;
         }
         return defaultValue;
     }
@@ -382,14 +379,31 @@ public class ConversationCli {
         if (value instanceof Boolean bool) {
             return bool;
         }
-        String text = String.valueOf(value).trim();
+        return parseBooleanText(String.valueOf(value));
+    }
+
+    private Boolean parseBooleanText(String raw) {
+        if (raw == null) {
+            return null;
+        }
+        String text = raw.trim();
         if (text.isBlank() || "null".equalsIgnoreCase(text)) {
             return null;
         }
-        if ("true".equalsIgnoreCase(text) || "on".equalsIgnoreCase(text) || "1".equals(text)) {
+        if ("true".equalsIgnoreCase(text)
+                || "on".equalsIgnoreCase(text)
+                || "1".equals(text)
+                || "yes".equalsIgnoreCase(text)
+                || "y".equalsIgnoreCase(text)
+                || "是".equals(text)) {
             return true;
         }
-        if ("false".equalsIgnoreCase(text) || "off".equalsIgnoreCase(text) || "0".equals(text)) {
+        if ("false".equalsIgnoreCase(text)
+                || "off".equalsIgnoreCase(text)
+                || "0".equals(text)
+                || "no".equalsIgnoreCase(text)
+                || "n".equalsIgnoreCase(text)
+                || "否".equals(text)) {
             return false;
         }
         return null;

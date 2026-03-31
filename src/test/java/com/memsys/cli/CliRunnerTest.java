@@ -26,6 +26,10 @@ class CliRunnerTest {
         assertEquals("否", CliRunner.needsMemoryLabelFromRaw(Boolean.FALSE));
         assertEquals("是", CliRunner.needsMemoryLabelFromRaw("true"));
         assertEquals("否", CliRunner.needsMemoryLabelFromRaw("0"));
+        assertEquals("是", CliRunner.needsMemoryLabelFromRaw("yes"));
+        assertEquals("否", CliRunner.needsMemoryLabelFromRaw("n"));
+        assertEquals("是", CliRunner.needsMemoryLabelFromRaw("是"));
+        assertEquals("否", CliRunner.needsMemoryLabelFromRaw("否"));
         assertEquals("unknown", CliRunner.needsMemoryLabelFromRaw("null"));
         assertEquals("unknown", CliRunner.needsMemoryLabelFromRaw("N/A"));
     }

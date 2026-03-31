@@ -1902,10 +1902,20 @@ public class CliRunner implements CommandLineRunner {
         if (text.isBlank()) {
             return "unknown";
         }
-        if ("true".equalsIgnoreCase(text) || "on".equalsIgnoreCase(text) || "1".equals(text)) {
+        if ("true".equalsIgnoreCase(text)
+                || "on".equalsIgnoreCase(text)
+                || "1".equals(text)
+                || "yes".equalsIgnoreCase(text)
+                || "y".equalsIgnoreCase(text)
+                || "是".equals(text)) {
             return "是";
         }
-        if ("false".equalsIgnoreCase(text) || "off".equalsIgnoreCase(text) || "0".equals(text)) {
+        if ("false".equalsIgnoreCase(text)
+                || "off".equalsIgnoreCase(text)
+                || "0".equals(text)
+                || "no".equalsIgnoreCase(text)
+                || "n".equalsIgnoreCase(text)
+                || "否".equals(text)) {
             return "否";
         }
         return "unknown";

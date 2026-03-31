@@ -1832,6 +1832,68 @@ class ConversationCliTest {
     }
 
     @Test
+    void getLastEvidenceTraceShouldParseYesNoBooleanLegacyFields() {
+        MemoryStorage storage = new MemoryStorage(tempDir.toString());
+        storage.writeMetadata(Map.of(
+                "global_controls", Map.of(
+                        "use_saved_memories", true,
+                        "use_chat_history", false
+                )
+        ));
+        SkillService skillService = new SkillService(tempDir.toString());
+        RecordingLlmClient llmClient = new RecordingLlmClient();
+        ConversationCli conversationCli = new ConversationCli(
+                llmClient,
+                storage,
+                new MemoryManager(storage, 100, 30, 15),
+                null,
+                alwaysNeedMemoryReflectionService(),
+                null,
+                null,
+                new AgentGuideService(tempDir.resolve("missing-Agent.md").toString(), tempDir.toString()),
+                new SystemPromptBuilder(),
+                new NoopMemoryAsyncService(),
+                null,
+                skillService,
+                null,
+                toolsWithoutRag(skillService),
+                40,
+                15,
+                false,
+                0.35,
+                5
+        );
+
+        Map<String, Object> traceRecord = new LinkedHashMap<>();
+        traceRecord.put("timestamp", LocalDateTime.now().toString());
+        traceRecord.put("user_message", "legacy yes/no");
+        traceRecord.put("memory_loaded", "yes");
+        traceRecord.put("reflection", Map.of(
+                "needs_memory", "y",
+                "memory_purpose", "continuity",
+                "reason", "legacy yes/no bool",
+                "evidence_purposes", List.of("continuity")
+        ));
+        traceRecord.put("retrieved_insights", List.of("insight:a"));
+        traceRecord.put("used_insights", List.of("insight:a"));
+        traceRecord.put("retrieved_examples", List.of());
+        traceRecord.put("used_examples", List.of());
+        traceRecord.put("loaded_skills", List.of());
+        traceRecord.put("used_skills", List.of());
+        traceRecord.put("retrieved_tasks", List.of());
+        traceRecord.put("used_tasks", List.of());
+        traceRecord.put("used_evidence_summary", "insights 1/1");
+        storage.appendMemoryEvidenceTrace(traceRecord);
+
+        MemoryEvidenceTrace trace = conversationCli.getLastEvidenceTrace();
+        assertThat(trace).isNotNull();
+        assertThat(trace.memoryLoaded()).isTrue();
+        assertThat(trace.reflection()).isNotNull();
+        assertThat(trace.reflection().needs_memory()).isTrue();
+        assertThat(trace.reflection().memory_purpose()).isEqualTo("CONTINUITY");
+    }
+
+    @Test
     void getRecentEvidenceTracesShouldParseLegacyTimestampFormats() {
         MemoryStorage storage = new MemoryStorage(tempDir.toString());
         storage.writeMetadata(Map.of(
