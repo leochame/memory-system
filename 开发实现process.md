@@ -1954,3 +1954,33 @@
 - 实际结果：
   - `/memory-debug` 与 `/memory-insights` 可稳定回读 `reflection[needs_memory]`、`evidence[retrieved][insights][0]`、`retrieved[examples][0]`、`loaded[skills][1]` 等 bracket-path 字段，不再因数组索引扁平导出造成覆盖率偏差
   - Step 2/6 的跨来源 trace 兼容能力从“点路径扁平字段”扩展到“中括号路径扁平字段”，降低外部系统对接后的排障成本
+
+#### 迭代记录 - 2026-03-31 19:34
+
+- 增强目标：围绕 Step 1/6（6.1 Memory Reflection 调用链）按开发文档 `v4.35` 复核当前项目，并完成文档对齐验收
+- 涉及文件：修改 `开发实现process.md`
+- 实现方案：
+  1. 对照 `开发文档.md` 6.1 五项“需要完成”核查 `ReflectionResult -> MemoryReflectionService -> ConversationCli -> SystemPromptBuilder` 调用链落点
+  2. 针对 `v4.35` 完成标准 4/5 重点复核：`needs_memory=true` 时默认值按 `memory_purpose` 派生；`evidence_types/evidence_purposes` hyphen/snake/camel 别名输入可归一化
+  3. 执行 Step 1/6 定向回归：`ReflectionResultTest`、`MemoryReflectionServiceTest`、`SystemPromptBuilderTest`、`ConversationCliTest`
+- 状态：已完成
+- 实际结果：
+  - 当前实现与开发文档 `6.1` 保持一致，本轮未发现需要新增的代码缺口
+  - 主链路、提示词层、评测链路在“反思结果归一化 + 默认值派生 + 失败稳定回退”语义上保持一致
+  - 定向测试通过：`export JAVA_HOME=$(/usr/libexec/java_home) && mvn -q -Dtest=ReflectionResultTest,MemoryReflectionServiceTest,SystemPromptBuilderTest,ConversationCliTest test`
+
+#### 迭代记录 - 2026-03-31 19:50
+
+- 增强目标：继续执行 Step 2/6（6.2 记忆证据追踪），补齐历史 trace 在“斜杠路径扁平字段”格式下的兼容解析，避免 `/memory-debug` 与 `/memory-insights` 在 JSON Pointer 风格导出数据上出现覆盖率误判
+- 涉及文件：修改 `src/main/java/com/memsys/cli/ConversationCli.java`、修改 `src/main/java/com/memsys/memory/MemoryTraceInsightService.java`、修改 `src/test/java/com/memsys/cli/ConversationCliTest.java`、修改 `src/test/java/com/memsys/memory/MemoryTraceInsightServiceTest.java`、修改 `开发文档.md`、修改 `开发实现process.md`
+- 实现方案：
+  1. 在 `ConversationCli.flattenedKeySuffix(...)` 增加 `key/` 前缀识别，兼容 `reflection/needs_memory`、`retrieved/examples/0` 等扁平键
+  2. 在 `ConversationCli.splitFlattenedPath(...)` 增加 `/` 分隔支持，与 `.`、`[]` 路径统一重建为嵌套结构
+  3. 在 `MemoryTraceInsightService` 同步复用同级规则，确保 `/memory-insights` 与 `/memory-debug` 对 slash-path trace 的解析口径一致
+  4. 新增 `getLastEvidenceTraceShouldParseFlattenedSlashPathTraceFields`，覆盖 `/memory-debug` 在 slash-path 场景下的反思字段与四类证据解析
+  5. 新增 `analyzeRecentTracesShouldParseFlattenedSlashPathTraceFields`，覆盖 `/memory-insights` 在 slash-path 场景下的 retrieved/used 统计一致性
+  6. 同步开发文档 `6.2` 完成标准新增第 37 条，明确“斜杠路径扁平字段兼容”约束
+- 状态：已完成
+- 实际结果：
+  - `/memory-debug` 与 `/memory-insights` 可稳定回读 `reflection/needs_memory`、`evidence/retrieved/insights/0`、`retrieved/examples/0`、`loaded/skills/1` 等 slash-path 字段，不再因路径风格差异导致覆盖率偏差
+  - Step 2/6 的跨来源 trace 兼容能力从“点路径 + 中括号路径”扩展到“斜杠路径”，跨系统导入数据的可诊断性进一步提升

@@ -1780,6 +1780,9 @@ public class ConversationCli {
         if (entryKey.startsWith(key + "[")) {
             return entryKey.substring(key.length());
         }
+        if (entryKey.startsWith(key + "/")) {
+            return entryKey.substring(key.length() + 1);
+        }
         return null;
     }
 
@@ -1791,7 +1794,7 @@ public class ConversationCli {
         StringBuilder token = new StringBuilder();
         for (int i = 0; i < suffix.length(); i++) {
             char ch = suffix.charAt(i);
-            if (ch == '.') {
+            if (ch == '.' || ch == '/') {
                 if (!token.isEmpty()) {
                     parts.add(token.toString());
                     token.setLength(0);
