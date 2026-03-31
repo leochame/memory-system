@@ -433,9 +433,12 @@ public class ConversationCli {
             } catch (Exception e) {
                 log.warn("Memory reflection invocation failed, using fallback", e);
             }
+            reflection = ensureReflectionResult(reflection, true, "normal");
             reflectionMs = elapsedMillis(reflectionStartNs);
             emitProgress(progressListener, "reflection_done", "记忆需求判断完成。",
                     Map.of("needs_memory", reflection.needs_memory()));
+        } else {
+            reflection = ensureReflectionResult(reflection, false, "normal");
         }
         this.lastReflectionResult = reflection;
 
@@ -572,6 +575,9 @@ public class ConversationCli {
             } catch (Exception e) {
                 log.warn("Memory reflection invocation failed in eval mode, using fallback", e);
             }
+            reflection = ensureReflectionResult(reflection, true, "eval");
+        } else {
+            reflection = ensureReflectionResult(reflection, false, "eval");
         }
         this.lastReflectionResult = reflection;
 
@@ -620,6 +626,19 @@ public class ConversationCli {
         this.lastEvidenceTrace = trace;
 
         return llmClient.chat(systemPrompt, messages, 0.7);
+    }
+
+    private ReflectionResult ensureReflectionResult(ReflectionResult reflection,
+                                                    boolean useSavedMemories,
+                                                    String mode) {
+        if (reflection != null) {
+            return reflection;
+        }
+        if (useSavedMemories) {
+            log.warn("Memory reflection returned null in {} mode, using fallback reflection result", mode);
+            return ReflectionResult.fallback();
+        }
+        return ReflectionResult.memoryDisabled();
     }
 
     /** 内部辅助类，用于在构建 system prompt 时收集证据使用数据 */

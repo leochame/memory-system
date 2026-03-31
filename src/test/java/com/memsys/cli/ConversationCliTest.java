@@ -733,6 +733,92 @@ class ConversationCliTest {
     }
 
     @Test
+    void processUserMessageShouldFallbackWhenReflectionServiceReturnsNull() {
+        MemoryStorage storage = new MemoryStorage(tempDir.toString());
+        storage.writeMetadata(Map.of(
+                "global_controls", Map.of(
+                        "use_saved_memories", true,
+                        "use_chat_history", false
+                )
+        ));
+        SkillService skillService = new SkillService(tempDir.toString());
+        RecordingLlmClient llmClient = new RecordingLlmClient();
+
+        ConversationCli conversationCli = new ConversationCli(
+                llmClient,
+                storage,
+                new MemoryManager(storage, 100, 30, 15),
+                null,
+                nullReturningReflectionService(),
+                null,
+                null,
+                new AgentGuideService(tempDir.resolve("missing-Agent.md").toString(), tempDir.toString()),
+                new SystemPromptBuilder(),
+                new NoopMemoryAsyncService(),
+                null,
+                skillService,
+                null,
+                toolsWithoutRag(skillService),
+                40,
+                15,
+                false,
+                0.35,
+                5
+        );
+
+        String reply = conversationCli.processUserMessage("继续说");
+        assertThat(reply).isEqualTo("assistant reply");
+
+        ReflectionResult reflection = conversationCli.getLastReflectionResult();
+        assertThat(reflection).isNotNull();
+        assertThat(reflection.needs_memory()).isTrue();
+        assertThat(reflection.reason()).isEqualTo("反思阶段异常，默认加载长期记忆以保证回答稳定性。");
+        assertThat(llmClient.capturedSystemPrompts.get(0)).contains("needs_memory: true");
+    }
+
+    @Test
+    void processUserMessageWithMemoryForEvalShouldFallbackWhenReflectionServiceReturnsNull() {
+        MemoryStorage storage = new MemoryStorage(tempDir.toString());
+        storage.writeMetadata(Map.of(
+                "global_controls", Map.of(
+                        "use_saved_memories", true,
+                        "use_chat_history", false
+                )
+        ));
+        SkillService skillService = new SkillService(tempDir.toString());
+        RecordingLlmClient llmClient = new RecordingLlmClient();
+
+        ConversationCli conversationCli = new ConversationCli(
+                llmClient,
+                storage,
+                new MemoryManager(storage, 100, 30, 15),
+                null,
+                nullReturningReflectionService(),
+                null,
+                null,
+                new AgentGuideService(tempDir.resolve("missing-Agent.md").toString(), tempDir.toString()),
+                new SystemPromptBuilder(),
+                new NoopMemoryAsyncService(),
+                null,
+                skillService,
+                null,
+                toolsWithoutRag(skillService),
+                40,
+                15,
+                false,
+                0.35,
+                5
+        );
+
+        String reply = conversationCli.processUserMessageWithMemoryForEval("eval");
+        assertThat(reply).isEqualTo("assistant reply");
+        ReflectionResult reflection = conversationCli.getLastReflectionResult();
+        assertThat(reflection).isNotNull();
+        assertThat(reflection.needs_memory()).isTrue();
+        assertThat(reflection.reason()).isEqualTo("反思阶段异常，默认加载长期记忆以保证回答稳定性。");
+    }
+
+    @Test
     void getLastEvidenceTraceShouldFallbackToPersistedTraceWhenInMemoryTraceMissing() {
         MemoryStorage storage = new MemoryStorage(tempDir.toString());
         storage.writeMetadata(Map.of(
@@ -1286,6 +1372,12 @@ class ConversationCliTest {
                         List.of("RECENT_HISTORY"),
                         purposes
                 ));
+        return reflectionService;
+    }
+
+    private MemoryReflectionService nullReturningReflectionService() {
+        MemoryReflectionService reflectionService = mock(MemoryReflectionService.class);
+        when(reflectionService.reflect(anyString(), anyString())).thenReturn(null);
         return reflectionService;
     }
 

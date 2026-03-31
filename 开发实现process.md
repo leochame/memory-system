@@ -1025,3 +1025,33 @@
 - 实际结果：
   - 历史 trace 即使存在 `"reflection":"{...}"`、`"retrieved_insights":"[...]"` 等 legacy 形态，也可被 `/memory-debug` 正常消费
   - 降低了手工修复/跨版本迁移后 trace 可视化退化风险，提升证据追踪链路的可用性
+
+#### 迭代记录 - 2026-03-31 13:35
+
+- 增强目标：继续执行 Step 6/6（调研深化与文档更新），围绕 Memory-System 形成“可持续内容运营”执行规范，补齐选题矩阵与产能节奏约束
+- 涉及文件：修改 `开发文档.md`、修改 `开发实现process.md`
+- 实现方案：
+  1. 在开发文档 5.10 新增“内容选题矩阵”，固定 10 类围绕记忆系统主线的高频选题（反思、证据、连续性、治理、任务、主动服务、论文口径等）
+  2. 在开发文档 5.10 新增“命令驱动内容流水线（SOP）”，明确采集/草稿/复核/入库四步时序，并新增索引文件建议 `.memory/content-assets/index.md`
+  3. 在开发文档 5.10 新增“周执行节奏”，定义周一/周三/周五与双周图表卡产出机制，降低临近答辩突击风险
+  4. 强化开发文档 6.9：补充索引维护与选题覆盖约束，并新增“索引可追溯”与“月度内容均衡”验收标准
+- 状态：已完成
+- 实际结果：
+  - Step 6/6 从“模板规范”进一步升级为“选题-生产-复核-留痕”的完整内容运营流程
+  - 围绕记忆系统的内容产出具备稳定节奏与覆盖约束，可持续服务开发迭代、答辩演示与论文写作
+
+#### 迭代记录 - 2026-03-31 14:20
+
+- 增强目标：继续执行 Step 2/6（6.2 记忆证据追踪），修复反思服务返回 `null` 时 trace 链路的稳定性缺口，避免 `needs_memory` 语义漂移或空指针风险
+- 涉及文件：修改 `src/main/java/com/memsys/cli/ConversationCli.java`、修改 `src/test/java/com/memsys/cli/ConversationCliTest.java`、修改 `开发文档.md`、修改 `开发实现process.md`
+- 实现方案：
+  1. `ConversationCli` 新增 `ensureReflectionResult(...)`，统一兜底 `ReflectionResult`：
+     - `use_saved_memories=true` 且反思结果为 `null` 时，回退 `ReflectionResult.fallback()`
+     - `use_saved_memories=false` 时固定为 `ReflectionResult.memoryDisabled()`
+  2. 在 `processUserMessage(...)` 与 `processUserMessageWithMemoryForEval(...)` 两条链路统一接入该兜底逻辑，保证 normal/eval 一致
+  3. 新增回归测试覆盖“反思服务返回 `null`（normal/eval）”场景，验证 `needs_memory` 与 fallback reason 稳定可观测
+  4. 同步开发文档 6.2 完成标准，补充 `null` 反思结果的稳定语义约束
+- 状态：已完成
+- 实际结果：
+  - 反思阶段即使返回 `null`，`/memory-debug` 与 trace 持久化仍可获得稳定、可解释的反思结果
+  - Step 2/6 在“反思异常 + 证据追踪”联合链路上的健壮性进一步提升，降低线上不可观测风险
