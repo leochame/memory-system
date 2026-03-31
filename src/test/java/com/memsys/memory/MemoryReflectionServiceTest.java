@@ -92,4 +92,70 @@ class MemoryReflectionServiceTest {
         assertThat(result.confidence()).isEqualTo(1.0d);
         assertThat(result.evidence_purposes()).containsExactly("continuity");
     }
+
+    @Test
+    void reflectShouldFixContradictingNotNeededPurposeWhenNeedsMemoryIsTrue() {
+        LlmExtractionService extractionService = mock(LlmExtractionService.class);
+        when(extractionService.reflectMemoryNeed(anyString())).thenReturn(
+                new MemoryReflectionResult(
+                        true,
+                        "NOT_NEEDED",
+                        "需要历史上下文",
+                        88d,
+                        "优先看最近上下文",
+                        List.of("RECENT_HISTORY"),
+                        List.of("continuity")
+                )
+        );
+
+        MemoryReflectionService service = new MemoryReflectionService(extractionService);
+        ReflectionResult result = service.reflect("继续上次任务", "上次讨论了部署计划");
+
+        assertThat(result.needs_memory()).isTrue();
+        assertThat(result.memory_purpose()).isEqualTo("CONTINUITY");
+        assertThat(result.reason()).isEqualTo("需要历史上下文");
+    }
+
+    @Test
+    void reflectShouldFallbackForNullLikeReasonAndHint() {
+        LlmExtractionService extractionService = mock(LlmExtractionService.class);
+        when(extractionService.reflectMemoryNeed(anyString())).thenReturn(
+                new MemoryReflectionResult(
+                        true,
+                        "CONTINUITY",
+                        " null ",
+                        80d,
+                        "N/A",
+                        List.of("RECENT_HISTORY"),
+                        List.of("continuity")
+                )
+        );
+
+        MemoryReflectionService service = new MemoryReflectionService(extractionService);
+        ReflectionResult result = service.reflect("继续上次任务", "上次讨论了部署计划");
+
+        assertThat(result.reason()).isEqualTo("需要调用长期记忆以保证回答质量。");
+        assertThat(result.retrieval_hint()).isEqualTo("优先检索与用户当前问题最相关的历史证据。");
+    }
+
+    @Test
+    void reflectShouldFallbackToDefaultConfidenceWhenConfidenceNotFinite() {
+        LlmExtractionService extractionService = mock(LlmExtractionService.class);
+        when(extractionService.reflectMemoryNeed(anyString())).thenReturn(
+                new MemoryReflectionResult(
+                        true,
+                        "CONTINUITY",
+                        "需要历史信息",
+                        Double.NaN,
+                        "优先看最近上下文",
+                        List.of("RECENT_HISTORY"),
+                        List.of("continuity")
+                )
+        );
+
+        MemoryReflectionService service = new MemoryReflectionService(extractionService);
+        ReflectionResult result = service.reflect("继续上次任务", "上次讨论了部署计划");
+
+        assertThat(result.confidence()).isEqualTo(0.7d);
+    }
 }

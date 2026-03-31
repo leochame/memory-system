@@ -84,6 +84,10 @@ public class MemoryReflectionService {
             return "NOT_NEEDED";
         }
         String normalized = memoryPurpose == null ? "" : memoryPurpose.trim().toUpperCase(Locale.ROOT);
+        // needs_memory=true 时不允许保留 NOT_NEEDED，避免语义矛盾。
+        if ("NOT_NEEDED".equals(normalized)) {
+            return "CONTINUITY";
+        }
         if (ReflectionResult.KNOWN_MEMORY_PURPOSES.contains(normalized)) {
             return normalized;
         }
@@ -92,14 +96,14 @@ public class MemoryReflectionService {
 
     private String normalizeReason(String reason, boolean needsMemory) {
         String normalized = reason == null ? "" : reason.trim();
-        if (!normalized.isBlank()) {
+        if (!isNullLikeText(normalized)) {
             return normalized;
         }
         return needsMemory ? "需要调用长期记忆以保证回答质量。" : "当前问题可直接回答，无需调用长期记忆。";
     }
 
     private double normalizeConfidence(Double confidence) {
-        if (confidence == null) {
+        if (confidence == null || !Double.isFinite(confidence)) {
             return 0.7d;
         }
         double value = confidence;
@@ -120,10 +124,21 @@ public class MemoryReflectionService {
             return "";
         }
         String normalized = retrievalHint == null ? "" : retrievalHint.trim();
-        if (!normalized.isBlank()) {
+        if (!isNullLikeText(normalized)) {
             return normalized;
         }
         return "优先检索与用户当前问题最相关的历史证据。";
+    }
+
+    private boolean isNullLikeText(String value) {
+        if (value == null || value.isBlank()) {
+            return true;
+        }
+        String normalized = value.trim().toLowerCase(Locale.ROOT);
+        return "null".equals(normalized)
+                || "undefined".equals(normalized)
+                || "n/a".equals(normalized)
+                || "none".equals(normalized);
     }
 
     private List<String> normalizeEvidenceTypes(List<String> evidenceTypes, boolean needsMemory) {
