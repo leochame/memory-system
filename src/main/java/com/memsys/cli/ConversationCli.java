@@ -1840,6 +1840,9 @@ public class ConversationCli {
                     .filter(s -> !s.isBlank())
                     .toList();
         }
+        if (value instanceof Map<?, ?> map) {
+            return normalizeStringMapEntries(map);
+        }
         String text = normalizeText(value);
         if (text.isBlank() || isNullLike(text)) {
             return List.of();
@@ -1853,6 +1856,33 @@ public class ConversationCli {
             return parsedFromDelimitedText;
         }
         return List.of(text);
+    }
+
+    private List<String> normalizeStringMapEntries(Map<?, ?> map) {
+        if (map == null || map.isEmpty()) {
+            return List.of();
+        }
+        List<String> items = new ArrayList<>();
+        for (Map.Entry<?, ?> entry : map.entrySet()) {
+            String key = normalizeListItem(entry.getKey());
+            Object rawValue = entry.getValue();
+            Boolean boolValue = parseOptionalBoolean(rawValue);
+            if (boolValue != null) {
+                if (boolValue && !key.isBlank()) {
+                    items.add(key);
+                }
+                continue;
+            }
+            String normalizedValue = normalizeListItem(rawValue);
+            if (!normalizedValue.isBlank()) {
+                items.add(normalizedValue);
+                continue;
+            }
+            if (!key.isBlank()) {
+                items.add(key);
+            }
+        }
+        return items;
     }
 
     @SuppressWarnings("unchecked")

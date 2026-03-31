@@ -379,6 +379,46 @@ class MemoryTraceInsightServiceTest {
     }
 
     @Test
+    void analyzeRecentTracesShouldParseMapStyleEvidenceFields() {
+        MemoryStorage storage = new MemoryStorage(tempDir.toString());
+        MemoryTraceInsightService service = new MemoryTraceInsightService(storage);
+
+        Map<String, Object> trace = new LinkedHashMap<>();
+        trace.put("memory_loaded", true);
+        trace.put("reflection", Map.of(
+                "needs_memory", true,
+                "reason", "map style evidence",
+                "evidence_purposes", List.of("followup")
+        ));
+        trace.put("retrieved_insights", Map.of("insight-a", true, "insight-b", "yes", "insight-c", false));
+        trace.put("used_insights", Map.of("insight-b", true));
+        trace.put("retrieved_examples", Map.of(
+                "case-1", Map.of("title", "example-a"),
+                "case-2", Map.of("content", "example-b")
+        ));
+        trace.put("used_examples", Map.of("case-2", Map.of("content", "example-b")));
+        trace.put("loaded_skills", Map.of("debugging", true, "planner", "yes", "refactor", "no"));
+        trace.put("used_skills", Map.of("planner", true));
+        trace.put("retrieved_tasks", Map.of("task-a", 1, "task-b", "on", "task-c", 0));
+        trace.put("used_tasks", Map.of("task-b", true));
+        storage.appendMemoryEvidenceTrace(trace);
+
+        MemoryTraceInsightService.InsightReport report = service.analyzeRecentTraces(20);
+
+        assertThat(report.sampleSize()).isEqualTo(1);
+        assertThat(report.insightStat().retrieved()).isEqualTo(2);
+        assertThat(report.insightStat().used()).isEqualTo(1);
+        assertThat(report.exampleStat().retrieved()).isEqualTo(2);
+        assertThat(report.exampleStat().used()).isEqualTo(1);
+        assertThat(report.skillStat().retrieved()).isEqualTo(2);
+        assertThat(report.skillStat().used()).isEqualTo(1);
+        assertThat(report.taskStat().retrieved()).isEqualTo(2);
+        assertThat(report.taskStat().used()).isEqualTo(1);
+        assertThat(report.topUsedSkills()).containsExactly("planner (1)");
+        assertThat(report.topPurposes()).containsExactly("followup (1)");
+    }
+
+    @Test
     void analyzeRecentTracesShouldIgnoreNullLikeEvidenceTokens() {
         MemoryStorage storage = new MemoryStorage(tempDir.toString());
         MemoryTraceInsightService service = new MemoryTraceInsightService(storage);

@@ -1909,3 +1909,19 @@
 - 实际结果：
   - `/memory-debug` 与 `/memory-insights` 可稳定回读 `reflection.needs_memory`、`evidence.retrieved.insights`、`retrieved.examples`、`loaded.skills` 等扁平字段，不再因结构差异出现统计失真
   - Step 2/6 的跨来源 trace 兼容能力从“字段别名/结构别名”扩展到“点路径扁平化字段”，降低外部数据导入后的排障成本
+
+#### 迭代记录 - 2026-03-31 18:55
+
+- 增强目标：继续执行 Step 2/6（6.2 记忆证据追踪），补齐历史 trace 在“键值映射证据列表（map）”格式下的兼容解析，避免 `/memory-debug` 与 `/memory-insights` 在跨系统导出数据上低估检索量/使用量
+- 涉及文件：修改 `src/main/java/com/memsys/cli/ConversationCli.java`、修改 `src/main/java/com/memsys/memory/MemoryTraceInsightService.java`、修改 `src/test/java/com/memsys/cli/ConversationCliTest.java`、修改 `src/test/java/com/memsys/memory/MemoryTraceInsightServiceTest.java`、修改 `开发文档.md`、修改 `开发实现process.md`
+- 实现方案：
+  1. 在 `ConversationCli.normalizeStringList(...)` 增加 map 分支：支持 `{"insight-a":true}`、`{"task-a":"on"}`、`{"case-1":{"title":"example-a"}}` 等格式，抽取有效证据文本
+  2. 在 `MemoryTraceInsightService.asStringList(...)` 同步 map 解析规则，确保 `/memory-insights` 与 `/memory-debug` 统计口径一致
+  3. 对 map 中布尔/开关值执行过滤：仅 `true/yes/on/1/是` 计入命中，`false/no/off/0/否` 不计入，避免噪声污染
+  4. 新增 `getLastEvidenceTraceShouldParseMapStyleEvidenceFields` 与 `analyzeRecentTracesShouldParseMapStyleEvidenceFields`，覆盖调试视图与洞察链路的 map 兼容回归
+  5. 同步开发文档 `6.2` 完成标准新增第 35 条，明确“键值映射证据列表兼容”约束
+- 状态：已完成
+- 实际结果：
+  - `/memory-debug` 与 `/memory-insights` 可稳定解析 map 形式证据列表，并正确统计 retrieved/used 覆盖率
+  - 否定型标记值（`false/no/off/0`）不再误计入命中，降低跨来源 trace 的统计偏差风险
+  - 定向测试通过：`export JAVA_HOME=$(/usr/libexec/java_home) && mvn -q -Dtest=ConversationCliTest,MemoryTraceInsightServiceTest test`

@@ -389,6 +389,9 @@ public class MemoryTraceInsightService {
             }
             return items;
         }
+        if (value instanceof Map<?, ?> map) {
+            return asStringListFromMap(map);
+        }
         if (value instanceof String text) {
             String normalized = text.trim();
             if (normalized.isEmpty() || isNullLike(normalized)) {
@@ -405,6 +408,33 @@ public class MemoryTraceInsightService {
             return List.of(normalized);
         }
         return List.of();
+    }
+
+    private List<String> asStringListFromMap(Map<?, ?> map) {
+        if (map == null || map.isEmpty()) {
+            return List.of();
+        }
+        List<String> items = new ArrayList<>();
+        for (Map.Entry<?, ?> entry : map.entrySet()) {
+            String key = normalizeListItem(entry.getKey());
+            Object rawValue = entry.getValue();
+            Boolean boolValue = toNullableBoolean(rawValue);
+            if (boolValue != null) {
+                if (boolValue && !key.isBlank()) {
+                    items.add(key);
+                }
+                continue;
+            }
+            String normalizedValue = normalizeListItem(rawValue);
+            if (!normalizedValue.isBlank()) {
+                items.add(normalizedValue);
+                continue;
+            }
+            if (!key.isBlank()) {
+                items.add(key);
+            }
+        }
+        return items;
     }
 
     private boolean toBoolean(Object value) {
