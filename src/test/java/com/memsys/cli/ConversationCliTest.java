@@ -777,6 +777,60 @@ class ConversationCliTest {
     }
 
     @Test
+    void processUserMessageShouldNormalizeMalformedReflectionResultFromService() {
+        MemoryStorage storage = new MemoryStorage(tempDir.toString());
+        storage.writeMetadata(Map.of(
+                "global_controls", Map.of(
+                        "use_saved_memories", true,
+                        "use_chat_history", false
+                )
+        ));
+        SkillService skillService = new SkillService(tempDir.toString());
+        RecordingLlmClient llmClient = new RecordingLlmClient();
+
+        ConversationCli conversationCli = new ConversationCli(
+                llmClient,
+                storage,
+                new MemoryManager(storage, 100, 30, 15),
+                null,
+                malformedNoMemoryReflectionService(),
+                null,
+                null,
+                new AgentGuideService(tempDir.resolve("missing-Agent.md").toString(), tempDir.toString()),
+                new SystemPromptBuilder(),
+                new NoopMemoryAsyncService(),
+                null,
+                skillService,
+                null,
+                toolsWithoutRag(skillService),
+                40,
+                15,
+                false,
+                0.35,
+                5
+        );
+
+        String reply = conversationCli.processUserMessage("继续");
+        assertThat(reply).isEqualTo("assistant reply");
+
+        ReflectionResult reflection = conversationCli.getLastReflectionResult();
+        assertThat(reflection).isNotNull();
+        assertThat(reflection.needs_memory()).isFalse();
+        assertThat(reflection.memory_purpose()).isEqualTo("NOT_NEEDED");
+        assertThat(reflection.reason()).isEqualTo("当前问题可直接回答，无需调用长期记忆。");
+        assertThat(reflection.confidence()).isEqualTo(0.87d);
+        assertThat(reflection.retrieval_hint()).isEmpty();
+        assertThat(reflection.evidence_types()).isEmpty();
+        assertThat(reflection.evidence_purposes()).isEmpty();
+
+        String systemPrompt = llmClient.capturedSystemPrompts.get(0);
+        assertThat(systemPrompt).contains("needs_memory: false");
+        assertThat(systemPrompt).contains("memory_purpose: NOT_NEEDED");
+        assertThat(systemPrompt).doesNotContain("evidence_types:");
+        assertThat(systemPrompt).doesNotContain("evidence_purposes:");
+    }
+
+    @Test
     void processUserMessageWithMemoryForEvalShouldFallbackWhenReflectionServiceReturnsNull() {
         MemoryStorage storage = new MemoryStorage(tempDir.toString());
         storage.writeMetadata(Map.of(
@@ -1922,6 +1976,21 @@ class ConversationCliTest {
                         "",
                         List.of(),
                         List.of()
+                ));
+        return reflectionService;
+    }
+
+    private MemoryReflectionService malformedNoMemoryReflectionService() {
+        MemoryReflectionService reflectionService = mock(MemoryReflectionService.class);
+        when(reflectionService.reflect(anyString(), anyString()))
+                .thenReturn(new ReflectionResult(
+                        false,
+                        "CONTINUITY",
+                        "null",
+                        87.0d,
+                        "legacy hint should be dropped",
+                        List.of("TASK"),
+                        List.of("followup")
                 ));
         return reflectionService;
     }

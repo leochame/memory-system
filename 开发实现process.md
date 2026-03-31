@@ -1290,3 +1290,46 @@
 - 实际结果：
   - `/memory-debug` 在历史 trace 的异常字段场景下不再展示空证据集合，且与 `SystemPromptBuilder` 的默认反思语义保持一致
   - 定向测试通过：`./scripts/run-tests.sh -q -Dtest=ConversationCliTest,SystemPromptBuilderTest test`
+
+#### 迭代记录 - 2026-03-31 23:10
+
+- 增强目标：继续执行 Step 6/6（调研与文档更新），围绕 Memory-System 打造“更多内容”的第三层执行方案，将栏目化产出升级为“资产包化 + 回放校验”
+- 涉及文件：修改 `开发文档.md`、修改 `开发实现process.md`
+- 实现方案：
+  1. 将开发文档版本升级至 `v4.9`，在 `5.10` 新增 `5.10.13 Step 6/6 内容扩展蓝图（第三层：资产包化与回放即内容）`
+  2. 新增 5 类资产包（演示剧本/诊断问答/对照实验/论文附录/发布素材），并绑定固定证据入口与命令回放链路
+  3. 固化资产包最小字段（`asset_pack_id/source_content_ids/command_bundle/expected_observations/evidence_snapshot`），补齐可追踪、可回放、可复测要求
+  4. 在开发文档新增 `6.15 需求十三`，将资产包目录、状态机、7 天复测、周度执行小结转化为可验收条款
+- 状态：已完成
+- 实际结果：
+  - Step 6/6 从“内容卡 + 系列栏目”进一步升级为“资产包化执行”，可直接服务答辩演示、论文附录与对外发布复用
+  - 文档侧形成“内容卡 -> 系列栏目 -> 资产包”三层内容体系，后续可按索引字段稳定运营并审计回放状态
+
+#### 迭代记录 - 2026-03-31 23:35
+
+- 增强目标：继续执行 Step 1/6（6.1 Memory Reflection 调用链）防御性加固，补齐反思结果在 `ConversationCli` 主链路/评测链路的二次规范化，避免异常字段透传造成语义漂移
+- 涉及文件：修改 `src/main/java/com/memsys/cli/ConversationCli.java`、修改 `src/test/java/com/memsys/cli/ConversationCliTest.java`、修改 `开发实现process.md`
+- 实现方案：
+  1. 在 `ConversationCli` 中新增反思结果统一规范化方法，对 `memory_purpose/reason/confidence/retrieval_hint/evidence_types/evidence_purposes` 执行防御性清洗
+  2. 主链路与评测链路在 `ensureReflectionResult(...)` 后统一调用规范化方法，保证上游返回异常值时仍满足 Step 1/6 语义约束
+  3. 新增回归测试，覆盖“反思服务返回冲突字段/空值字段”场景
+- 状态：已完成
+- 实际结果：
+  - `ConversationCli` 现已在 normal/eval 两条调用链统一执行反思结果二次规范化，避免上游异常值直接进入提示词和证据链
+  - 当 `needs_memory=false` 时，反思结果被强制规范为 `NOT_NEEDED` 且清空检索提示与证据字段，语义不再冲突
+  - 新增回归测试 `processUserMessageShouldNormalizeMalformedReflectionResultFromService`，验证冲突字段（如 `needs_memory=false` 但携带用途/检索提示）会被稳定纠正
+  - 定向测试通过：`./scripts/run-tests.sh -q -Dtest=ConversationCliTest,SystemPromptBuilderTest,MemoryReflectionServiceTest test`
+
+#### 迭代记录 - 2026-03-31 23:55
+
+- 增强目标：继续执行 Step 2/6（6.2 记忆证据追踪），补齐 `/memory-debug [N]` 历史视图的反思证据字段展示，避免排障时只看见覆盖率但看不到“期望证据类型/用途”
+- 涉及文件：修改 `src/main/java/com/memsys/cli/CliRunner.java`、修改 `src/test/java/com/memsys/cli/CliRunnerTest.java`、修改 `开发文档.md`、修改 `开发实现process.md`
+- 实现方案：
+  1. 在 `CliRunner.showMemoryDebugHistory(...)` 中新增 `证据类型/证据用途` 输出，字段来源于 trace 内反思结果
+  2. 提供 `traceEvidenceTypes(...)`、`traceEvidencePurposes(...)` 统一格式化方法，执行去空白与去重，防止历史脏数据污染展示
+  3. 新增回归测试 `traceEvidenceTypesShouldJoinAndDeduplicateValues` 与 `traceEvidencePurposesShouldJoinAndDeduplicateValues`，覆盖格式化稳定性
+  4. 同步开发文档 6.2 完成标准，新增“历史视图必须展示 evidence 类型/用途”的验收条款
+- 状态：已完成
+- 实际结果：
+  - `/memory-debug [N]` 现在可在历史窗口直接看到 `evidence_types/evidence_purposes`，单轮与历史视图在反思证据语义上更一致
+  - 定向测试通过：`./scripts/run-tests.sh -q -Dtest=CliRunnerTest,MemoryEvidenceTraceTest,ConversationCliTest test`

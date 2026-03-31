@@ -956,6 +956,8 @@ public class CliRunner implements CommandLineRunner {
             String purpose = traceMemoryPurpose(trace);
             String confidence = traceConfidence(trace);
             String retrievalHint = traceRetrievalHint(trace);
+            String evidenceTypes = traceEvidenceTypes(trace);
+            String evidencePurposes = traceEvidencePurposes(trace);
 
             List<String> retrievedInsights = trace.retrievedInsights();
             List<String> retrievedExamples = trace.retrievedExamples();
@@ -974,6 +976,12 @@ public class CliRunner implements CommandLineRunner {
             sb.append(String.format("  置信度: %s\n", confidence));
             if (!retrievalHint.isBlank()) {
                 sb.append(String.format("  检索提示: %s\n", truncateForDisplay(retrievalHint, 120)));
+            }
+            if (!evidenceTypes.isBlank()) {
+                sb.append(String.format("  证据类型: %s\n", evidenceTypes));
+            }
+            if (!evidencePurposes.isBlank()) {
+                sb.append(String.format("  证据用途: %s\n", evidencePurposes));
             }
             sb.append(String.format("  用户消息: %s\n", userMessage.isBlank() ? "(empty)" : userMessage));
             sb.append(String.format("  检索: Insights %d | Examples %d | Skills %d | Tasks %d\n",
@@ -1915,6 +1923,32 @@ public class CliRunner implements CommandLineRunner {
             return "";
         }
         return trace.reflection().retrieval_hint().trim();
+    }
+
+    static String traceEvidenceTypes(MemoryEvidenceTrace trace) {
+        if (trace == null || trace.reflection() == null || trace.reflection().evidence_types() == null) {
+            return "";
+        }
+        return trace.reflection().evidence_types().stream()
+                .filter(Objects::nonNull)
+                .map(String::trim)
+                .filter(s -> !s.isBlank())
+                .distinct()
+                .reduce((left, right) -> left + ", " + right)
+                .orElse("");
+    }
+
+    static String traceEvidencePurposes(MemoryEvidenceTrace trace) {
+        if (trace == null || trace.reflection() == null || trace.reflection().evidence_purposes() == null) {
+            return "";
+        }
+        return trace.reflection().evidence_purposes().stream()
+                .filter(Objects::nonNull)
+                .map(String::trim)
+                .filter(s -> !s.isBlank())
+                .distinct()
+                .reduce((left, right) -> left + ", " + right)
+                .orElse("");
     }
 
     private boolean parseBoolean(Object value, boolean defaultValue) {

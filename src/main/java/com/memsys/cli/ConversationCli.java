@@ -436,11 +436,13 @@ public class ConversationCli {
                 log.warn("Memory reflection invocation failed, using fallback", e);
             }
             reflection = ensureReflectionResult(reflection, true, "normal");
+            reflection = normalizeRuntimeReflection(reflection, true);
             reflectionMs = elapsedMillis(reflectionStartNs);
             emitProgress(progressListener, "reflection_done", "记忆需求判断完成。",
                     Map.of("needs_memory", reflection.needs_memory()));
         } else {
             reflection = ensureReflectionResult(reflection, false, "normal");
+            reflection = normalizeRuntimeReflection(reflection, false);
         }
         this.lastReflectionResult = reflection;
 
@@ -578,8 +580,10 @@ public class ConversationCli {
                 log.warn("Memory reflection invocation failed in eval mode, using fallback", e);
             }
             reflection = ensureReflectionResult(reflection, true, "eval");
+            reflection = normalizeRuntimeReflection(reflection, true);
         } else {
             reflection = ensureReflectionResult(reflection, false, "eval");
+            reflection = normalizeRuntimeReflection(reflection, false);
         }
         this.lastReflectionResult = reflection;
 
@@ -641,6 +645,32 @@ public class ConversationCli {
             return ReflectionResult.fallback();
         }
         return ReflectionResult.memoryDisabled();
+    }
+
+    private ReflectionResult normalizeRuntimeReflection(ReflectionResult reflection, boolean useSavedMemories) {
+        ReflectionResult source = reflection;
+        if (source == null) {
+            source = useSavedMemories ? ReflectionResult.fallback() : ReflectionResult.memoryDisabled();
+        }
+        if (!useSavedMemories) {
+            return ReflectionResult.memoryDisabled();
+        }
+        boolean needsMemory = source.needs_memory();
+        String memoryPurpose = normalizeMemoryPurpose(source.memory_purpose(), needsMemory);
+        String reason = normalizeReason(source.reason(), needsMemory);
+        double confidence = normalizeConfidence(source.confidence(), 0.7d);
+        String retrievalHint = normalizeRetrievalHint(source.retrieval_hint(), needsMemory);
+        List<String> evidenceTypes = normalizeEvidenceTypes(source.evidence_types(), needsMemory);
+        List<String> evidencePurposes = normalizeEvidencePurposes(source.evidence_purposes(), needsMemory);
+        return new ReflectionResult(
+                needsMemory,
+                memoryPurpose,
+                reason,
+                confidence,
+                retrievalHint,
+                evidenceTypes,
+                evidencePurposes
+        );
     }
 
     /** 内部辅助类，用于在构建 system prompt 时收集证据使用数据 */
@@ -1518,6 +1548,13 @@ public class ConversationCli {
         return retrievalHint.trim();
     }
 
+    private String normalizeReason(String reason, boolean needsMemory) {
+        if (!isNullLike(reason)) {
+            return reason.trim();
+        }
+        return needsMemory ? "需要调用长期记忆以保证回答质量。" : "当前问题可直接回答，无需调用长期记忆。";
+    }
+
     private List<String> normalizeEvidenceTypes(List<String> evidenceTypes, boolean needsMemory) {
         if (!needsMemory || evidenceTypes == null || evidenceTypes.isEmpty()) {
             if (needsMemory) {
@@ -1652,6 +1689,17 @@ public class ConversationCli {
             return "";
         }
         return text;
+    }
+
+    private boolean isNullLike(String value) {
+        if (value == null || value.isBlank()) {
+            return true;
+        }
+        String normalized = value.trim().toLowerCase(Locale.ROOT);
+        return "null".equals(normalized)
+                || "undefined".equals(normalized)
+                || "n/a".equals(normalized)
+                || "none".equals(normalized);
     }
 
     private double parseOptionalDouble(Object value, double defaultValue) {
