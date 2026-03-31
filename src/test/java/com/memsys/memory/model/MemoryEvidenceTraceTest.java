@@ -153,5 +153,8 @@ class MemoryEvidenceTraceTest {
         assertThat(summary).contains("诊断: Insights 已检索但未使用（0/2）");
         assertThat(summary).contains("诊断: Examples 使用偏低（1/3）");
         assertThat(summary).contains("诊断: Skills 已检索但未使用（0/1）");
+        assertThat(summary).contains("unused_insights");
+        assertThat(summary).contains("unused_examples");
+        assertThat(summary).contains("unused_skills");
     }
 }

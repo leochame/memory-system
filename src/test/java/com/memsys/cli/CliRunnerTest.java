@@ -87,4 +87,24 @@ class CliRunnerTest {
 
         assertEquals("continuity, experience", CliRunner.traceEvidencePurposes(trace));
     }
+
+    @Test
+    void previewUnusedEvidenceShouldReturnDeduplicatedPreview() {
+        String preview = CliRunner.previewUnusedEvidence(
+                List.of(" i1 ", "i2", "i2", "i3", ""),
+                List.of("i2", " "),
+                2
+        );
+        assertEquals("i1; i3", preview);
+    }
+
+    @Test
+    void previewUnusedEvidenceShouldAppendOverflowCount() {
+        String preview = CliRunner.previewUnusedEvidence(
+                List.of("a", "b", "c"),
+                List.of(),
+                2
+        );
+        assertEquals("a; b ... +1", preview);
+    }
 }

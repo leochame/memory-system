@@ -997,6 +997,10 @@ public class CliRunner implements CommandLineRunner {
             appendCoverageDiagnosis(sb, "Examples", usedExamples.size(), retrievedExamples.size());
             appendCoverageDiagnosis(sb, "Skills", usedSkills.size(), loadedSkills.size());
             appendCoverageDiagnosis(sb, "Tasks", usedTasks.size(), retrievedTasks.size());
+            appendUnusedEvidencePreview(sb, "Insights", retrievedInsights, usedInsights);
+            appendUnusedEvidencePreview(sb, "Examples", retrievedExamples, usedExamples);
+            appendUnusedEvidencePreview(sb, "Skills", loadedSkills, usedSkills);
+            appendUnusedEvidencePreview(sb, "Tasks", retrievedTasks, usedTasks);
             if (!usedSummary.isBlank()) {
                 sb.append(String.format("  摘要: %s\n", truncateForDisplay(usedSummary, 120)));
             }
@@ -1859,6 +1863,17 @@ public class CliRunner implements CommandLineRunner {
         }
     }
 
+    private void appendUnusedEvidencePreview(StringBuilder sb,
+                                             String label,
+                                             List<String> retrieved,
+                                             List<String> used) {
+        String preview = previewUnusedEvidence(retrieved, used, 2);
+        if (preview.isBlank()) {
+            return;
+        }
+        sb.append(String.format("  未使用%s: %s\n", label, preview));
+    }
+
     private String traceNeedsMemoryLabel(MemoryEvidenceTrace trace) {
         if (trace == null || trace.reflection() == null) {
             return "unknown";
@@ -1949,6 +1964,38 @@ public class CliRunner implements CommandLineRunner {
                 .distinct()
                 .reduce((left, right) -> left + ", " + right)
                 .orElse("");
+    }
+
+    static String previewUnusedEvidence(List<String> retrieved, List<String> used, int maxItems) {
+        if (retrieved == null || retrieved.isEmpty() || maxItems <= 0) {
+            return "";
+        }
+        LinkedHashSet<String> usedSet = normalizeEvidenceItems(used);
+        List<String> unused = normalizeEvidenceItems(retrieved).stream()
+                .filter(item -> !usedSet.contains(item))
+                .toList();
+        if (unused.isEmpty()) {
+            return "";
+        }
+        int limit = Math.min(maxItems, unused.size());
+        String preview = String.join("; ", unused.subList(0, limit));
+        if (unused.size() > limit) {
+            preview = preview + String.format(" ... +%d", unused.size() - limit);
+        }
+        return preview;
+    }
+
+    private static LinkedHashSet<String> normalizeEvidenceItems(List<String> items) {
+        LinkedHashSet<String> normalized = new LinkedHashSet<>();
+        if (items == null || items.isEmpty()) {
+            return normalized;
+        }
+        items.stream()
+                .filter(Objects::nonNull)
+                .map(String::trim)
+                .filter(s -> !s.isBlank())
+                .forEach(normalized::add);
+        return normalized;
     }
 
     private boolean parseBoolean(Object value, boolean defaultValue) {

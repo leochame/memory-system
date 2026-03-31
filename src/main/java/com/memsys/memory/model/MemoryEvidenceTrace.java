@@ -1,8 +1,10 @@
 package com.memsys.memory.model;
 
 import java.time.LocalDateTime;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
+import java.util.Objects;
 
 /**
  * Memory Evidence Trace — 记录单轮回答中的记忆反思与证据使用情况。
@@ -98,6 +100,10 @@ public record MemoryEvidenceTrace(
         appendList(sb, "used_examples", usedExamples, 3);
         appendList(sb, "used_skills", usedSkills, 5);
         appendList(sb, "used_tasks", usedTasks, 3);
+        appendUnusedList(sb, "unused_insights", retrievedInsights, usedInsights, 3);
+        appendUnusedList(sb, "unused_examples", retrievedExamples, usedExamples, 3);
+        appendUnusedList(sb, "unused_skills", loadedSkills, usedSkills, 3);
+        appendUnusedList(sb, "unused_tasks", retrievedTasks, usedTasks, 3);
         if (usedEvidenceSummary != null && !usedEvidenceSummary.isBlank()) {
             sb.append("摘要: ").append(usedEvidenceSummary.trim()).append("\n");
         }
@@ -154,5 +160,36 @@ public record MemoryEvidenceTrace(
         if (items.size() > limit) {
             sb.append("  ... +").append(items.size() - limit).append(" 条\n");
         }
+    }
+
+    private void appendUnusedList(StringBuilder sb,
+                                  String label,
+                                  List<String> retrieved,
+                                  List<String> used,
+                                  int maxItems) {
+        if (retrieved == null || retrieved.isEmpty() || maxItems <= 0) {
+            return;
+        }
+        LinkedHashSet<String> usedSet = normalizeSet(used);
+        List<String> unused = normalizeSet(retrieved).stream()
+                .filter(item -> !usedSet.contains(item))
+                .toList();
+        if (unused.isEmpty()) {
+            return;
+        }
+        appendList(sb, label, unused, maxItems);
+    }
+
+    private LinkedHashSet<String> normalizeSet(List<String> items) {
+        LinkedHashSet<String> normalized = new LinkedHashSet<>();
+        if (items == null || items.isEmpty()) {
+            return normalized;
+        }
+        items.stream()
+                .filter(Objects::nonNull)
+                .map(String::trim)
+                .filter(s -> !s.isBlank())
+                .forEach(normalized::add);
+        return normalized;
     }
 }

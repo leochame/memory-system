@@ -1361,3 +1361,47 @@
 - 实际结果：
   - `/memory-debug` 与 `/memory-debug [N]` 在跨版本 trace 字段命名不一致时仍能稳定展示反思语义与检索/使用证据
   - 定向测试通过：`./scripts/run-tests.sh -q -Dtest=ConversationCliTest,CliRunnerTest test`
+
+#### 迭代记录 - 2026-03-31 14:05
+
+- 增强目标：继续执行 Step 6/6（调研与文档更新），围绕 Memory-System 打造“更多内容”的第五层方案，将内容体系升级为“渠道化分发 + 自动化生成”
+- 涉及文件：修改 `开发文档.md`、修改 `开发实现process.md`
+- 实现方案：
+  1. 将开发文档版本升级至 `v4.13`，在 `5.10` 新增 `5.10.15 Step 6/6 内容扩展蓝图（第五层：渠道化分发与自动化生成）`
+  2. 新增 8 类内容形态：`Memory 日报快照`、`Memory 周报简报`、`修复公告卡`、`基准榜单卡`、`谣言澄清卡`、`成本效率账本卡`、`IM 周度推送包`、`答辩冲刺提纲包`
+  3. 固化“采集 -> 组装 -> 审核 -> 分发 -> 回流”自动化最小流水线，并新增索引字段：`distribution_channel/audience_stage/render_template/auto_generated/publish_url/feedback_score/feedback_volume/next_distribution_at`
+  4. 在开发文档新增 `6.17 需求十五`，将渠道目录规范、分发节奏、48 小时反馈回流约束与周度执行小结转化为可验收条款
+- 状态：已完成
+- 实际结果：
+  - Step 6/6 从“问题库化 + 专题化”进一步升级为“渠道化运营 + 半自动生产”，内容体系可从内部复盘稳定扩展到多渠道分发
+  - 文档侧形成“内容生产 -> 渠道分发 -> 反馈回流 -> 开发验证”的完整闭环，可持续服务开发迭代、答辩与论文输出
+
+#### 迭代记录 - 2026-03-31 14:30
+
+- 增强目标：执行 Step 1/6（6.1 Memory Reflection 调用链）语义加固，修复“仅有 memory_purpose 时 evidence 默认值偏离”的问题
+- 涉及文件：修改 `src/main/java/com/memsys/memory/model/ReflectionResult.java`、`src/main/java/com/memsys/memory/MemoryReflectionService.java`、`src/main/java/com/memsys/cli/ConversationCli.java`、`src/main/java/com/memsys/prompt/SystemPromptBuilder.java`、`src/test/java/com/memsys/memory/MemoryReflectionServiceTest.java`、`src/test/java/com/memsys/cli/ConversationCliTest.java`、`src/test/java/com/memsys/prompt/SystemPromptBuilderTest.java`
+- 实现方案：
+  1. 在 `ReflectionResult` 增加基于 `memory_purpose` 的默认映射方法，统一派生 `evidence_purposes/evidence_types`
+  2. `MemoryReflectionService` 在反思输出规范化阶段改为“按 purpose 派生默认证据”，避免一律回退 continuity
+  3. `ConversationCli` 运行态规范化与历史 trace 回读规范化统一采用同一映射逻辑，保证主链路与 `/memory-debug` 一致
+  4. `SystemPromptBuilder` 按 `memory_purpose` 显示默认证据字段，保持提示词语义与运行链路一致
+  5. 补充 3 组回归测试，覆盖 `ACTION_FOLLOWUP` 与 `EXPERIENCE_REUSE` 的默认派生行为
+- 状态：已完成
+- 实际结果：
+  - 当 `needs_memory=true` 但 `evidence_purposes/evidence_types` 缺失或非法时，默认值将与 `memory_purpose` 对齐（如 `ACTION_FOLLOWUP -> followup + TASK`）
+  - 主链路反思、持久化 trace 回读、提示词展示三条路径默认语义一致，降低证据类型漂移导致的误检索风险
+
+#### 迭代记录 - 2026-03-31 13:41
+
+- 增强目标：继续执行 Step 2/6（6.2 记忆证据追踪），补齐“检索到了但没用上”的样例级可观测性，降低 `/memory-debug` 定位证据浪费的时间成本
+- 涉及文件：修改 `src/main/java/com/memsys/memory/model/MemoryEvidenceTrace.java`、修改 `src/main/java/com/memsys/cli/CliRunner.java`、修改 `src/test/java/com/memsys/memory/model/MemoryEvidenceTraceTest.java`、修改 `src/test/java/com/memsys/cli/CliRunnerTest.java`、修改 `开发文档.md`、修改 `开发实现process.md`
+- 实现方案：
+  1. 在 `MemoryEvidenceTrace.buildDisplaySummary()` 增加 `unused_*` 输出（`retrieved - used`），覆盖 Insights/Examples/Skills/Tasks，默认去空白、去重、限量展示
+  2. 在 `CliRunner.showMemoryDebugHistory(...)` 增加“未使用证据”预览行，帮助在历史窗口直接定位浪费证据样例
+  3. 新增 `CliRunner.previewUnusedEvidence(...)` 统一差集预览逻辑，支持去重与溢出数量提示（`... +N`）
+  4. 新增测试 `previewUnusedEvidenceShouldReturnDeduplicatedPreview`、`previewUnusedEvidenceShouldAppendOverflowCount`，并在 `MemoryEvidenceTraceTest` 补充 `unused_*` 展示断言
+  5. 同步开发文档 6.2 完成标准，新增“覆盖率异常时需展示未使用证据样例”验收条款
+- 状态：已完成
+- 实际结果：
+  - `/memory-debug` 与 `/memory-debug [N]` 在“已检索但未使用/使用偏低”场景下可直接看到未使用证据样例，定位链路从“看比例”提升到“看对象”
+  - Step 2/6 诊断维度从计数级扩展到样例级，排查证据浪费时无需手工比对 retrieved/used 两组列表

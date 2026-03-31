@@ -1364,6 +1364,69 @@ class ConversationCliTest {
     }
 
     @Test
+    void getLastEvidenceTraceShouldDeriveEvidenceFallbackFromMemoryPurpose() {
+        MemoryStorage storage = new MemoryStorage(tempDir.toString());
+        storage.writeMetadata(Map.of(
+                "global_controls", Map.of(
+                        "use_saved_memories", true,
+                        "use_chat_history", false
+                )
+        ));
+        SkillService skillService = new SkillService(tempDir.toString());
+        RecordingLlmClient llmClient = new RecordingLlmClient();
+        ConversationCli conversationCli = new ConversationCli(
+                llmClient,
+                storage,
+                new MemoryManager(storage, 100, 30, 15),
+                null,
+                alwaysNeedMemoryReflectionService(),
+                null,
+                null,
+                new AgentGuideService(tempDir.resolve("missing-Agent.md").toString(), tempDir.toString()),
+                new SystemPromptBuilder(),
+                new NoopMemoryAsyncService(),
+                null,
+                skillService,
+                null,
+                toolsWithoutRag(skillService),
+                40,
+                15,
+                false,
+                0.35,
+                5
+        );
+
+        Map<String, Object> traceRecord = new LinkedHashMap<>();
+        traceRecord.put("timestamp", LocalDateTime.now().toString());
+        traceRecord.put("user_message", "followup fallback");
+        traceRecord.put("memory_loaded", true);
+        traceRecord.put("reflection", Map.of(
+                "needs_memory", true,
+                "memory_purpose", "ACTION_FOLLOWUP",
+                "reason", "需要任务跟进",
+                "evidence_types", List.of("invalid"),
+                "evidence_purposes", List.of("invalid")
+        ));
+        traceRecord.put("retrieved_insights", List.of());
+        traceRecord.put("used_insights", List.of());
+        traceRecord.put("retrieved_examples", List.of());
+        traceRecord.put("used_examples", List.of());
+        traceRecord.put("loaded_skills", List.of());
+        traceRecord.put("used_skills", List.of());
+        traceRecord.put("retrieved_tasks", List.of());
+        traceRecord.put("used_tasks", List.of());
+        traceRecord.put("used_evidence_summary", "none");
+        storage.appendMemoryEvidenceTrace(traceRecord);
+
+        MemoryEvidenceTrace trace = conversationCli.getLastEvidenceTrace();
+        assertThat(trace).isNotNull();
+        assertThat(trace.reflection()).isNotNull();
+        assertThat(trace.reflection().memory_purpose()).isEqualTo("ACTION_FOLLOWUP");
+        assertThat(trace.reflection().evidence_types()).containsExactly("TASK", "RECENT_HISTORY");
+        assertThat(trace.reflection().evidence_purposes()).containsExactly("followup");
+    }
+
+    @Test
     void getLastEvidenceTraceShouldDropEvidenceFieldsWhenNeedsMemoryIsFalse() {
         MemoryStorage storage = new MemoryStorage(tempDir.toString());
         storage.writeMetadata(Map.of(

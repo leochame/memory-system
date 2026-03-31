@@ -94,6 +94,30 @@ class MemoryReflectionServiceTest {
     }
 
     @Test
+    void reflectShouldDeriveEvidenceFallbackFromMemoryPurpose() {
+        LlmExtractionService extractionService = mock(LlmExtractionService.class);
+        when(extractionService.reflectMemoryNeed(anyString())).thenReturn(
+                new MemoryReflectionResult(
+                        true,
+                        "ACTION_FOLLOWUP",
+                        "需要跟进历史任务",
+                        90d,
+                        "",
+                        List.of("INVALID"),
+                        List.of("INVALID")
+                )
+        );
+
+        MemoryReflectionService service = new MemoryReflectionService(extractionService);
+        ReflectionResult result = service.reflect("我上次说的任务进展如何", "上次安排了任务");
+
+        assertThat(result.needs_memory()).isTrue();
+        assertThat(result.memory_purpose()).isEqualTo("ACTION_FOLLOWUP");
+        assertThat(result.evidence_types()).containsExactly("TASK", "RECENT_HISTORY");
+        assertThat(result.evidence_purposes()).containsExactly("followup");
+    }
+
+    @Test
     void reflectShouldFixContradictingNotNeededPurposeWhenNeedsMemoryIsTrue() {
         LlmExtractionService extractionService = mock(LlmExtractionService.class);
         when(extractionService.reflectMemoryNeed(anyString())).thenReturn(

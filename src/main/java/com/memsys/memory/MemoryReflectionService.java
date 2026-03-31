@@ -71,11 +71,8 @@ public class MemoryReflectionService {
         String reason = normalizeReason(raw.reason(), needsMemory);
         double confidence = normalizeConfidence(raw.confidence());
         String retrievalHint = normalizeRetrievalHint(raw.retrieval_hint(), needsMemory);
-        List<String> evidenceTypes = normalizeEvidenceTypes(raw.evidence_types(), needsMemory);
-        List<String> purposes = normalizePurposes(raw.evidence_purposes(), needsMemory);
-        if (purposes.isEmpty() && needsMemory) {
-            purposes = purposesFromMemoryPurpose(memoryPurpose);
-        }
+        List<String> evidenceTypes = normalizeEvidenceTypes(raw.evidence_types(), needsMemory, memoryPurpose);
+        List<String> purposes = normalizePurposes(raw.evidence_purposes(), needsMemory, memoryPurpose);
         return new ReflectionResult(needsMemory, memoryPurpose, reason, confidence, retrievalHint, evidenceTypes, purposes);
     }
 
@@ -144,7 +141,9 @@ public class MemoryReflectionService {
                 || "none".equals(normalized);
     }
 
-    private List<String> normalizeEvidenceTypes(List<String> evidenceTypes, boolean needsMemory) {
+    private List<String> normalizeEvidenceTypes(List<String> evidenceTypes,
+                                                boolean needsMemory,
+                                                String memoryPurpose) {
         if (!needsMemory) {
             return List.of();
         }
@@ -156,10 +155,12 @@ public class MemoryReflectionService {
         if (!normalized.isEmpty()) {
             return normalized;
         }
-        return List.of("USER_INSIGHT", "RECENT_HISTORY");
+        return ReflectionResult.defaultEvidenceTypesForMemoryPurpose(memoryPurpose);
     }
 
-    private List<String> normalizePurposes(List<String> purposes, boolean needsMemory) {
+    private List<String> normalizePurposes(List<String> purposes,
+                                           boolean needsMemory,
+                                           String memoryPurpose) {
         if (!needsMemory) {
             return List.of();
         }
@@ -169,21 +170,10 @@ public class MemoryReflectionService {
                 .distinct()
                 .toList();
         if (normalized.isEmpty()) {
-            // needs_memory=true 但没有有效用途时提供稳定回退，避免后续证据链路失焦。
-            return List.of("continuity");
+            // needs_memory=true 但没有有效用途时按 memory_purpose 派生默认用途，避免语义漂移。
+            return ReflectionResult.defaultPurposesForMemoryPurpose(memoryPurpose);
         }
         return normalized;
-    }
-
-    private List<String> purposesFromMemoryPurpose(String memoryPurpose) {
-        return switch (memoryPurpose) {
-            case "PERSONALIZATION" -> List.of("personalization");
-            case "CONTINUITY" -> List.of("continuity");
-            case "CONSTRAINT" -> List.of("constraint");
-            case "EXPERIENCE_REUSE" -> List.of("experience");
-            case "ACTION_FOLLOWUP" -> List.of("followup");
-            default -> List.of("continuity");
-        };
     }
 
     private String buildReflectionPrompt(String userMessage, String recentContext) {

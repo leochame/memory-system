@@ -268,6 +268,41 @@ class SystemPromptBuilderTest {
         assertThat(prompt).contains("evidence_purposes: continuity, experience");
     }
 
+    @Test
+    void buildSystemPromptShouldDeriveEvidenceFallbackFromMemoryPurpose() {
+        String prompt = builder.buildSystemPrompt(
+                "",
+                null,
+                null,
+                new ReflectionResult(
+                        true,
+                        "EXPERIENCE_REUSE",
+                        "需要复用历史案例",
+                        0.88d,
+                        "",
+                        List.of("INVALID"),
+                        List.of("INVALID")
+                ),
+                List.<Map<String, Object>>of(),
+                null,
+                List.<String>of(),
+                false,
+                false,
+                false,
+                false,
+                false,
+                false,
+                List.<String>of(),
+                null,
+                List.<RagService.RelevantMemory>of(),
+                null
+        );
+
+        assertThat(prompt).contains("memory_purpose: EXPERIENCE_REUSE");
+        assertThat(prompt).contains("evidence_types: EXAMPLE");
+        assertThat(prompt).contains("evidence_purposes: experience");
+    }
+
     private void assertSectionOrder(String prompt, String... sections) {
         int lastIndex = -1;
         for (String section : sections) {

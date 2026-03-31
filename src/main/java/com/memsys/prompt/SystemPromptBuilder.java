@@ -68,8 +68,8 @@ public class SystemPromptBuilder {
             String reason = normalizeReason(reflectionResult.reason(), needsMemory);
             double confidence = normalizeConfidence(reflectionResult.confidence());
             String retrievalHint = normalizeRetrievalHint(reflectionResult.retrieval_hint(), needsMemory);
-            List<String> evidenceTypes = normalizeEvidenceTypes(reflectionResult.evidence_types(), needsMemory);
-            List<String> evidencePurposes = normalizeEvidencePurposes(reflectionResult.evidence_purposes(), needsMemory);
+            List<String> evidenceTypes = normalizeEvidenceTypes(reflectionResult.evidence_types(), needsMemory, memoryPurpose);
+            List<String> evidencePurposes = normalizeEvidencePurposes(reflectionResult.evidence_purposes(), needsMemory, memoryPurpose);
             prompt.append("## 3.5 记忆反思决策\n");
             prompt.append("- needs_memory: ").append(needsMemory).append("\n");
             if (!memoryPurpose.isBlank()) {
@@ -260,10 +260,12 @@ public class SystemPromptBuilder {
                 || "none".equals(normalized);
     }
 
-    private List<String> normalizeEvidenceTypes(List<String> evidenceTypes, boolean needsMemory) {
+    private List<String> normalizeEvidenceTypes(List<String> evidenceTypes,
+                                                boolean needsMemory,
+                                                String memoryPurpose) {
         if (!needsMemory || evidenceTypes == null || evidenceTypes.isEmpty()) {
             if (needsMemory) {
-                return List.of("USER_INSIGHT", "RECENT_HISTORY");
+                return ReflectionResult.defaultEvidenceTypesForMemoryPurpose(memoryPurpose);
             }
             return List.of();
         }
@@ -277,13 +279,15 @@ public class SystemPromptBuilder {
         if (!normalized.isEmpty()) {
             return List.copyOf(normalized);
         }
-        return List.of("USER_INSIGHT", "RECENT_HISTORY");
+        return ReflectionResult.defaultEvidenceTypesForMemoryPurpose(memoryPurpose);
     }
 
-    private List<String> normalizeEvidencePurposes(List<String> evidencePurposes, boolean needsMemory) {
+    private List<String> normalizeEvidencePurposes(List<String> evidencePurposes,
+                                                   boolean needsMemory,
+                                                   String memoryPurpose) {
         if (!needsMemory || evidencePurposes == null || evidencePurposes.isEmpty()) {
             if (needsMemory) {
-                return List.of("continuity");
+                return ReflectionResult.defaultPurposesForMemoryPurpose(memoryPurpose);
             }
             return List.of();
         }
@@ -297,7 +301,7 @@ public class SystemPromptBuilder {
         if (!normalized.isEmpty()) {
             return List.copyOf(normalized);
         }
-        return List.of("continuity");
+        return ReflectionResult.defaultPurposesForMemoryPurpose(memoryPurpose);
     }
 
     public String buildTemporaryPrompt() {

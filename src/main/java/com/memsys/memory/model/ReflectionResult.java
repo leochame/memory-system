@@ -68,4 +68,39 @@ public record ReflectionResult(
                 List.of()
         );
     }
+
+    public static List<String> defaultPurposesForMemoryPurpose(String memoryPurpose) {
+        String normalized = normalizePurposeKey(memoryPurpose);
+        return switch (normalized) {
+            case "PERSONALIZATION" -> List.of("personalization");
+            case "CONSTRAINT" -> List.of("constraint");
+            case "EXPERIENCE_REUSE" -> List.of("experience");
+            case "ACTION_FOLLOWUP" -> List.of("followup");
+            case "NOT_NEEDED" -> List.of();
+            default -> List.of("continuity");
+        };
+    }
+
+    public static List<String> defaultEvidenceTypesForMemoryPurpose(String memoryPurpose) {
+        String normalized = normalizePurposeKey(memoryPurpose);
+        return switch (normalized) {
+            case "PERSONALIZATION" -> List.of("USER_INSIGHT", "RECENT_HISTORY");
+            case "CONSTRAINT" -> List.of("USER_INSIGHT", "RECENT_HISTORY");
+            case "EXPERIENCE_REUSE" -> List.of("EXAMPLE");
+            case "ACTION_FOLLOWUP" -> List.of("TASK", "RECENT_HISTORY");
+            case "NOT_NEEDED" -> List.of();
+            default -> List.of("USER_INSIGHT", "RECENT_HISTORY");
+        };
+    }
+
+    private static String normalizePurposeKey(String memoryPurpose) {
+        if (memoryPurpose == null || memoryPurpose.isBlank()) {
+            return "CONTINUITY";
+        }
+        String normalized = memoryPurpose.trim().toUpperCase(java.util.Locale.ROOT);
+        if (!KNOWN_MEMORY_PURPOSES.contains(normalized)) {
+            return "CONTINUITY";
+        }
+        return normalized;
+    }
 }

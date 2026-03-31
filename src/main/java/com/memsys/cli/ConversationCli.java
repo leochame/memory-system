@@ -660,8 +660,8 @@ public class ConversationCli {
         String reason = normalizeReason(source.reason(), needsMemory);
         double confidence = normalizeConfidence(source.confidence(), 0.7d);
         String retrievalHint = normalizeRetrievalHint(source.retrieval_hint(), needsMemory);
-        List<String> evidenceTypes = normalizeEvidenceTypes(source.evidence_types(), needsMemory);
-        List<String> evidencePurposes = normalizeEvidencePurposes(source.evidence_purposes(), needsMemory);
+        List<String> evidenceTypes = normalizeEvidenceTypes(source.evidence_types(), needsMemory, memoryPurpose);
+        List<String> evidencePurposes = normalizeEvidencePurposes(source.evidence_purposes(), needsMemory, memoryPurpose);
         return new ReflectionResult(
                 needsMemory,
                 memoryPurpose,
@@ -1510,14 +1510,15 @@ public class ConversationCli {
                 needsMemory);
         List<String> evidenceTypes = normalizeEvidenceTypes(
                 normalizeStringList(readFirstNonNull(reflectionMap, "evidence_types", "evidenceTypes")),
-                needsMemory);
+                needsMemory,
+                memoryPurpose);
         List<String> rawPurposes = normalizeStringList(
                 readFirstNonNull(reflectionMap, "evidence_purposes", "evidencePurposes"));
         if (rawPurposes.isEmpty()) {
             rawPurposes = normalizeStringList(
                     readFirstNonNull(reflectionMap, "evidence_purpose", "evidencePurpose"));
         }
-        List<String> purposes = normalizeEvidencePurposes(rawPurposes, needsMemory);
+        List<String> purposes = normalizeEvidencePurposes(rawPurposes, needsMemory, memoryPurpose);
         return new ReflectionResult(
                 needsMemory,
                 memoryPurpose,
@@ -1579,10 +1580,12 @@ public class ConversationCli {
         return needsMemory ? "需要调用长期记忆以保证回答质量。" : "当前问题可直接回答，无需调用长期记忆。";
     }
 
-    private List<String> normalizeEvidenceTypes(List<String> evidenceTypes, boolean needsMemory) {
+    private List<String> normalizeEvidenceTypes(List<String> evidenceTypes,
+                                                boolean needsMemory,
+                                                String memoryPurpose) {
         if (!needsMemory || evidenceTypes == null || evidenceTypes.isEmpty()) {
             if (needsMemory) {
-                return List.of("USER_INSIGHT", "RECENT_HISTORY");
+                return ReflectionResult.defaultEvidenceTypesForMemoryPurpose(memoryPurpose);
             }
             return List.of();
         }
@@ -1596,13 +1599,15 @@ public class ConversationCli {
         if (!normalized.isEmpty()) {
             return List.copyOf(normalized);
         }
-        return List.of("USER_INSIGHT", "RECENT_HISTORY");
+        return ReflectionResult.defaultEvidenceTypesForMemoryPurpose(memoryPurpose);
     }
 
-    private List<String> normalizeEvidencePurposes(List<String> evidencePurposes, boolean needsMemory) {
+    private List<String> normalizeEvidencePurposes(List<String> evidencePurposes,
+                                                   boolean needsMemory,
+                                                   String memoryPurpose) {
         if (!needsMemory || evidencePurposes == null || evidencePurposes.isEmpty()) {
             if (needsMemory) {
-                return List.of("continuity");
+                return ReflectionResult.defaultPurposesForMemoryPurpose(memoryPurpose);
             }
             return List.of();
         }
@@ -1616,7 +1621,7 @@ public class ConversationCli {
         if (!normalized.isEmpty()) {
             return List.copyOf(normalized);
         }
-        return List.of("continuity");
+        return ReflectionResult.defaultPurposesForMemoryPurpose(memoryPurpose);
     }
 
     private List<String> normalizeStringList(Object value) {
