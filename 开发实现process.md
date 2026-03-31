@@ -953,3 +953,33 @@
 - 实际结果：
   - `/memory-debug [N]` 在落盘延迟阶段也能展示最新一轮证据 trace，不再落后一轮
   - 历史窗口支持去重，避免同一轮 trace 在持久化和内存态同时存在时重复输出
+
+#### 迭代记录 - 2026-03-31 10:15
+
+- 增强目标：执行 Step 1/6（6.1 Memory Reflection 调用链），按开发文档 v4.2 补齐结构化反思决策字段，完善“反思结果进入 Prompt + 稳定回退”闭环
+- 涉及文件：修改 `src/main/java/com/memsys/llm/LlmDtos.java`、`src/main/java/com/memsys/llm/schema/Schemas.java`、`src/main/java/com/memsys/memory/model/ReflectionResult.java`、`src/main/java/com/memsys/memory/MemoryReflectionService.java`、`src/main/java/com/memsys/cli/ConversationCli.java`、`src/main/java/com/memsys/prompt/SystemPromptBuilder.java`、以及对应测试文件
+- 实现方案：
+  1. `MemoryReflectionResult/ReflectionResult` 新增并规范化 `memory_purpose/confidence/retrieval_hint/evidence_types`
+  2. `Schemas.memoryReflectionResult()` 增加对应 schema 字段，保留 `evidence_purposes` 兼容既有链路
+  3. `MemoryReflectionService` 增加字段归一化与失败回退：`needs_memory=false` 时强制 `memory_purpose=NOT_NEEDED` 且清空用途与证据类型
+  4. `ConversationCli` 补齐新字段落盘与回读，并让证据加载判定同时支持 `evidence_types + evidence_purposes`
+  5. `SystemPromptBuilder` 在 3.5 节显式注入新增反思字段，确保主提示词可消费完整决策
+- 状态：已完成
+- 实际结果：
+  - Step 1/6 调用链字段与开发文档 v4.2 对齐，反思决策可解释性和稳定性提升
+  - 定向测试通过：`export JAVA_HOME=$(/usr/libexec/java_home) && mvn -q -Dtest=MemoryReflectionServiceTest,SystemPromptBuilderTest,ConversationCliTest,MemoryEvidenceTraceTest,ImChatGatingE2ETest test`
+
+#### 迭代记录 - 2026-03-31 10:35
+
+- 增强目标：继续执行 Step 2/6（6.2 记忆证据追踪），补齐 legacy trace 兼容解析能力，避免历史回读在“扁平反思字段”下误显示为 `unknown`
+- 涉及文件：修改 `src/main/java/com/memsys/cli/ConversationCli.java`、修改 `src/test/java/com/memsys/cli/ConversationCliTest.java`、修改 `开发文档.md`、修改 `开发实现process.md`
+- 实现方案：
+  1. `ConversationCli` 新增 `parseReflection()` 与 `parseReflectionMap()`，先解析 `reflection` 嵌套对象，失败时回退解析顶层字段
+  2. 新增 `evidence_purpose` 单数字段兼容，自动归一到 `evidence_purposes`
+  3. 保持三态语义：只有 `needs_memory` 可明确解析时才构造 `ReflectionResult`，否则维持 `reflection=null`
+  4. 新增回归测试 `getLastEvidenceTraceShouldParseLegacyTopLevelReflectionFields`，覆盖“顶层反思字段 + 无 reflection 对象”回读场景
+  5. 同步开发文档 6.2 完成标准，补充 legacy 扁平字段兼容约束
+- 状态：已完成
+- 实际结果：
+  - 历史 trace 在 `reflection` 缺失但顶层存在 `needs_memory/reason` 时可被正确解析并用于 `/memory-debug`
+  - legacy 数据兼容与三态语义同时成立，避免兼容修复引入“未知值被误判为否”的回归风险

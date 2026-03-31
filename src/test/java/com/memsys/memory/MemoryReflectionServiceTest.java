@@ -21,7 +21,11 @@ class MemoryReflectionServiceTest {
         when(extractionService.reflectMemoryNeed(anyString())).thenReturn(
                 new MemoryReflectionResult(
                         true,
+                        "CONTINUITY",
                         " ",
+                        85d,
+                        "",
+                        List.of(" recent_history ", "invalid"),
                         Arrays.asList(" continuity ", "EXPERIENCE", "invalid", null, "continuity")
                 )
         );
@@ -30,7 +34,11 @@ class MemoryReflectionServiceTest {
         ReflectionResult result = service.reflect("继续上次的话题", "上次在讨论毕设");
 
         assertThat(result.needs_memory()).isTrue();
+        assertThat(result.memory_purpose()).isEqualTo("CONTINUITY");
         assertThat(result.reason()).isEqualTo("需要调用长期记忆以保证回答质量。");
+        assertThat(result.confidence()).isEqualTo(0.85d);
+        assertThat(result.retrieval_hint()).isEqualTo("优先检索与用户当前问题最相关的历史证据。");
+        assertThat(result.evidence_types()).containsExactly("RECENT_HISTORY");
         assertThat(result.evidence_purposes()).containsExactly("continuity", "experience");
     }
 
@@ -40,7 +48,11 @@ class MemoryReflectionServiceTest {
         when(extractionService.reflectMemoryNeed(anyString())).thenReturn(
                 new MemoryReflectionResult(
                         false,
+                        "PERSONALIZATION",
                         null,
+                        null,
+                        "should be cleared",
+                        List.of("USER_INSIGHT"),
                         List.of("continuity", "personalization")
                 )
         );
@@ -49,7 +61,10 @@ class MemoryReflectionServiceTest {
         ReflectionResult result = service.reflect("你好", "");
 
         assertThat(result.needs_memory()).isFalse();
+        assertThat(result.memory_purpose()).isEqualTo("NOT_NEEDED");
         assertThat(result.reason()).isEqualTo("当前问题可直接回答，无需调用长期记忆。");
+        assertThat(result.retrieval_hint()).isBlank();
+        assertThat(result.evidence_types()).isEmpty();
         assertThat(result.evidence_purposes()).isEmpty();
     }
 
@@ -59,7 +74,11 @@ class MemoryReflectionServiceTest {
         when(extractionService.reflectMemoryNeed(anyString())).thenReturn(
                 new MemoryReflectionResult(
                         true,
+                        "UNKNOWN",
                         "需要历史信息",
+                        120d,
+                        " ",
+                        List.of("INVALID"),
                         List.of("INVALID", " ", "unknown")
                 )
         );
@@ -68,6 +87,9 @@ class MemoryReflectionServiceTest {
         ReflectionResult result = service.reflect("继续上次任务", "上次在讨论发布计划");
 
         assertThat(result.needs_memory()).isTrue();
+        assertThat(result.memory_purpose()).isEqualTo("CONTINUITY");
+        assertThat(result.evidence_types()).containsExactly("USER_INSIGHT", "RECENT_HISTORY");
+        assertThat(result.confidence()).isEqualTo(1.0d);
         assertThat(result.evidence_purposes()).containsExactly("continuity");
     }
 }

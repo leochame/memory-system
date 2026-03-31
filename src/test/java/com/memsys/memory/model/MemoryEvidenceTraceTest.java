@@ -15,7 +15,15 @@ class MemoryEvidenceTraceTest {
         MemoryEvidenceTrace trace = new MemoryEvidenceTrace(
                 LocalDateTime.of(2026, 3, 29, 11, 0),
                 "帮我继续任务复盘",
-                new ReflectionResult(true, "需要延续任务上下文", List.of("continuity", "followup")),
+                new ReflectionResult(
+                        true,
+                        "ACTION_FOLLOWUP",
+                        "需要延续任务上下文",
+                        0.9d,
+                        "优先检索任务上下文",
+                        List.of("TASK", "RECENT_HISTORY"),
+                        List.of("continuity", "followup")
+                ),
                 true,
                 List.of("diet: 用户不爱吃鱼", "project: 记忆系统开发中"),
                 List.of("project: 记忆系统开发中"),
@@ -49,7 +57,15 @@ class MemoryEvidenceTraceTest {
         MemoryEvidenceTrace trace = new MemoryEvidenceTrace(
                 LocalDateTime.of(2026, 3, 29, 12, 0),
                 "你好",
-                new ReflectionResult(false, "当前问题可直接回答，无需调用长期记忆。", List.of()),
+                new ReflectionResult(
+                        false,
+                        "NOT_NEEDED",
+                        "当前问题可直接回答，无需调用长期记忆。",
+                        0.95d,
+                        "",
+                        List.of(),
+                        List.of()
+                ),
                 false,
                 List.of(),
                 List.of(),
@@ -74,7 +90,15 @@ class MemoryEvidenceTraceTest {
             MemoryEvidenceTrace trace = new MemoryEvidenceTrace(
                     LocalDateTime.of(2026, 3, 29, 12, 5),
                     "继续复盘",
-                    new ReflectionResult(true, "需要延续上下文", List.of("continuity")),
+                    new ReflectionResult(
+                            true,
+                            "CONTINUITY",
+                            "需要延续上下文",
+                            0.8d,
+                            "优先检索近期上下文",
+                            List.of("RECENT_HISTORY"),
+                            List.of("continuity")
+                    ),
                     true,
                     List.of("i1", "i2"),
                     List.of("i1"),

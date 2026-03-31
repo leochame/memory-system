@@ -136,11 +136,32 @@ public final class Schemas {
         props.put("needs_memory", JsonBooleanSchema.builder()
                 .description("Whether this user message requires long-term memory to answer well")
                 .build());
+        props.put("memory_purpose", JsonEnumSchema.builder()
+                .description("Primary purpose of memory usage")
+                .enumValues(List.of(
+                        "PERSONALIZATION",
+                        "CONTINUITY",
+                        "CONSTRAINT",
+                        "EXPERIENCE_REUSE",
+                        "ACTION_FOLLOWUP",
+                        "NOT_NEEDED"
+                ))
+                .build());
         props.put("reason", JsonStringSchema.builder()
                 .description("Brief explanation of why memory is or is not needed for this message")
                 .build());
+        props.put("confidence", JsonIntegerSchema.builder()
+                .description("Confidence score from 0 to 100")
+                .build());
+        props.put("retrieval_hint", JsonStringSchema.builder()
+                .description("A concise retrieval hint for downstream evidence loading")
+                .build());
+        props.put("evidence_types", JsonArraySchema.builder()
+                .description("Expected evidence types: USER_INSIGHT, SESSION_SUMMARY, TASK, EXAMPLE, SKILL, RECENT_HISTORY")
+                .items(JsonStringSchema.builder().description("evidence type").build())
+                .build());
         props.put("evidence_purposes", JsonArraySchema.builder()
-                .description("List of evidence purposes if memory is needed: personalization, continuity, constraint, experience, followup")
+                .description("Legacy purpose list for backward compatibility: personalization, continuity, constraint, experience, followup")
                 .items(JsonStringSchema.builder().description("evidence purpose").build())
                 .build());
 

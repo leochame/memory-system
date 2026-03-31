@@ -184,7 +184,15 @@ class ImChatGatingE2ETest {
     private MemoryReflectionService reflectionServiceWithPurposes(List<String> purposes) {
         MemoryReflectionService reflectionService = mock(MemoryReflectionService.class);
         when(reflectionService.reflect(anyString(), anyString()))
-                .thenReturn(new ReflectionResult(true, "test gating", purposes));
+                .thenReturn(new ReflectionResult(
+                        true,
+                        "CONTINUITY",
+                        "test gating",
+                        0.8d,
+                        "test hint",
+                        List.of("RECENT_HISTORY"),
+                        purposes
+                ));
         return reflectionService;
     }
 

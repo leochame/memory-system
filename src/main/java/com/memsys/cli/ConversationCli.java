@@ -778,9 +778,12 @@ public class ConversationCli {
 
         boolean shouldLoadMemory = useSavedMemories && reflection != null && reflection.needs_memory();
         Set<String> purposes = normalizePurposes(reflection);
-        boolean needsInsightEvidence = shouldLoadMemory && needsInsightEvidence(purposes);
-        boolean needsExperienceEvidence = shouldLoadMemory && purposes.contains("experience");
-        boolean needsFollowupEvidence = shouldLoadMemory && purposes.contains("followup");
+        Set<String> evidenceTypes = normalizeEvidenceTypes(reflection);
+        boolean needsInsightEvidence = shouldLoadMemory && needsInsightEvidence(purposes, evidenceTypes);
+        boolean needsExperienceEvidence = shouldLoadMemory
+                && (purposes.contains("experience") || evidenceTypes.contains("EXAMPLE"));
+        boolean needsFollowupEvidence = shouldLoadMemory
+                && (purposes.contains("followup") || evidenceTypes.contains("TASK"));
 
         List<Map.Entry<String, Memory>> topMemories = needsInsightEvidence
                 ? memoryManager.getTopOfMindMemories(topOfMindLimit)
@@ -941,13 +944,30 @@ public class ConversationCli {
                 .collect(Collectors.toCollection(LinkedHashSet::new));
     }
 
-    private boolean needsInsightEvidence(Set<String> purposes) {
-        if (purposes == null || purposes.isEmpty()) {
-            return false;
+    private Set<String> normalizeEvidenceTypes(ReflectionResult reflection) {
+        if (reflection == null || reflection.evidence_types() == null) {
+            return Set.of();
         }
-        return purposes.contains("personalization")
-                || purposes.contains("continuity")
-                || purposes.contains("constraint");
+        return reflection.evidence_types().stream()
+                .filter(Objects::nonNull)
+                .map(String::trim)
+                .filter(s -> !s.isBlank())
+                .map(s -> s.toUpperCase(Locale.ROOT))
+                .collect(Collectors.toCollection(LinkedHashSet::new));
+    }
+
+    private boolean needsInsightEvidence(Set<String> purposes, Set<String> evidenceTypes) {
+        boolean purposeNeedsInsight = purposes != null && (
+                purposes.contains("personalization")
+                        || purposes.contains("continuity")
+                        || purposes.contains("constraint")
+        );
+        boolean typeNeedsInsight = evidenceTypes != null && (
+                evidenceTypes.contains("USER_INSIGHT")
+                        || evidenceTypes.contains("SESSION_SUMMARY")
+                        || evidenceTypes.contains("RECENT_HISTORY")
+        );
+        return purposeNeedsInsight || typeNeedsInsight;
     }
 
     private List<String> collectTaskContext(String sourcePlatform,
@@ -1173,7 +1193,11 @@ public class ConversationCli {
             Map<String, Object> reflectionMap = new LinkedHashMap<>();
             if (reflection != null) {
                 reflectionMap.put("needs_memory", reflection.needs_memory());
+                reflectionMap.put("memory_purpose", reflection.memory_purpose());
                 reflectionMap.put("reason", reflection.reason());
+                reflectionMap.put("confidence", reflection.confidence());
+                reflectionMap.put("retrieval_hint", reflection.retrieval_hint());
+                reflectionMap.put("evidence_types", reflection.evidence_types());
                 reflectionMap.put("evidence_purposes", reflection.evidence_purposes());
             }
             record.put("reflection", reflectionMap);
@@ -1331,7 +1355,11 @@ public class ConversationCli {
             return false;
         }
         return left.needs_memory() == right.needs_memory()
+                && Objects.equals(left.memory_purpose(), right.memory_purpose())
                 && Objects.equals(left.reason(), right.reason())
+                && Double.compare(left.confidence(), right.confidence()) == 0
+                && Objects.equals(left.retrieval_hint(), right.retrieval_hint())
+                && Objects.equals(left.evidence_types(), right.evidence_types())
                 && Objects.equals(left.evidence_purposes(), right.evidence_purposes());
     }
 
@@ -1350,17 +1378,7 @@ public class ConversationCli {
             }
         }
 
-        ReflectionResult reflection = null;
-        Object reflectionObj = record.get("reflection");
-        if (reflectionObj instanceof Map<?, ?> rawMap) {
-            Map<String, Object> reflectionMap = (Map<String, Object>) rawMap;
-            Boolean needsMemory = parseOptionalBoolean(reflectionMap.get("needs_memory"));
-            if (needsMemory != null) {
-                String reason = normalizeText(reflectionMap.get("reason"));
-                List<String> purposes = normalizeStringList(reflectionMap.get("evidence_purposes"));
-                reflection = new ReflectionResult(needsMemory, reason, purposes);
-            }
-        }
+        ReflectionResult reflection = parseReflection(record);
 
         return new MemoryEvidenceTrace(
                 timestamp,
@@ -1376,6 +1394,50 @@ public class ConversationCli {
                 normalizeStringList(record.get("retrieved_tasks")),
                 normalizeStringList(record.get("used_tasks")),
                 normalizeText(record.get("used_evidence_summary"))
+        );
+    }
+
+    @SuppressWarnings("unchecked")
+    private ReflectionResult parseReflection(Map<String, Object> record) {
+        if (record == null || record.isEmpty()) {
+            return null;
+        }
+        Object reflectionObj = record.get("reflection");
+        if (reflectionObj instanceof Map<?, ?> rawMap) {
+            ReflectionResult nested = parseReflectionMap((Map<String, Object>) rawMap);
+            if (nested != null) {
+                return nested;
+            }
+        }
+        // 兼容早期 trace：reflection 字段缺失，反思字段直接扁平存储在顶层。
+        return parseReflectionMap(record);
+    }
+
+    private ReflectionResult parseReflectionMap(Map<String, Object> reflectionMap) {
+        if (reflectionMap == null || reflectionMap.isEmpty()) {
+            return null;
+        }
+        Boolean needsMemory = parseOptionalBoolean(reflectionMap.get("needs_memory"));
+        if (needsMemory == null) {
+            return null;
+        }
+        String memoryPurpose = normalizeText(reflectionMap.get("memory_purpose"));
+        String reason = normalizeText(reflectionMap.get("reason"));
+        double confidence = parseOptionalDouble(reflectionMap.get("confidence"), 0.7d);
+        String retrievalHint = normalizeText(reflectionMap.get("retrieval_hint"));
+        List<String> evidenceTypes = normalizeStringList(reflectionMap.get("evidence_types"));
+        List<String> purposes = normalizeStringList(reflectionMap.get("evidence_purposes"));
+        if (purposes.isEmpty()) {
+            purposes = normalizeStringList(reflectionMap.get("evidence_purpose"));
+        }
+        return new ReflectionResult(
+                needsMemory,
+                memoryPurpose.isBlank() ? (needsMemory ? "CONTINUITY" : "NOT_NEEDED") : memoryPurpose,
+                reason,
+                confidence,
+                retrievalHint,
+                evidenceTypes,
+                purposes
         );
     }
 
@@ -1405,6 +1467,38 @@ public class ConversationCli {
             return "";
         }
         return text;
+    }
+
+    private double parseOptionalDouble(Object value, double defaultValue) {
+        if (value == null) {
+            return defaultValue;
+        }
+        if (value instanceof Number number) {
+            return normalizeConfidence(number.doubleValue(), defaultValue);
+        }
+        String text = String.valueOf(value).trim();
+        if (text.isBlank()) {
+            return defaultValue;
+        }
+        try {
+            return normalizeConfidence(Double.parseDouble(text), defaultValue);
+        } catch (NumberFormatException ignored) {
+            return defaultValue;
+        }
+    }
+
+    private double normalizeConfidence(double value, double defaultValue) {
+        if (Double.isNaN(value) || Double.isInfinite(value)) {
+            return defaultValue;
+        }
+        double normalized = value > 1.0d ? value / 100.0d : value;
+        if (normalized < 0.0d) {
+            return 0.0d;
+        }
+        if (normalized > 1.0d) {
+            return 1.0d;
+        }
+        return normalized;
     }
 
     /**

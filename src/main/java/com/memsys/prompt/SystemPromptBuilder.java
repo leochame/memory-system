@@ -61,8 +61,20 @@ public class SystemPromptBuilder {
         if (reflectionResult != null) {
             prompt.append("## 3.5 记忆反思决策\n");
             prompt.append("- needs_memory: ").append(reflectionResult.needs_memory()).append("\n");
+            if (reflectionResult.memory_purpose() != null && !reflectionResult.memory_purpose().isBlank()) {
+                prompt.append("- memory_purpose: ").append(reflectionResult.memory_purpose().trim()).append("\n");
+            }
             if (reflectionResult.reason() != null && !reflectionResult.reason().isBlank()) {
                 prompt.append("- reason: ").append(reflectionResult.reason().trim()).append("\n");
+            }
+            prompt.append("- confidence: ").append(String.format(java.util.Locale.ROOT, "%.2f", reflectionResult.confidence())).append("\n");
+            if (reflectionResult.retrieval_hint() != null && !reflectionResult.retrieval_hint().isBlank()) {
+                prompt.append("- retrieval_hint: ").append(reflectionResult.retrieval_hint().trim()).append("\n");
+            }
+            if (reflectionResult.evidence_types() != null && !reflectionResult.evidence_types().isEmpty()) {
+                prompt.append("- evidence_types: ")
+                        .append(String.join(", ", reflectionResult.evidence_types()))
+                        .append("\n");
             }
             if (reflectionResult.evidence_purposes() != null && !reflectionResult.evidence_purposes().isEmpty()) {
                 prompt.append("- evidence_purposes: ")

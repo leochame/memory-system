@@ -69,7 +69,11 @@ public final class LlmDtos {
      */
     public record MemoryReflectionResult(
             boolean needs_memory,
+            String memory_purpose,
             String reason,
+            Double confidence,
+            String retrieval_hint,
+            java.util.List<String> evidence_types,
             java.util.List<String> evidence_purposes
     ) {
     }

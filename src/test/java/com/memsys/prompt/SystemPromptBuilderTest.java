@@ -19,7 +19,15 @@ class SystemPromptBuilderTest {
                 "agent guide content",
                 Map.<String, Object>of("timezone", "Asia/Shanghai"),
                 Map.<String, Object>of("tone", "concise"),
-                new ReflectionResult(true, "需要结合用户历史偏好", List.of("personalization", "continuity")),
+                new ReflectionResult(
+                        true,
+                        "PERSONALIZATION",
+                        "需要结合用户历史偏好",
+                        0.91d,
+                        "优先检索用户偏好相关记忆",
+                        List.of("USER_INSIGHT"),
+                        List.of("personalization", "continuity")
+                ),
                 List.of(Map.<String, Object>of("timestamp", "2026-03-18 19:00:00", "message", "你好")),
                 "用户偏好简洁直接。",
                 List.of("debugging"),
@@ -54,7 +62,10 @@ class SystemPromptBuilderTest {
         assertThat(prompt).contains("create_task(...)");
         assertThat(prompt).contains("## 3.5 记忆反思决策");
         assertThat(prompt).contains("needs_memory: true");
+        assertThat(prompt).contains("memory_purpose: PERSONALIZATION");
         assertThat(prompt).contains("reason: 需要结合用户历史偏好");
+        assertThat(prompt).contains("retrieval_hint: 优先检索用户偏好相关记忆");
+        assertThat(prompt).contains("evidence_types: USER_INSIGHT");
         assertThat(prompt).contains("evidence_purposes: personalization, continuity");
         assertThat(prompt).contains("## 9. 相关任务上下文（Retrieved Tasks）");
         assertThat(prompt).contains("[到期] 例会 @ 2026-03-29 20:00");

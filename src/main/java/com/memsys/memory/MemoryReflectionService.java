@@ -67,9 +67,27 @@ public class MemoryReflectionService {
 
     private ReflectionResult normalizeResult(MemoryReflectionResult raw) {
         boolean needsMemory = raw.needs_memory();
+        String memoryPurpose = normalizeMemoryPurpose(raw.memory_purpose(), needsMemory);
         String reason = normalizeReason(raw.reason(), needsMemory);
+        double confidence = normalizeConfidence(raw.confidence());
+        String retrievalHint = normalizeRetrievalHint(raw.retrieval_hint(), needsMemory);
+        List<String> evidenceTypes = normalizeEvidenceTypes(raw.evidence_types(), needsMemory);
         List<String> purposes = normalizePurposes(raw.evidence_purposes(), needsMemory);
-        return new ReflectionResult(needsMemory, reason, purposes);
+        if (purposes.isEmpty() && needsMemory) {
+            purposes = purposesFromMemoryPurpose(memoryPurpose);
+        }
+        return new ReflectionResult(needsMemory, memoryPurpose, reason, confidence, retrievalHint, evidenceTypes, purposes);
+    }
+
+    private String normalizeMemoryPurpose(String memoryPurpose, boolean needsMemory) {
+        if (!needsMemory) {
+            return "NOT_NEEDED";
+        }
+        String normalized = memoryPurpose == null ? "" : memoryPurpose.trim().toUpperCase(Locale.ROOT);
+        if (ReflectionResult.KNOWN_MEMORY_PURPOSES.contains(normalized)) {
+            return normalized;
+        }
+        return "CONTINUITY";
     }
 
     private String normalizeReason(String reason, boolean needsMemory) {
@@ -78,6 +96,49 @@ public class MemoryReflectionService {
             return normalized;
         }
         return needsMemory ? "需要调用长期记忆以保证回答质量。" : "当前问题可直接回答，无需调用长期记忆。";
+    }
+
+    private double normalizeConfidence(Double confidence) {
+        if (confidence == null) {
+            return 0.7d;
+        }
+        double value = confidence;
+        if (value > 1.0d) {
+            value = value / 100.0d;
+        }
+        if (value < 0.0d) {
+            return 0.0d;
+        }
+        if (value > 1.0d) {
+            return 1.0d;
+        }
+        return value;
+    }
+
+    private String normalizeRetrievalHint(String retrievalHint, boolean needsMemory) {
+        if (!needsMemory) {
+            return "";
+        }
+        String normalized = retrievalHint == null ? "" : retrievalHint.trim();
+        if (!normalized.isBlank()) {
+            return normalized;
+        }
+        return "优先检索与用户当前问题最相关的历史证据。";
+    }
+
+    private List<String> normalizeEvidenceTypes(List<String> evidenceTypes, boolean needsMemory) {
+        if (!needsMemory) {
+            return List.of();
+        }
+        List<String> normalized = evidenceTypes == null ? List.of() : evidenceTypes.stream()
+                .map(type -> type == null ? "" : type.trim().toUpperCase(Locale.ROOT))
+                .filter(type -> !type.isBlank() && ReflectionResult.KNOWN_EVIDENCE_TYPES.contains(type))
+                .distinct()
+                .toList();
+        if (!normalized.isEmpty()) {
+            return normalized;
+        }
+        return List.of("USER_INSIGHT", "RECENT_HISTORY");
     }
 
     private List<String> normalizePurposes(List<String> purposes, boolean needsMemory) {
@@ -96,6 +157,17 @@ public class MemoryReflectionService {
         return normalized;
     }
 
+    private List<String> purposesFromMemoryPurpose(String memoryPurpose) {
+        return switch (memoryPurpose) {
+            case "PERSONALIZATION" -> List.of("personalization");
+            case "CONTINUITY" -> List.of("continuity");
+            case "CONSTRAINT" -> List.of("constraint");
+            case "EXPERIENCE_REUSE" -> List.of("experience");
+            case "ACTION_FOLLOWUP" -> List.of("followup");
+            default -> List.of("continuity");
+        };
+    }
+
     private String buildReflectionPrompt(String userMessage, String recentContext) {
         StringBuilder sb = new StringBuilder();
         sb.append("""
@@ -106,6 +178,24 @@ public class MemoryReflectionService {
                 - 如果问题涉及用户个人偏好、之前的对话、历史任务、个人背景 → needs_memory=true
                 - 如果问题需要延续之前的讨论或遵循用户声明的约束 → needs_memory=true
                 - 如果问题可能受益于历史解决方案的复用 → needs_memory=true
+
+                memory_purpose 只能从以下枚举中选择一个：
+                - PERSONALIZATION
+                - CONTINUITY
+                - CONSTRAINT
+                - EXPERIENCE_REUSE
+                - ACTION_FOLLOWUP
+                - NOT_NEEDED
+
+                confidence 为 0-100 的整数，表示判断置信度。
+                retrieval_hint 给出一句检索提示语；若 needs_memory=false 则为空字符串。
+                evidence_types 从以下枚举中选择（可多选，若 needs_memory=false 则为空数组）：
+                - USER_INSIGHT
+                - SESSION_SUMMARY
+                - TASK
+                - EXAMPLE
+                - SKILL
+                - RECENT_HISTORY
 
                 evidence_purposes 从以下选项中选择（可多选，如果 needs_memory=false 则为空数组）：
                 - personalization: 需要用户偏好来个性化回复

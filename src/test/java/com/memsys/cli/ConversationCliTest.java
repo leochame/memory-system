@@ -918,6 +918,65 @@ class ConversationCliTest {
     }
 
     @Test
+    void getLastEvidenceTraceShouldParseLegacyTopLevelReflectionFields() {
+        MemoryStorage storage = new MemoryStorage(tempDir.toString());
+        storage.writeMetadata(Map.of(
+                "global_controls", Map.of(
+                        "use_saved_memories", true,
+                        "use_chat_history", false
+                )
+        ));
+        SkillService skillService = new SkillService(tempDir.toString());
+        RecordingLlmClient llmClient = new RecordingLlmClient();
+        ConversationCli conversationCli = new ConversationCli(
+                llmClient,
+                storage,
+                new MemoryManager(storage, 100, 30, 15),
+                null,
+                alwaysNeedMemoryReflectionService(),
+                null,
+                null,
+                new AgentGuideService(tempDir.resolve("missing-Agent.md").toString(), tempDir.toString()),
+                new SystemPromptBuilder(),
+                new NoopMemoryAsyncService(),
+                null,
+                skillService,
+                null,
+                toolsWithoutRag(skillService),
+                40,
+                15,
+                false,
+                0.35,
+                5
+        );
+
+        Map<String, Object> traceRecord = new LinkedHashMap<>();
+        traceRecord.put("timestamp", LocalDateTime.now().toString());
+        traceRecord.put("user_message", "继续上次饮食偏好建议");
+        traceRecord.put("memory_loaded", true);
+        traceRecord.put("needs_memory", "true");
+        traceRecord.put("reason", "legacy top-level reflection");
+        traceRecord.put("evidence_purpose", List.of("personalization"));
+        traceRecord.put("retrieved_insights", List.of("food_preference: 不吃鱼"));
+        traceRecord.put("used_insights", List.of("food_preference: 不吃鱼"));
+        traceRecord.put("retrieved_examples", List.of());
+        traceRecord.put("used_examples", List.of());
+        traceRecord.put("loaded_skills", List.of());
+        traceRecord.put("used_skills", List.of());
+        traceRecord.put("retrieved_tasks", List.of());
+        traceRecord.put("used_tasks", List.of());
+        traceRecord.put("used_evidence_summary", "insights 1/1");
+        storage.appendMemoryEvidenceTrace(traceRecord);
+
+        MemoryEvidenceTrace trace = conversationCli.getLastEvidenceTrace();
+        assertThat(trace).isNotNull();
+        assertThat(trace.reflection()).isNotNull();
+        assertThat(trace.reflection().needs_memory()).isTrue();
+        assertThat(trace.reflection().reason()).isEqualTo("legacy top-level reflection");
+        assertThat(trace.reflection().evidence_purposes()).containsExactly("personalization");
+    }
+
+    @Test
     void getRecentEvidenceTracesShouldReuseNormalizedParsingForHistoryView() {
         MemoryStorage storage = new MemoryStorage(tempDir.toString());
         storage.writeMetadata(Map.of(
@@ -1157,14 +1216,30 @@ class ConversationCliTest {
     private MemoryReflectionService reflectionServiceWithPurposes(List<String> purposes) {
         MemoryReflectionService reflectionService = mock(MemoryReflectionService.class);
         when(reflectionService.reflect(anyString(), anyString()))
-                .thenReturn(new ReflectionResult(true, "需要历史信息", purposes));
+                .thenReturn(new ReflectionResult(
+                        true,
+                        "CONTINUITY",
+                        "需要历史信息",
+                        0.8d,
+                        "优先检索历史上下文",
+                        List.of("RECENT_HISTORY"),
+                        purposes
+                ));
         return reflectionService;
     }
 
     private MemoryReflectionService noMemoryReflectionService() {
         MemoryReflectionService reflectionService = mock(MemoryReflectionService.class);
         when(reflectionService.reflect(anyString(), anyString()))
-                .thenReturn(new ReflectionResult(false, "当前问题无需长期记忆。", List.of()));
+                .thenReturn(new ReflectionResult(
+                        false,
+                        "NOT_NEEDED",
+                        "当前问题无需长期记忆。",
+                        0.95d,
+                        "",
+                        List.of(),
+                        List.of()
+                ));
         return reflectionService;
     }
 }

@@ -11,7 +11,11 @@ import java.util.List;
  */
 public record ReflectionResult(
         boolean needs_memory,
+        String memory_purpose,
         String reason,
+        double confidence,
+        String retrieval_hint,
+        List<String> evidence_types,
         List<String> evidence_purposes
 ) {
 
@@ -28,18 +32,40 @@ public record ReflectionResult(
     public static final List<String> KNOWN_PURPOSES = List.of(
             "personalization", "continuity", "constraint", "experience", "followup"
     );
+    public static final List<String> KNOWN_MEMORY_PURPOSES = List.of(
+            "PERSONALIZATION", "CONTINUITY", "CONSTRAINT", "EXPERIENCE_REUSE", "ACTION_FOLLOWUP", "NOT_NEEDED"
+    );
+    public static final List<String> KNOWN_EVIDENCE_TYPES = List.of(
+            "USER_INSIGHT", "SESSION_SUMMARY", "TASK", "EXAMPLE", "SKILL", "RECENT_HISTORY"
+    );
 
     /**
      * 反思失败时的默认结果：需要记忆，原因为"反思阶段失败，默认加载记忆"。
      */
     public static ReflectionResult fallback() {
-        return new ReflectionResult(true, "反思阶段异常，默认加载长期记忆以保证回答稳定性。", List.of("continuity"));
+        return new ReflectionResult(
+                true,
+                "CONTINUITY",
+                "反思阶段异常，默认加载长期记忆以保证回答稳定性。",
+                0.50d,
+                "优先检索近期会话摘要与用户洞察，确保上下文连续。",
+                List.of("SESSION_SUMMARY", "USER_INSIGHT", "RECENT_HISTORY"),
+                List.of("continuity")
+        );
     }
 
     /**
      * 记忆开关关闭时的默认结果：不需要记忆，且用途列表为空。
      */
     public static ReflectionResult memoryDisabled() {
-        return new ReflectionResult(false, "记忆开关已关闭，已跳过长期记忆反思与加载。", List.of());
+        return new ReflectionResult(
+                false,
+                "NOT_NEEDED",
+                "记忆开关已关闭，已跳过长期记忆反思与加载。",
+                1.0d,
+                "",
+                List.of(),
+                List.of()
+        );
     }
 }
