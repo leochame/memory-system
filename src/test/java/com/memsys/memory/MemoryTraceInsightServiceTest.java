@@ -344,6 +344,41 @@ class MemoryTraceInsightServiceTest {
     }
 
     @Test
+    void analyzeRecentTracesShouldParseFlattenedDotPathTraceFields() {
+        MemoryStorage storage = new MemoryStorage(tempDir.toString());
+        MemoryTraceInsightService service = new MemoryTraceInsightService(storage);
+
+        Map<String, Object> trace = new LinkedHashMap<>();
+        trace.put("memory_loaded", true);
+        trace.put("reflection.needs_memory", true);
+        trace.put("reflection.reason", "flat key trace");
+        trace.put("reflection.evidence_purposes", List.of("follow-up"));
+        trace.put("evidence.retrieved.insights", List.of("i-1", "i-2"));
+        trace.put("evidence.used.insights", List.of("i-2"));
+        trace.put("retrieved.examples", List.of("e-1"));
+        trace.put("used.examples", List.of("e-1"));
+        trace.put("loaded.skills", List.of("s-1", "s-2"));
+        trace.put("used.skills", List.of("s-2"));
+        trace.put("evidence.retrieved.tasks", "t-1, t-2");
+        trace.put("evidence.used.tasks", "t-2");
+        storage.appendMemoryEvidenceTrace(trace);
+
+        MemoryTraceInsightService.InsightReport report = service.analyzeRecentTraces(20);
+
+        assertThat(report.sampleSize()).isEqualTo(1);
+        assertThat(report.insightStat().retrieved()).isEqualTo(2);
+        assertThat(report.insightStat().used()).isEqualTo(1);
+        assertThat(report.exampleStat().retrieved()).isEqualTo(1);
+        assertThat(report.exampleStat().used()).isEqualTo(1);
+        assertThat(report.skillStat().retrieved()).isEqualTo(2);
+        assertThat(report.skillStat().used()).isEqualTo(1);
+        assertThat(report.taskStat().retrieved()).isEqualTo(2);
+        assertThat(report.taskStat().used()).isEqualTo(1);
+        assertThat(report.topUsedSkills()).containsExactly("s-2 (1)");
+        assertThat(report.topPurposes()).containsExactly("follow-up (1)");
+    }
+
+    @Test
     void analyzeRecentTracesShouldIgnoreNullLikeEvidenceTokens() {
         MemoryStorage storage = new MemoryStorage(tempDir.toString());
         MemoryTraceInsightService service = new MemoryTraceInsightService(storage);

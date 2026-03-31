@@ -456,8 +456,52 @@ public class MemoryTraceInsightService {
             if (value != null) {
                 return value;
             }
+            Map<String, Object> flattenedSubtree = readFlattenedSubtree(source, key);
+            if (!flattenedSubtree.isEmpty()) {
+                return flattenedSubtree;
+            }
         }
         return null;
+    }
+
+    @SuppressWarnings("unchecked")
+    private Map<String, Object> readFlattenedSubtree(Map<String, Object> source, String key) {
+        if (source == null || source.isEmpty() || key == null || key.isBlank()) {
+            return Map.of();
+        }
+        String prefix = key + ".";
+        Map<String, Object> nested = new LinkedHashMap<>();
+        for (Map.Entry<String, Object> entry : source.entrySet()) {
+            String entryKey = entry.getKey();
+            if (entryKey == null || !entryKey.startsWith(prefix)) {
+                continue;
+            }
+            String suffix = entryKey.substring(prefix.length());
+            if (suffix.isBlank()) {
+                continue;
+            }
+            String[] parts = suffix.split("\\.");
+            Map<String, Object> cursor = nested;
+            for (int i = 0; i < parts.length - 1; i++) {
+                String part = parts[i];
+                if (part.isBlank()) {
+                    continue;
+                }
+                Object existing = cursor.get(part);
+                if (!(existing instanceof Map<?, ?> existingMap)) {
+                    Map<String, Object> created = new LinkedHashMap<>();
+                    cursor.put(part, created);
+                    cursor = created;
+                } else {
+                    cursor = (Map<String, Object>) existingMap;
+                }
+            }
+            String leaf = parts[parts.length - 1];
+            if (!leaf.isBlank()) {
+                cursor.put(leaf, entry.getValue());
+            }
+        }
+        return nested;
     }
 
     private Map<String, Object> parseReflection(Map<String, Object> trace) {
@@ -490,6 +534,10 @@ public class MemoryTraceInsightService {
         if (!direct.isEmpty()) {
             return direct;
         }
+        List<String> groupedFromTopLevel = readTraceListFromGroupedMap(trace, group, category, keys);
+        if (!groupedFromTopLevel.isEmpty()) {
+            return groupedFromTopLevel;
+        }
         Map<String, Object> evidence = asMap(readFirstNonNull(trace, "evidence", "evidence_trace", "evidenceTrace"));
         if (evidence.isEmpty()) {
             return List.of();
@@ -498,13 +546,14 @@ public class MemoryTraceInsightService {
         if (!directFromEvidence.isEmpty()) {
             return directFromEvidence;
         }
-        Map<String, Object> grouped = asMap(readFirstNonNull(
-                evidence,
-                group,
-                toCamel(group),
-                "retrieved".equals(group) ? "loaded" : null
-        ));
-        if (grouped.isEmpty()) {
+        return readTraceListFromGroupedMap(evidence, group, category, keys);
+    }
+
+    private List<String> readTraceListFromGroupedMap(Map<String, Object> source,
+                                                     String group,
+                                                     String category,
+                                                     String... keys) {
+        if (source == null || source.isEmpty()) {
             return List.of();
         }
         String singular = singular(category);
@@ -514,7 +563,26 @@ public class MemoryTraceInsightService {
         groupedKeys[2] = category + "_list";
         groupedKeys[3] = toCamel(category) + "List";
         System.arraycopy(keys, 0, groupedKeys, 4, keys.length);
-        return asStringList(readFirstNonNull(grouped, groupedKeys));
+        List<String> groupCandidates = new ArrayList<>();
+        groupCandidates.add(group);
+        groupCandidates.add(toCamel(group));
+        if ("retrieved".equals(group)) {
+            groupCandidates.add("loaded");
+        }
+        for (String candidateGroup : groupCandidates) {
+            if (candidateGroup == null || candidateGroup.isBlank()) {
+                continue;
+            }
+            Map<String, Object> grouped = asMap(readFirstNonNull(source, candidateGroup));
+            if (grouped.isEmpty()) {
+                continue;
+            }
+            List<String> values = asStringList(readFirstNonNull(grouped, groupedKeys));
+            if (!values.isEmpty()) {
+                return values;
+            }
+        }
+        return List.of();
     }
 
     private List<String> normalizePurposes(List<String> purposes) {

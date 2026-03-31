@@ -45,6 +45,9 @@ echo "[INFO] JAVA_HOME=$JAVA_HOME"
 
 if [[ $# -eq 0 ]]; then
   mvn test
+elif [[ "${1}" == -* ]]; then
+  # If only Maven flags are provided (for example: -q), keep default goal as test.
+  mvn test "$@"
 else
   mvn "$@"
 fi

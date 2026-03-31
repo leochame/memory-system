@@ -1866,3 +1866,46 @@
   - `/memory-debug` 与 `/memory-insights` 在跨系统导入的多层转义 trace 下可稳定解包并恢复结构化字段，不再展示原始转义字符串
   - Step 2/6 的历史 trace 兼容能力从“二次字符串化”扩展到“多层字符串化”，降低外部数据接入时的排障成本
   - 定向测试通过：`export JAVA_HOME=$(/usr/libexec/java_home) && mvn -q -Dtest=ConversationCliTest,MemoryTraceInsightServiceTest test`
+
+#### 迭代记录 - 2026-03-31 23:59（选题评分引擎）
+
+- 增强目标：继续执行 Step 6/6（调研与文档更新），围绕 Memory-System 打造“更多内容”的第十六层方案，将内容体系升级为“选题评分引擎 + 发布回流实验”。
+- 涉及文件：修改 `开发文档.md`、修改 `开发实现process.md`
+- 实现方案：
+  1. 将开发文档版本升级至 `v4.32`，在 `5.10` 新增 `5.10.26 Step 6/6 内容扩展蓝图（第十六层：选题评分引擎与发布回流实验）`。
+  2. 新增 8 类引擎化内容资产：`选题候选池卡`、`选题评分卡`、`周排期编排卡`、`实验对照卡`、`发布回执卡`、`回流任务卡`、`复用模板卡`、`月度增长复盘卡`。
+  3. 固化选题评分机制（价值/证据/成本/复用/争议）与 Top 3 入排期规则，并新增索引字段：`topic_id/topic_score/score_breakdown/experiment_variant/publish_channel/feedback_signal/feedback_to_task_ref/template_reuse_ref`。
+  4. 在开发文档新增 `6.28 需求二十六`，将目录规范、A/B 对照约束、反馈回流约束与周/月验收门槛转化为可执行条款。
+- 状态：已完成
+- 实际结果：
+  - Step 6/6 从“栏目化持续运营”进一步升级为“内容工程引擎化”，内容生产从经验驱动转为评分驱动与实验驱动。
+  - 围绕记忆系统形成“候选选题 -> 评分排序 -> 周排期 -> A/B 对照 -> 发布回执 -> 回流任务 -> 模板复用”的增长闭环，便于持续扩展内容规模并保持质量可控。
+
+#### 迭代记录 - 2026-03-31 18:24
+
+- 增强目标：围绕 Step 1/6（6.1 Memory Reflection 调用链）按开发文档 `v4.32` 复核当前项目并完成稳定性回归
+- 涉及文件：修改 `开发实现process.md`
+- 实现方案：
+  1. 逐项对照 `开发文档.md` 6.1 的五项“需要完成”与五项“完成标准”，核查 `ReflectionResult -> MemoryReflectionService -> ConversationCli -> SystemPromptBuilder` 主链路
+  2. 重点复核 `needs_memory=true` 场景下 `memory_purpose` 别名归一化与 `evidence_types/evidence_purposes` 按用途派生默认值的行为一致性
+  3. 执行 Step 1/6 定向回归：`ReflectionResultTest`、`MemoryReflectionServiceTest`、`SystemPromptBuilderTest`、`ConversationCliTest`
+- 状态：已完成
+- 实际结果：
+  - 当前实现与开发文档 `6.1` 保持一致，本轮未发现新增代码缺口
+  - 主链路、提示词层与评测链路在反思结果归一化、默认值派生与失败回退语义上保持一致
+  - 定向测试通过：`./scripts/run-tests.sh -q -Dtest=ReflectionResultTest,MemoryReflectionServiceTest,SystemPromptBuilderTest,ConversationCliTest test`
+
+#### 迭代记录 - 2026-03-31 18:40
+
+- 增强目标：继续执行 Step 2/6（6.2 记忆证据追踪），补齐历史 trace 在“点路径扁平字段”格式下的兼容解析，避免 `/memory-debug` 与 `/memory-insights` 在跨系统扁平化导出数据上出现覆盖率误判
+- 涉及文件：修改 `src/main/java/com/memsys/cli/ConversationCli.java`、修改 `src/main/java/com/memsys/memory/MemoryTraceInsightService.java`、修改 `src/test/java/com/memsys/cli/ConversationCliTest.java`、修改 `src/test/java/com/memsys/memory/MemoryTraceInsightServiceTest.java`、修改 `开发文档.md`、修改 `开发实现process.md`
+- 实现方案：
+  1. 在 `ConversationCli.readFirstNonNull(...)` 增加扁平子树重建：当键名为 `reflection.xxx`、`evidence.retrieved.xxx` 等点路径格式时自动重建为嵌套 Map
+  2. 在 `ConversationCli.readTraceList(...)` 增加“顶层分组读取”分支，兼容 `retrieved.examples`、`used.skills`、`loaded.skills` 等非 `evidence` 包裹格式
+  3. 在 `MemoryTraceInsightService` 同步实现同级规则，确保 `/memory-insights` 与 `/memory-debug` 对点路径扁平 trace 的解析口径一致
+  4. 新增 `getLastEvidenceTraceShouldParseFlattenedDotPathTraceFields` 与 `analyzeRecentTracesShouldParseFlattenedDotPathTraceFields`，覆盖 `reflection.*`、`evidence.retrieved.*`、`retrieved.*`、`loaded.*` 混合场景
+  5. 同步开发文档 `6.2` 完成标准新增第 34 条，明确点路径扁平字段兼容约束
+- 状态：已完成
+- 实际结果：
+  - `/memory-debug` 与 `/memory-insights` 可稳定回读 `reflection.needs_memory`、`evidence.retrieved.insights`、`retrieved.examples`、`loaded.skills` 等扁平字段，不再因结构差异出现统计失真
+  - Step 2/6 的跨来源 trace 兼容能力从“字段别名/结构别名”扩展到“点路径扁平化字段”，降低外部数据导入后的排障成本

@@ -1470,6 +1470,10 @@ public class ConversationCli {
         if (!direct.isEmpty()) {
             return direct;
         }
+        List<String> groupedFromTopLevel = readTraceListFromGroupedMap(record, group, category, directKeys);
+        if (!groupedFromTopLevel.isEmpty()) {
+            return groupedFromTopLevel;
+        }
         Map<String, Object> evidence = asMap(readFirstNonNull(record, "evidence", "evidence_trace", "evidenceTrace"));
         if (evidence.isEmpty()) {
             return List.of();
@@ -1479,24 +1483,43 @@ public class ConversationCli {
         if (!directFromEvidence.isEmpty()) {
             return directFromEvidence;
         }
+        return readTraceListFromGroupedMap(evidence, group, category, directKeys);
+    }
 
-        String categorySingular = singular(category);
-        Map<String, Object> grouped = asMap(readFirstNonNull(
-                evidence,
-                group,
-                toCamel(group),
-                "retrieved".equals(group) ? "loaded" : null
-        ));
-        if (grouped.isEmpty()) {
+    private List<String> readTraceListFromGroupedMap(Map<String, Object> source,
+                                                     String group,
+                                                     String category,
+                                                     String... directKeys) {
+        if (source == null || source.isEmpty()) {
             return List.of();
         }
+        String categorySingular = singular(category);
         String[] groupedKeys = new String[4 + directKeys.length];
         groupedKeys[0] = category;
         groupedKeys[1] = categorySingular;
         groupedKeys[2] = category + "_list";
         groupedKeys[3] = toCamel(category) + "List";
         System.arraycopy(directKeys, 0, groupedKeys, 4, directKeys.length);
-        return normalizeStringList(readFirstNonNull(grouped, groupedKeys));
+        List<String> groupCandidates = new ArrayList<>();
+        groupCandidates.add(group);
+        groupCandidates.add(toCamel(group));
+        if ("retrieved".equals(group)) {
+            groupCandidates.add("loaded");
+        }
+        for (String candidateGroup : groupCandidates) {
+            if (candidateGroup == null || candidateGroup.isBlank()) {
+                continue;
+            }
+            Map<String, Object> grouped = asMap(readFirstNonNull(source, candidateGroup));
+            if (grouped.isEmpty()) {
+                continue;
+            }
+            List<String> values = normalizeStringList(readFirstNonNull(grouped, groupedKeys));
+            if (!values.isEmpty()) {
+                return values;
+            }
+        }
+        return List.of();
     }
 
     @SuppressWarnings("unchecked")
@@ -1700,8 +1723,52 @@ public class ConversationCli {
             if (value != null) {
                 return value;
             }
+            Map<String, Object> flattenedSubtree = readFlattenedSubtree(source, key);
+            if (!flattenedSubtree.isEmpty()) {
+                return flattenedSubtree;
+            }
         }
         return null;
+    }
+
+    @SuppressWarnings("unchecked")
+    private Map<String, Object> readFlattenedSubtree(Map<String, Object> source, String key) {
+        if (source == null || source.isEmpty() || key == null || key.isBlank()) {
+            return Map.of();
+        }
+        String prefix = key + ".";
+        Map<String, Object> nested = new LinkedHashMap<>();
+        for (Map.Entry<String, Object> entry : source.entrySet()) {
+            String entryKey = entry.getKey();
+            if (entryKey == null || !entryKey.startsWith(prefix)) {
+                continue;
+            }
+            String suffix = entryKey.substring(prefix.length());
+            if (suffix.isBlank()) {
+                continue;
+            }
+            String[] parts = suffix.split("\\.");
+            Map<String, Object> cursor = nested;
+            for (int i = 0; i < parts.length - 1; i++) {
+                String part = parts[i];
+                if (part.isBlank()) {
+                    continue;
+                }
+                Object existing = cursor.get(part);
+                if (!(existing instanceof Map<?, ?> existingMap)) {
+                    Map<String, Object> created = new LinkedHashMap<>();
+                    cursor.put(part, created);
+                    cursor = created;
+                } else {
+                    cursor = (Map<String, Object>) existingMap;
+                }
+            }
+            String leaf = parts[parts.length - 1];
+            if (!leaf.isBlank()) {
+                cursor.put(leaf, entry.getValue());
+            }
+        }
+        return nested;
     }
 
     private String normalizeMemoryPurpose(String memoryPurpose, boolean needsMemory) {

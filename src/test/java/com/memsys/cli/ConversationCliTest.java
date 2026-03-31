@@ -2347,6 +2347,73 @@ class ConversationCliTest {
     }
 
     @Test
+    void getLastEvidenceTraceShouldParseFlattenedDotPathTraceFields() {
+        MemoryStorage storage = new MemoryStorage(tempDir.toString());
+        storage.writeMetadata(Map.of(
+                "global_controls", Map.of(
+                        "use_saved_memories", true,
+                        "use_chat_history", false
+                )
+        ));
+        SkillService skillService = new SkillService(tempDir.toString());
+        RecordingLlmClient llmClient = new RecordingLlmClient();
+        ConversationCli conversationCli = new ConversationCli(
+                llmClient,
+                storage,
+                new MemoryManager(storage, 100, 30, 15),
+                null,
+                alwaysNeedMemoryReflectionService(),
+                null,
+                null,
+                new AgentGuideService(tempDir.resolve("missing-Agent.md").toString(), tempDir.toString()),
+                new SystemPromptBuilder(),
+                new NoopMemoryAsyncService(),
+                null,
+                skillService,
+                null,
+                toolsWithoutRag(skillService),
+                40,
+                15,
+                false,
+                0.35,
+                5
+        );
+
+        Map<String, Object> traceRecord = new LinkedHashMap<>();
+        traceRecord.put("timestamp", LocalDateTime.now().toString());
+        traceRecord.put("user_message", "flattened dot-path evidence trace");
+        traceRecord.put("memory_loaded", true);
+        traceRecord.put("reflection.needs_memory", true);
+        traceRecord.put("reflection.memory_purpose", "action-followup");
+        traceRecord.put("reflection.reason", "flat key trace");
+        traceRecord.put("reflection.evidence_purposes", List.of("follow-up"));
+        traceRecord.put("evidence.retrieved.insights", List.of("insight-a", "insight-b"));
+        traceRecord.put("evidence.used.insights", List.of("insight-a"));
+        traceRecord.put("retrieved.examples", List.of("example-a"));
+        traceRecord.put("used.examples", List.of("example-a"));
+        traceRecord.put("loaded.skills", List.of("debugging", "planner"));
+        traceRecord.put("used.skills", List.of("planner"));
+        traceRecord.put("evidence.retrieved.tasks", "task-a, task-b");
+        traceRecord.put("evidence.used.tasks", "task-b");
+        storage.appendMemoryEvidenceTrace(traceRecord);
+
+        MemoryEvidenceTrace trace = conversationCli.getLastEvidenceTrace();
+        assertThat(trace).isNotNull();
+        assertThat(trace.reflection()).isNotNull();
+        assertThat(trace.reflection().needs_memory()).isTrue();
+        assertThat(trace.reflection().memory_purpose()).isEqualTo("ACTION_FOLLOWUP");
+        assertThat(trace.reflection().evidence_purposes()).containsExactly("followup");
+        assertThat(trace.retrievedInsights()).containsExactly("insight-a", "insight-b");
+        assertThat(trace.usedInsights()).containsExactly("insight-a");
+        assertThat(trace.retrievedExamples()).containsExactly("example-a");
+        assertThat(trace.usedExamples()).containsExactly("example-a");
+        assertThat(trace.loadedSkills()).containsExactly("debugging", "planner");
+        assertThat(trace.usedSkills()).containsExactly("planner");
+        assertThat(trace.retrievedTasks()).containsExactly("task-a", "task-b");
+        assertThat(trace.usedTasks()).containsExactly("task-b");
+    }
+
+    @Test
     void getLastEvidenceTraceShouldParseDelimitedStringEvidenceFields() {
         MemoryStorage storage = new MemoryStorage(tempDir.toString());
         storage.writeMetadata(Map.of(
