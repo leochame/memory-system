@@ -2197,3 +2197,51 @@
   - `/memory-debug` 与 `/memory-insights` 可稳定回读 `$.reflection.needs_memory`、`$['reflection']['evidence_purposes'][0]`、`$.retrieved.examples[0]`、`$[loaded][skills][1]` 等 JSONPath 风格字段，不再因路径前缀与键名引号差异导致证据统计缺失
   - Step 2/6 的跨来源 trace 兼容能力从“JSON Pointer/URI Fragment 路径”扩展到“JSONPath 路径”，进一步降低跨系统导入后的排障成本
   - 定向测试通过：`export JAVA_HOME=$(/usr/libexec/java_home) && mvn -q -Dtest=ConversationCliTest,MemoryTraceInsightServiceTest test`
+
+#### 迭代记录 - 2026-03-31 22:08
+
+- 增强目标：围绕 Step 1/6（6.1 Memory Reflection 调用链）按开发文档 `v4.42` 执行本轮对齐复核，确认当前项目可直接进入下一步
+- 涉及文件：修改 `开发实现process.md`
+- 实现方案：
+  1. 对照开发文档 `6.1` 的 5 项“需要完成”，复核 `LlmDtos/Schemas/MemoryReflectionService/ConversationCli/SystemPromptBuilder` 的调用链闭环
+  2. 重点复核完成标准 4/5：`needs_memory=true` 时默认值按 `memory_purpose` 派生，以及 `recent-history/recentHistory`、`follow-up/followUp` 等别名归一化
+  3. 执行 Step 1/6 定向回归：`export JAVA_HOME=$(/usr/libexec/java_home) && mvn -q -Dtest=ReflectionResultTest,MemoryReflectionServiceTest,SystemPromptBuilderTest,ConversationCliTest test`
+  4. 执行编译校验：`export JAVA_HOME=$(/usr/libexec/java_home) && mvn -q compile`
+- 状态：已完成
+- 实际结果：
+  - 本轮未发现 Step 1/6 新增代码缺口，当前实现继续满足开发文档 `v4.42` 要求
+  - 反思结果注入 Prompt、按决策加载记忆、失败稳定回退、字段别名归一化语义保持一致
+  - 定向测试与编译均通过
+
+#### 迭代记录 - 2026-03-31 22:12
+
+- 增强目标：继续执行 Step 2/6（6.2 记忆证据追踪），补齐历史 trace 在“冒号路径扁平字段”格式下的兼容解析，避免 `/memory-debug` 与 `/memory-insights` 在跨系统自定义分隔符导出数据上出现覆盖率误判
+- 涉及文件：修改 `src/main/java/com/memsys/cli/ConversationCli.java`、修改 `src/main/java/com/memsys/memory/MemoryTraceInsightService.java`、修改 `src/test/java/com/memsys/cli/ConversationCliTest.java`、修改 `src/test/java/com/memsys/memory/MemoryTraceInsightServiceTest.java`、修改 `开发文档.md`、修改 `开发实现process.md`
+- 实现方案：
+  1. 在 `ConversationCli.flattenedKeySuffix(...)` 增加 `:` 分隔符识别，并在 `splitFlattenedPath(...)` 同步支持按冒号切分路径 token
+  2. 在 `MemoryTraceInsightService` 同步复用同级规则，确保 `/memory-insights` 与 `/memory-debug` 的解析口径一致
+  3. 新增 `getLastEvidenceTraceShouldParseFlattenedColonPathTraceFields`，覆盖 `/memory-debug` 在 `reflection:needs_memory`、`evidence:retrieved:insights:0`、`loaded:skills:1` 等场景下的回读
+  4. 新增 `analyzeRecentTracesShouldParseFlattenedColonPathTraceFields`，覆盖 `/memory-insights` 在同场景下的 retrieved/used 统计一致性
+  5. 同步开发文档升级至 `v4.43`，并在 `6.2` 完成标准新增第 44 条，明确“冒号路径扁平字段兼容”约束
+- 状态：已完成
+- 实际结果：
+  - `/memory-debug` 与 `/memory-insights` 可稳定回读 `reflection:needs_memory`、`evidence:retrieved:insights:0`、`retrieved:examples:0`、`loaded:skills:1` 等 colon-path 字段，不再因自定义分隔符差异导致证据统计缺失
+  - Step 2/6 的跨来源 trace 兼容能力从“JSONPath 路径”扩展到“冒号路径”，进一步降低跨系统导入后的排障成本
+  - 定向测试通过：`export JAVA_HOME=$(/usr/libexec/java_home) && mvn -q -Dtest=ConversationCliTest,MemoryTraceInsightServiceTest test`
+
+#### 迭代记录 - 2026-03-31 22:18
+
+- 增强目标：执行 Step 4/6（修复存在的问题），修复历史 trace 回读在“冒号路径分隔符两侧空白”场景下的字段命中失败，避免 `/memory-debug` 与 `/memory-insights` 漏统计
+- 涉及文件：修改 `src/main/java/com/memsys/cli/ConversationCli.java`、修改 `src/main/java/com/memsys/memory/MemoryTraceInsightService.java`、修改 `src/test/java/com/memsys/cli/ConversationCliTest.java`、修改 `src/test/java/com/memsys/memory/MemoryTraceInsightServiceTest.java`、修改 `开发文档.md`、修改 `开发实现process.md`
+- 实现方案：
+  1. 在 `ConversationCli.splitFlattenedPath(...)` 增加路径 token 去空白逻辑，确保 `reflection : needs_memory`、`evidence : retrieved : insights : 0` 可还原到标准键名
+  2. 在 `MemoryTraceInsightService.splitFlattenedPath(...)` 同步应用同级 token 去空白规则，保持 `/memory-insights` 与 `/memory-debug` 解析口径一致
+  3. 新增 `getLastEvidenceTraceShouldParseFlattenedColonPathTraceFieldsWithDelimiterWhitespace`，覆盖 `/memory-debug` 在 colon-path 分隔符空白场景下的回读
+  4. 新增 `analyzeRecentTracesShouldParseFlattenedColonPathTraceFieldsWithDelimiterWhitespace`，覆盖 `/memory-insights` 在同场景下的 retrieved/used 统计一致性
+  5. 同步开发文档 `6.2` 完成标准新增第 45 条，明确“冒号路径分隔符两侧空白兼容”约束
+- 状态：已完成
+- 实际结果：
+  - `/memory-debug` 与 `/memory-insights` 在 `reflection : needs_memory`、`loaded : skills : 1` 等分隔符含空白的 colon-path 字段上可稳定解析，不再因 token 带空白导致字段命中失败
+  - Step 4/6 在 colon-path 兼容性上补齐“分隔符空白清洗 + 统计一致”闭环，进一步降低跨系统导入数据的排障成本
+  - 定向测试通过：`export JAVA_HOME=$(/usr/libexec/java_home) && mvn -q -Dtest=ConversationCliTest,MemoryTraceInsightServiceTest test`
+  - 全量测试通过：`./scripts/run-tests.sh`（186 passed, 0 failed, 1 skipped）

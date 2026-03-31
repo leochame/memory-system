@@ -1844,7 +1844,7 @@ public class ConversationCli {
         int delimiterIndex = -1;
         for (int i = 0; i < candidate.length(); i++) {
             char ch = candidate.charAt(i);
-            if (ch == '.' || ch == '[' || ch == '/') {
+            if (ch == '.' || ch == '[' || ch == '/' || ch == ':') {
                 delimiterIndex = i;
                 break;
             }
@@ -1888,16 +1888,16 @@ public class ConversationCli {
         StringBuilder token = new StringBuilder();
         for (int i = 0; i < suffix.length(); i++) {
             char ch = suffix.charAt(i);
-            if (ch == '.' || ch == '/') {
+            if (ch == '.' || ch == '/' || ch == ':') {
                 if (!token.isEmpty()) {
-                    parts.add(decodeJsonPointerToken(token.toString()));
+                    addDecodedPathToken(parts, token);
                     token.setLength(0);
                 }
                 continue;
             }
             if (ch == '[') {
                 if (!token.isEmpty()) {
-                    parts.add(decodeJsonPointerToken(token.toString()));
+                    addDecodedPathToken(parts, token);
                     token.setLength(0);
                 }
                 int closeIdx = suffix.indexOf(']', i + 1);
@@ -1913,9 +1913,16 @@ public class ConversationCli {
             token.append(ch);
         }
         if (!token.isEmpty()) {
-            parts.add(decodeJsonPointerToken(token.toString()));
+            addDecodedPathToken(parts, token);
         }
         return parts;
+    }
+
+    private void addDecodedPathToken(List<String> parts, StringBuilder token) {
+        String decoded = decodeJsonPointerToken(token.toString()).trim();
+        if (!decoded.isBlank()) {
+            parts.add(decoded);
+        }
     }
 
     private String decodeJsonPointerToken(String token) {
