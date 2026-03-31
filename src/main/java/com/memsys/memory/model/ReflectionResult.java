@@ -95,13 +95,39 @@ public record ReflectionResult(
     }
 
     private static String normalizePurposeKey(String memoryPurpose) {
-        if (memoryPurpose == null || memoryPurpose.isBlank()) {
-            return "CONTINUITY";
-        }
-        String normalized = memoryPurpose.trim().toUpperCase(java.util.Locale.ROOT);
-        if (!KNOWN_MEMORY_PURPOSES.contains(normalized)) {
+        String normalized = canonicalMemoryPurpose(memoryPurpose);
+        if (normalized == null) {
             return "CONTINUITY";
         }
         return normalized;
+    }
+
+    public static String normalizeMemoryPurpose(String memoryPurpose, boolean needsMemory) {
+        if (!needsMemory) {
+            return "NOT_NEEDED";
+        }
+        String normalized = canonicalMemoryPurpose(memoryPurpose);
+        if (normalized == null || "NOT_NEEDED".equals(normalized)) {
+            return "CONTINUITY";
+        }
+        return normalized;
+    }
+
+    private static String canonicalMemoryPurpose(String memoryPurpose) {
+        if (memoryPurpose == null || memoryPurpose.isBlank()) {
+            return null;
+        }
+        String compact = memoryPurpose.trim()
+                .toUpperCase(java.util.Locale.ROOT)
+                .replaceAll("[^A-Z]", "");
+        return switch (compact) {
+            case "PERSONALIZATION" -> "PERSONALIZATION";
+            case "CONTINUITY" -> "CONTINUITY";
+            case "CONSTRAINT" -> "CONSTRAINT";
+            case "EXPERIENCEREUSE" -> "EXPERIENCE_REUSE";
+            case "ACTIONFOLLOWUP" -> "ACTION_FOLLOWUP";
+            case "NOTNEEDED" -> "NOT_NEEDED";
+            default -> null;
+        };
     }
 }

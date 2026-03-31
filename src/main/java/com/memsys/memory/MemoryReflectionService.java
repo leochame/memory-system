@@ -77,18 +77,7 @@ public class MemoryReflectionService {
     }
 
     private String normalizeMemoryPurpose(String memoryPurpose, boolean needsMemory) {
-        if (!needsMemory) {
-            return "NOT_NEEDED";
-        }
-        String normalized = memoryPurpose == null ? "" : memoryPurpose.trim().toUpperCase(Locale.ROOT);
-        // needs_memory=true 时不允许保留 NOT_NEEDED，避免语义矛盾。
-        if ("NOT_NEEDED".equals(normalized)) {
-            return "CONTINUITY";
-        }
-        if (ReflectionResult.KNOWN_MEMORY_PURPOSES.contains(normalized)) {
-            return normalized;
-        }
-        return "CONTINUITY";
+        return ReflectionResult.normalizeMemoryPurpose(memoryPurpose, needsMemory);
     }
 
     private String normalizeReason(String reason, boolean needsMemory) {

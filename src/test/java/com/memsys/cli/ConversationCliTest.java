@@ -927,6 +927,56 @@ class ConversationCliTest {
     }
 
     @Test
+    void processUserMessageShouldNormalizeHyphenatedMemoryPurpose() {
+        MemoryStorage storage = new MemoryStorage(tempDir.toString());
+        storage.writeMetadata(Map.of(
+                "global_controls", Map.of(
+                        "use_saved_memories", true,
+                        "use_chat_history", false
+                )
+        ));
+        SkillService skillService = new SkillService(tempDir.toString());
+        RecordingLlmClient llmClient = new RecordingLlmClient();
+
+        ConversationCli conversationCli = new ConversationCli(
+                llmClient,
+                storage,
+                new MemoryManager(storage, 100, 30, 15),
+                null,
+                hyphenatedFollowupReflectionService(),
+                null,
+                null,
+                new AgentGuideService(tempDir.resolve("missing-Agent.md").toString(), tempDir.toString()),
+                new SystemPromptBuilder(),
+                new NoopMemoryAsyncService(),
+                null,
+                skillService,
+                null,
+                toolsWithoutRag(skillService),
+                40,
+                15,
+                false,
+                0.35,
+                5
+        );
+
+        String reply = conversationCli.processUserMessage("继续跟进我上次安排的任务");
+        assertThat(reply).isEqualTo("assistant reply");
+
+        ReflectionResult reflection = conversationCli.getLastReflectionResult();
+        assertThat(reflection).isNotNull();
+        assertThat(reflection.needs_memory()).isTrue();
+        assertThat(reflection.memory_purpose()).isEqualTo("ACTION_FOLLOWUP");
+        assertThat(reflection.evidence_types()).containsExactly("TASK", "RECENT_HISTORY");
+        assertThat(reflection.evidence_purposes()).containsExactly("followup");
+
+        String systemPrompt = llmClient.capturedSystemPrompts.get(0);
+        assertThat(systemPrompt).contains("memory_purpose: ACTION_FOLLOWUP");
+        assertThat(systemPrompt).contains("evidence_types: TASK, RECENT_HISTORY");
+        assertThat(systemPrompt).contains("evidence_purposes: followup");
+    }
+
+    @Test
     void processUserMessageWithMemoryForEvalShouldFallbackWhenReflectionServiceReturnsNull() {
         MemoryStorage storage = new MemoryStorage(tempDir.toString());
         storage.writeMetadata(Map.of(
@@ -2398,6 +2448,21 @@ class ConversationCliTest {
                 .thenReturn(new ReflectionResult(
                         true,
                         "ACTION_FOLLOWUP",
+                        "需要跟进任务",
+                        0.89d,
+                        "优先看最近任务",
+                        List.of("INVALID"),
+                        List.of("INVALID")
+                ));
+        return reflectionService;
+    }
+
+    private MemoryReflectionService hyphenatedFollowupReflectionService() {
+        MemoryReflectionService reflectionService = mock(MemoryReflectionService.class);
+        when(reflectionService.reflect(anyString(), anyString()))
+                .thenReturn(new ReflectionResult(
+                        true,
+                        "action-followup",
                         "需要跟进任务",
                         0.89d,
                         "优先看最近任务",

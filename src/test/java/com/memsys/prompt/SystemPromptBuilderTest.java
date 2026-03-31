@@ -303,6 +303,41 @@ class SystemPromptBuilderTest {
         assertThat(prompt).contains("evidence_purposes: experience");
     }
 
+    @Test
+    void buildSystemPromptShouldNormalizeHyphenatedMemoryPurpose() {
+        String prompt = builder.buildSystemPrompt(
+                "",
+                null,
+                null,
+                new ReflectionResult(
+                        true,
+                        "action-followup",
+                        "需要复用历史任务",
+                        0.88d,
+                        "",
+                        List.of("INVALID"),
+                        List.of("INVALID")
+                ),
+                List.<Map<String, Object>>of(),
+                null,
+                List.<String>of(),
+                false,
+                false,
+                false,
+                false,
+                false,
+                false,
+                List.<String>of(),
+                null,
+                List.<RagService.RelevantMemory>of(),
+                null
+        );
+
+        assertThat(prompt).contains("memory_purpose: ACTION_FOLLOWUP");
+        assertThat(prompt).contains("evidence_types: TASK, RECENT_HISTORY");
+        assertThat(prompt).contains("evidence_purposes: followup");
+    }
+
     private void assertSectionOrder(String prompt, String... sections) {
         int lastIndex = -1;
         for (String section : sections) {

@@ -1532,3 +1532,32 @@
 - 实际结果：
   - `/memory-debug` 与 `/memory-debug [N]` 在跨系统导出的字段命名差异下可稳定回读反思对象与 Skills 检索列表
   - Skills 覆盖率诊断不再因字段别名差异退化为 `0/N`，Step 2/6 的跨来源 trace 可观测性进一步提升
+
+#### 迭代记录 - 2026-03-31 23:05
+
+- 增强目标：继续执行 Step 6/6（调研与文档更新），围绕 Memory-System 打造“更多内容”的第九层方案，将内容体系升级为“基准化资产 + 公开评测包”
+- 涉及文件：修改 `开发文档.md`、修改 `开发实现process.md`
+- 实现方案：
+  1. 将开发文档版本升级至 `v4.20`，在 `5.10` 新增 `5.10.19 Step 6/6 内容扩展蓝图（第九层：基准化资产与公开评测包）`
+  2. 新增 8 类基准化内容资产：`Memory 基准数据集卡`、`场景标注规范卡`、`评分协议卡`、`回放评测包`、`月度基准公报`、`回归红榜`、`模型/策略对照表`、`可复现认证卡`
+  3. 固化基准执行机制（周样本入库/双周回放/月度公报/72 小时回流判定）与新增索引字段：`benchmark_id/dataset_version/protocol_version/runner_env/model_variant/score_summary/reproducibility_badge/benchmark_status`
+  4. 在开发文档新增 `6.21 需求十九`，将基准目录规范、对照评测约束、回流时限与双周执行小结转化为可验收条款
+- 状态：已完成
+- 实际结果：
+  - Step 6/6 从“生态协作共创回流”进一步升级为“基准化资产运营”，内容可沉淀为长期可比较、可复放、可复验的评测体系
+  - 围绕记忆系统形成“样本沉淀 -> 协议评分 -> 回放评测 -> 月报发布 -> 回流开发验证”的稳定闭环，可持续支撑开发、答辩与论文指标一致性
+
+#### 迭代记录 - 2026-03-31 15:39
+
+- 增强目标：继续执行 Step 2/6（6.2 记忆证据追踪），统一 `memory_purpose` 归一化入口并补齐分隔符/命名风格差异兼容，避免 `action-followup` 等输入被误回退为 `CONTINUITY`
+- 涉及文件：修改 `src/main/java/com/memsys/memory/model/ReflectionResult.java`、修改 `src/main/java/com/memsys/memory/MemoryReflectionService.java`、修改 `src/main/java/com/memsys/prompt/SystemPromptBuilder.java`、修改 `src/main/java/com/memsys/cli/ConversationCli.java`、新增 `src/test/java/com/memsys/memory/model/ReflectionResultTest.java`、修改 `src/test/java/com/memsys/memory/MemoryReflectionServiceTest.java`、修改 `src/test/java/com/memsys/prompt/SystemPromptBuilderTest.java`、修改 `src/test/java/com/memsys/cli/ConversationCliTest.java`、修改 `开发文档.md`、修改 `开发实现process.md`
+- 实现方案：
+  1. 在 `ReflectionResult` 新增统一入口 `normalizeMemoryPurpose(memoryPurpose, needsMemory)`，集中处理 `NOT_NEEDED` 语义与默认回退
+  2. 新增 `canonicalMemoryPurpose(...)`：通过“去非字母字符 + 大写化”兼容 `ACTION_FOLLOWUP/action-followup/action_followup/actionFollowup` 等写法
+  3. 将 `ConversationCli`、`MemoryReflectionService`、`SystemPromptBuilder` 的本地归一化逻辑收敛到统一入口，避免多处规则漂移
+  4. 新增与扩展回归测试，覆盖 hyphen/snake/camel/空值/矛盾值场景，确保主链路与提示词都输出一致枚举值
+  5. 同步开发文档 `6.2` 完成标准，新增 `memory_purpose` 输入别名兼容要求
+- 状态：已完成
+- 实际结果：
+  - 反思主链路与证据追踪链路在 `memory_purpose` 格式差异下可稳定归一化，不再因分隔符差异导致语义漂移
+  - `ACTION_FOLLOWUP` 默认派生（`TASK + RECENT_HISTORY` / `followup`）在反思服务、系统提示词、CLI 主链路与模型层单测中形成一致性保护
