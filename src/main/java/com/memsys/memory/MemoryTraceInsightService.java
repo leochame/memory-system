@@ -588,6 +588,19 @@ public class MemoryTraceInsightService {
         } else if (candidate.startsWith("/")) {
             candidate = candidate.substring(1);
         }
+        if (candidate.startsWith("$")) {
+            if (candidate.length() == 1) {
+                return null;
+            }
+            char next = candidate.charAt(1);
+            if (next != '.' && next != '/' && next != '[') {
+                return null;
+            }
+            candidate = candidate.substring(1);
+            if (candidate.startsWith(".") || candidate.startsWith("/")) {
+                candidate = candidate.substring(1);
+            }
+        }
         if (candidate.isBlank()) {
             return null;
         }
@@ -599,7 +612,24 @@ public class MemoryTraceInsightService {
                 break;
             }
         }
-        if (delimiterIndex <= 0) {
+        if (delimiterIndex < 0) {
+            return null;
+        }
+        if (delimiterIndex == 0 && candidate.charAt(0) == '[') {
+            int closeIdx = candidate.indexOf(']');
+            if (closeIdx <= 1) {
+                return null;
+            }
+            String root = normalizeBracketToken(candidate.substring(1, closeIdx));
+            if (!normalizedKey.equals(normalizeLookupKey(root))) {
+                return null;
+            }
+            if (closeIdx + 1 >= candidate.length()) {
+                return null;
+            }
+            return candidate.substring(closeIdx + 1);
+        }
+        if (delimiterIndex == 0) {
             return null;
         }
         String root = candidate.substring(0, delimiterIndex);
@@ -635,9 +665,9 @@ public class MemoryTraceInsightService {
                 }
                 int closeIdx = suffix.indexOf(']', i + 1);
                 if (closeIdx > i + 1) {
-                    String bracketToken = suffix.substring(i + 1, closeIdx).trim();
+                    String bracketToken = normalizeBracketToken(suffix.substring(i + 1, closeIdx));
                     if (!bracketToken.isBlank()) {
-                        parts.add(decodeJsonPointerToken(bracketToken));
+                        parts.add(bracketToken);
                     }
                     i = closeIdx;
                 }
@@ -656,6 +686,22 @@ public class MemoryTraceInsightService {
             return "";
         }
         return token.replace("~1", "/").replace("~0", "~");
+    }
+
+    private String normalizeBracketToken(String token) {
+        String decoded = decodeJsonPointerToken(token);
+        if (decoded.isBlank()) {
+            return "";
+        }
+        String trimmed = decoded.trim();
+        if (trimmed.length() >= 2) {
+            char first = trimmed.charAt(0);
+            char last = trimmed.charAt(trimmed.length() - 1);
+            if ((first == '\'' && last == '\'') || (first == '"' && last == '"')) {
+                return trimmed.substring(1, trimmed.length() - 1).trim();
+            }
+        }
+        return trimmed;
     }
 
     private Map<String, Object> parseReflection(Map<String, Object> trace) {

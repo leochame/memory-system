@@ -2166,3 +2166,34 @@
   - Step 4/6 在跨系统导出数据的健壮性上补齐“键名去空白 + 归一化匹配”闭环，降低历史 trace 排障成本
   - 定向测试通过：`export JAVA_HOME=$(/usr/libexec/java_home) && mvn -q -Dtest=ConversationCliTest,MemoryTraceInsightServiceTest test`
   - 全量测试通过：`./scripts/run-tests.sh`（180 passed, 0 failed, 1 skipped）
+
+#### 迭代记录 - 2026-03-31 21:35
+
+- 增强目标：围绕 Step 1/6（6.1 Memory Reflection 调用链）按开发文档 `v4.42` 复核当前项目，完成本轮对齐验收
+- 涉及文件：修改 `开发实现process.md`
+- 实现方案：
+  1. 对照开发文档 `6.1` 的 5 项“需要完成”，逐项核查 `LlmDtos/Schemas/MemoryReflectionService/ConversationCli/SystemPromptBuilder` 的调用链闭环
+  2. 重点核查完成标准 4/5：`needs_memory=true` 时默认值按 `memory_purpose` 派生（如 `ACTION_FOLLOWUP -> TASK + followup`），以及 `recent-history/recentHistory`、`follow-up/followUp` 等别名归一化
+  3. 执行 Step 1/6 定向回归：`export JAVA_HOME=$(/usr/libexec/java_home) && mvn -q -Dtest=ReflectionResultTest,MemoryReflectionServiceTest,SystemPromptBuilderTest,ConversationCliTest test`
+- 状态：已完成
+- 实际结果：
+  - 当前实现与开发文档 `v4.42` 的 Step 1/6 要求保持一致，本轮未发现需新增代码的缺口
+  - 反思结果注入 Prompt、按决策加载记忆、失败稳定回退、字段别名归一化语义保持一致
+  - 定向测试通过（0 失败）
+
+#### 迭代记录 - 2026-03-31 21:42
+
+- 增强目标：继续执行 Step 2/6（6.2 记忆证据追踪），补齐历史 trace 在“JSONPath 扁平路径字段”格式下的兼容解析，避免 `/memory-debug` 与 `/memory-insights` 在跨系统导出数据上出现覆盖率误判
+- 涉及文件：修改 `src/main/java/com/memsys/cli/ConversationCli.java`、修改 `src/main/java/com/memsys/memory/MemoryTraceInsightService.java`、修改 `src/test/java/com/memsys/cli/ConversationCliTest.java`、修改 `src/test/java/com/memsys/memory/MemoryTraceInsightServiceTest.java`、修改 `开发文档.md`、修改 `开发实现process.md`
+- 实现方案：
+  1. 在 `ConversationCli.flattenedKeySuffix(...)` 增加 JSONPath 根标记兼容：支持 `$.`、`$/`、`$[...]` 三类入口，并在 bracket-root 场景下按根键归一化匹配
+  2. 在 `ConversationCli.splitFlattenedPath(...)` 增加 bracket token 规范化：支持单引号/双引号包裹键名（如 `$['reflection']["needs_memory"]`），避免重建后键名带引号导致字段命中失败
+  3. 在 `MemoryTraceInsightService` 同步复用同级 JSONPath 解析规则，确保 `/memory-insights` 与 `/memory-debug` 在 JSONPath trace 上口径一致
+  4. 新增 `getLastEvidenceTraceShouldParseFlattenedJsonPathTraceFields`，覆盖 `/memory-debug` 在 `$.reflection.needs_memory`、`$['evidence']['retrieved']['insights'][0]`、`$[loaded][skills][1]` 等场景下的回读
+  5. 新增 `analyzeRecentTracesShouldParseFlattenedJsonPathTraceFields`，覆盖 `/memory-insights` 在同场景下的 retrieved/used 统计一致性
+  6. 同步开发文档 `6.2` 完成标准新增第 43 条，明确“JSONPath 扁平路径字段兼容”约束
+- 状态：已完成
+- 实际结果：
+  - `/memory-debug` 与 `/memory-insights` 可稳定回读 `$.reflection.needs_memory`、`$['reflection']['evidence_purposes'][0]`、`$.retrieved.examples[0]`、`$[loaded][skills][1]` 等 JSONPath 风格字段，不再因路径前缀与键名引号差异导致证据统计缺失
+  - Step 2/6 的跨来源 trace 兼容能力从“JSON Pointer/URI Fragment 路径”扩展到“JSONPath 路径”，进一步降低跨系统导入后的排障成本
+  - 定向测试通过：`export JAVA_HOME=$(/usr/libexec/java_home) && mvn -q -Dtest=ConversationCliTest,MemoryTraceInsightServiceTest test`
