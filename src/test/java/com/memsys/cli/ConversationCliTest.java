@@ -2068,6 +2068,75 @@ class ConversationCliTest {
     }
 
     @Test
+    void getLastEvidenceTraceShouldParseObjectListEvidenceFields() {
+        MemoryStorage storage = new MemoryStorage(tempDir.toString());
+        storage.writeMetadata(Map.of(
+                "global_controls", Map.of(
+                        "use_saved_memories", true,
+                        "use_chat_history", false
+                )
+        ));
+        SkillService skillService = new SkillService(tempDir.toString());
+        RecordingLlmClient llmClient = new RecordingLlmClient();
+        ConversationCli conversationCli = new ConversationCli(
+                llmClient,
+                storage,
+                new MemoryManager(storage, 100, 30, 15),
+                null,
+                alwaysNeedMemoryReflectionService(),
+                null,
+                null,
+                new AgentGuideService(tempDir.resolve("missing-Agent.md").toString(), tempDir.toString()),
+                new SystemPromptBuilder(),
+                new NoopMemoryAsyncService(),
+                null,
+                skillService,
+                null,
+                toolsWithoutRag(skillService),
+                40,
+                15,
+                false,
+                0.35,
+                5
+        );
+
+        Map<String, Object> traceRecord = new LinkedHashMap<>();
+        traceRecord.put("timestamp", LocalDateTime.now().toString());
+        traceRecord.put("user_message", "legacy object list trace");
+        traceRecord.put("memory_loaded", true);
+        traceRecord.put("reflection", Map.of(
+                "needs_memory", true,
+                "memory_purpose", "CONTINUITY",
+                "reason", "object list fields",
+                "evidence_purposes", List.of("continuity")
+        ));
+        traceRecord.put("retrieved_insights", List.of(
+                Map.of("slot_name", "diet_preference"),
+                Map.of("content", "偏好简洁表达")
+        ));
+        traceRecord.put("used_insights", List.of(Map.of("slotName", "diet_preference")));
+        traceRecord.put("retrieved_examples", "[{\"title\":\"答辩案例\"}]");
+        traceRecord.put("used_examples", List.of(Map.of("name", "答辩案例")));
+        traceRecord.put("retrieved_skills", List.of(Map.of("name", "debugging"), Map.of("id", "planner")));
+        traceRecord.put("used_skills", List.of(Map.of("value", "debugging")));
+        traceRecord.put("retrieved_tasks", List.of(Map.of("title", "提交周报")));
+        traceRecord.put("used_tasks", List.of(Map.of("text", "提交周报")));
+        traceRecord.put("used_evidence_summary", "object list parsed");
+        storage.appendMemoryEvidenceTrace(traceRecord);
+
+        MemoryEvidenceTrace trace = conversationCli.getLastEvidenceTrace();
+        assertThat(trace).isNotNull();
+        assertThat(trace.retrievedInsights()).containsExactly("diet_preference", "偏好简洁表达");
+        assertThat(trace.usedInsights()).containsExactly("diet_preference");
+        assertThat(trace.retrievedExamples()).containsExactly("答辩案例");
+        assertThat(trace.usedExamples()).containsExactly("答辩案例");
+        assertThat(trace.loadedSkills()).containsExactly("debugging", "planner");
+        assertThat(trace.usedSkills()).containsExactly("debugging");
+        assertThat(trace.retrievedTasks()).containsExactly("提交周报");
+        assertThat(trace.usedTasks()).containsExactly("提交周报");
+    }
+
+    @Test
     void getLastEvidenceTraceShouldParseYesNoBooleanLegacyFields() {
         MemoryStorage storage = new MemoryStorage(tempDir.toString());
         storage.writeMetadata(Map.of(

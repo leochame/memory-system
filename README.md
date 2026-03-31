@@ -264,7 +264,7 @@ export OPENAI_MODEL="gpt-4"
 ### 2) 编译运行
 
 ```bash
-mvn clean package
+./scripts/run-tests.sh clean package
 java -jar target/memory-box-1.0.0.jar
 
 # 临时模式（不读取/不写入记忆）

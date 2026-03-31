@@ -1661,3 +1661,32 @@
 - 实际结果：
   - `/memory-debug [N]` 历史视图可稳定回读 16-19 位高精度 epoch 时间，不再受跨系统时间单位差异影响
   - Step 2/6 时间线兼容能力从“秒/毫秒”扩展到“秒/毫秒/微秒/纳秒”，降低历史数据导入后的排障成本
+
+#### 迭代记录 - 2026-03-31 23:50
+
+- 增强目标：继续执行 Step 6/6（调研与文档更新），围绕 Memory-System 打造“更多内容”的第十一层方案，将内容体系升级为“选题智能编排 + 质量闸门 + 内容债治理”
+- 涉及文件：修改 `开发文档.md`、修改 `开发实现process.md`
+- 实现方案：
+  1. 将开发文档版本升级至 `v4.23`，在 `5.10` 新增 `5.10.21 Step 6/6 内容扩展蓝图（第十一层：选题智能编排与质量闸门）`
+  2. 新增 8 类运营型内容资产：`选题优先级榜单卡`、`内容债清单卡`、`复测排班卡`、`证据缺口告警卡`、`结论寿命跟踪卡`、`回流收益归因卡`、`自动周刊草稿包`、`发布后质量回执卡`
+  3. 固化运营机制（周选题评分/周中质量闸门/周末内容债清理/双周收益归因）与新增索引字段：`topic_score/evidence_completeness/replay_cost/freshness_risk/content_debt_level/qa_gate_status/automation_run_id/roi_tag`
+  4. 在开发文档新增 `6.23 需求二十一`，将运营目录规范、闸门准入约束、内容债处理时限与收益归因约束转化为可验收条款
+- 状态：已完成
+- 实际结果：
+  - Step 6/6 从“产品化内容资产库”进一步升级为“运营决策层”，内容生产可按评分机制稳定排期，并通过质量闸门控制发布风险
+  - 围绕记忆系统形成“选题评分 -> 证据校验 -> 发布准入 -> 反馈回流 -> 收益归因”的可持续闭环，后续可按周度指标持续优化内容投入产出比
+
+#### 迭代记录 - 2026-03-31 17:20
+
+- 增强目标：继续执行 Step 2/6（6.2 记忆证据追踪），补齐历史 trace 在“对象数组证据列表”格式下的兼容解析，避免 `/memory-debug` 与 `/memory-insights` 把证据项展示为原始对象字符串
+- 涉及文件：修改 `src/main/java/com/memsys/cli/ConversationCli.java`、修改 `src/main/java/com/memsys/memory/MemoryTraceInsightService.java`、修改 `src/test/java/com/memsys/cli/ConversationCliTest.java`、修改 `src/test/java/com/memsys/memory/MemoryTraceInsightServiceTest.java`、修改 `开发文档.md`、修改 `开发实现process.md`
+- 实现方案：
+  1. 在 `ConversationCli` 的 trace 列表解析链路新增对象项归一化：当列表项是 `Map` 时优先抽取 `name/title/text/content/id/slot_name/slotName/value`
+  2. 在 `MemoryTraceInsightService` 复用同级规则，确保 `/memory-insights` 与 `/memory-debug` 对象列表解析口径一致
+  3. 新增 `getLastEvidenceTraceShouldParseObjectListEvidenceFields`，覆盖 `Collection<Map>` 与字符串化 JSON 对象数组的混合场景
+  4. 新增 `analyzeRecentTracesShouldParseObjectListEvidenceFields`，覆盖对象数组证据在洞察统计中的 `retrieved/used` 计数一致性
+  5. 同步开发文档 `6.2` 完成标准新增第 28 条，明确“对象数组证据列表兼容”约束
+- 状态：已完成
+- 实际结果：
+  - `/memory-debug` 历史回读在对象数组格式下可输出稳定可读证据项，不再出现 `{name=...}` 形式噪声
+  - `/memory-insights` 与 `/memory-debug` 在跨来源对象列表数据下保持一致统计，降低覆盖率误判风险

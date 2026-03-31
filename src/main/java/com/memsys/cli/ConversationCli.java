@@ -1678,7 +1678,7 @@ public class ConversationCli {
         }
         if (value instanceof Collection<?> collection) {
             return collection.stream()
-                    .map(this::normalizeText)
+                    .map(this::normalizeListItem)
                     .filter(s -> !s.isBlank())
                     .toList();
         }
@@ -1723,12 +1723,34 @@ public class ConversationCli {
             List<Object> values = TRACE_PARSER.readValue(text, new TypeReference<List<Object>>() {
             });
             return values.stream()
-                    .map(this::normalizeText)
+                    .map(this::normalizeListItem)
                     .filter(s -> !s.isBlank())
                     .toList();
         } catch (Exception ignored) {
             return List.of();
         }
+    }
+
+    @SuppressWarnings("unchecked")
+    private String normalizeListItem(Object value) {
+        if (value instanceof Map<?, ?> rawMap) {
+            Map<String, Object> map = (Map<String, Object>) rawMap;
+            String candidate = normalizeText(readFirstNonNull(
+                    map,
+                    "name",
+                    "title",
+                    "text",
+                    "content",
+                    "id",
+                    "slot_name",
+                    "slotName",
+                    "value"
+            ));
+            if (!candidate.isBlank()) {
+                return candidate;
+            }
+        }
+        return normalizeText(value);
     }
 
     private String unwrapJsonString(String rawText) {

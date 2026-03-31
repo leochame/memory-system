@@ -181,6 +181,45 @@ class MemoryTraceInsightServiceTest {
         assertThat(report.topPurposeInsights().get(0).sampleSize()).isEqualTo(1);
     }
 
+    @Test
+    void analyzeRecentTracesShouldParseObjectListEvidenceFields() {
+        MemoryStorage storage = new MemoryStorage(tempDir.toString());
+        MemoryTraceInsightService service = new MemoryTraceInsightService(storage);
+
+        Map<String, Object> trace = new LinkedHashMap<>();
+        trace.put("memory_loaded", true);
+        trace.put("reflection", Map.of(
+                "needs_memory", true,
+                "reason", "对象数组兼容",
+                "evidence_purposes", List.of("followup")
+        ));
+        trace.put("retrieved_insights", List.of(
+                Map.of("slot_name", "diet_preference"),
+                Map.of("content", "偏好简洁表达")
+        ));
+        trace.put("used_insights", List.of(Map.of("slotName", "diet_preference")));
+        trace.put("retrieved_examples", "[{\"title\":\"答辩案例\"}]");
+        trace.put("used_examples", List.of(Map.of("name", "答辩案例")));
+        trace.put("retrieved_skills", List.of(Map.of("name", "debugging"), Map.of("id", "planner")));
+        trace.put("used_skills", List.of(Map.of("value", "debugging")));
+        trace.put("retrieved_tasks", List.of(Map.of("title", "提交周报")));
+        trace.put("used_tasks", List.of(Map.of("text", "提交周报")));
+        storage.appendMemoryEvidenceTrace(trace);
+
+        MemoryTraceInsightService.InsightReport report = service.analyzeRecentTraces(20);
+
+        assertThat(report.sampleSize()).isEqualTo(1);
+        assertThat(report.insightStat().retrieved()).isEqualTo(2);
+        assertThat(report.insightStat().used()).isEqualTo(1);
+        assertThat(report.exampleStat().retrieved()).isEqualTo(1);
+        assertThat(report.exampleStat().used()).isEqualTo(1);
+        assertThat(report.skillStat().retrieved()).isEqualTo(2);
+        assertThat(report.skillStat().used()).isEqualTo(1);
+        assertThat(report.taskStat().retrieved()).isEqualTo(1);
+        assertThat(report.taskStat().used()).isEqualTo(1);
+        assertThat(report.topUsedSkills()).containsExactly("debugging (1)");
+    }
+
     private Map<String, Object> trace(boolean memoryLoaded,
                                       boolean needsMemory,
                                       String purpose,

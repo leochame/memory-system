@@ -355,7 +355,7 @@ public class MemoryTraceInsightService {
         if (value instanceof Collection<?> collection) {
             List<String> items = new ArrayList<>();
             for (Object item : collection) {
-                String text = normalizeText(item);
+                String text = normalizeListItem(item);
                 if (!text.isBlank()) {
                     items.add(text);
                 }
@@ -477,7 +477,7 @@ public class MemoryTraceInsightService {
             });
             List<String> items = new ArrayList<>();
             for (Object value : values) {
-                String normalized = normalizeText(value);
+                String normalized = normalizeListItem(value);
                 if (!normalized.isBlank()) {
                     items.add(normalized);
                 }
@@ -513,6 +513,28 @@ public class MemoryTraceInsightService {
 
     private String normalizeText(Object value) {
         return value == null ? "" : String.valueOf(value).trim();
+    }
+
+    @SuppressWarnings("unchecked")
+    private String normalizeListItem(Object value) {
+        if (value instanceof Map<?, ?> rawMap) {
+            Map<String, Object> map = (Map<String, Object>) rawMap;
+            String candidate = normalizeText(readFirstNonNull(
+                    map,
+                    "name",
+                    "title",
+                    "text",
+                    "content",
+                    "id",
+                    "slot_name",
+                    "slotName",
+                    "value"
+            ));
+            if (!candidate.isBlank()) {
+                return candidate;
+            }
+        }
+        return normalizeText(value);
     }
 
     public record EvidenceStat(int retrieved, int used, double usageRate) {
