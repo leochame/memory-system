@@ -117,6 +117,70 @@ class MemoryTraceInsightServiceTest {
         assertThat(report.topPurposeInsights().get(0).sampleSize()).isGreaterThan(0);
     }
 
+    @Test
+    void analyzeRecentTracesShouldParseAliasAndStringifiedTraceFields() {
+        MemoryStorage storage = new MemoryStorage(tempDir.toString());
+        MemoryTraceInsightService service = new MemoryTraceInsightService(storage);
+
+        Map<String, Object> trace = new LinkedHashMap<>();
+        trace.put("memoryLoaded", "yes");
+        trace.put("reflectionResult",
+                "{\"needsMemory\":\"y\",\"reason\":\"需要追踪任务进展\",\"evidencePurposes\":\"[\\\"followup\\\"]\"}");
+        trace.put("retrievedInsights", "[\"insight-a\",\"insight-b\"]");
+        trace.put("usedInsights", "[\"insight-a\"]");
+        trace.put("retrievedExamples", "[]");
+        trace.put("usedExamples", "[]");
+        trace.put("retrievedSkills", "\"[\\\"skill-a\\\",\\\"skill-b\\\"]\"");
+        trace.put("usedSkills", "[\"skill-a\"]");
+        trace.put("retrievedTasks", "[\"task-a\"]");
+        trace.put("usedTasks", "[]");
+        storage.appendMemoryEvidenceTrace(trace);
+
+        MemoryTraceInsightService.InsightReport report = service.analyzeRecentTraces(20);
+
+        assertThat(report.sampleSize()).isEqualTo(1);
+        assertThat(report.memoryLoadedRate()).isEqualTo(1.0d);
+        assertThat(report.needsMemoryRate()).isEqualTo(1.0d);
+        assertThat(report.unknownNeedsMemoryRate()).isZero();
+        assertThat(report.insightStat().retrieved()).isEqualTo(2);
+        assertThat(report.insightStat().used()).isEqualTo(1);
+        assertThat(report.skillStat().retrieved()).isEqualTo(2);
+        assertThat(report.skillStat().used()).isEqualTo(1);
+        assertThat(report.topPurposes()).isNotEmpty();
+        assertThat(report.topPurposes().get(0)).contains("followup");
+    }
+
+    @Test
+    void analyzeRecentTracesShouldNormalizeAndDeduplicatePurposesPerTrace() {
+        MemoryStorage storage = new MemoryStorage(tempDir.toString());
+        MemoryTraceInsightService service = new MemoryTraceInsightService(storage);
+
+        Map<String, Object> reflection = new LinkedHashMap<>();
+        reflection.put("needs_memory", true);
+        reflection.put("reason", "需要跟进");
+        reflection.put("evidence_purposes", List.of("FollowUp", " followup ", "FOLLOWUP"));
+
+        Map<String, Object> trace = new LinkedHashMap<>();
+        trace.put("memory_loaded", true);
+        trace.put("reflection", reflection);
+        trace.put("retrieved_insights", List.of("i-1"));
+        trace.put("used_insights", List.of("i-1"));
+        trace.put("retrieved_examples", List.of());
+        trace.put("used_examples", List.of());
+        trace.put("loaded_skills", List.of());
+        trace.put("used_skills", List.of());
+        trace.put("retrieved_tasks", List.of());
+        trace.put("used_tasks", List.of());
+        storage.appendMemoryEvidenceTrace(trace);
+
+        MemoryTraceInsightService.InsightReport report = service.analyzeRecentTraces(20);
+
+        assertThat(report.topPurposes()).containsExactly("followup (1)");
+        assertThat(report.topPurposeInsights()).hasSize(1);
+        assertThat(report.topPurposeInsights().get(0).purpose()).isEqualTo("followup");
+        assertThat(report.topPurposeInsights().get(0).sampleSize()).isEqualTo(1);
+    }
+
     private Map<String, Object> trace(boolean memoryLoaded,
                                       boolean needsMemory,
                                       String purpose,

@@ -1561,3 +1561,34 @@
 - 实际结果：
   - 反思主链路与证据追踪链路在 `memory_purpose` 格式差异下可稳定归一化，不再因分隔符差异导致语义漂移
   - `ACTION_FOLLOWUP` 默认派生（`TASK + RECENT_HISTORY` / `followup`）在反思服务、系统提示词、CLI 主链路与模型层单测中形成一致性保护
+
+#### 迭代记录 - 2026-03-31 23:40
+
+- 增强目标：围绕 Step 1/6（6.1 Memory Reflection 调用链）执行文档对齐复核，确认“反思结果传入 Prompt + 按决策加载记忆 + 异常稳定回退”在当前代码中持续成立
+- 涉及文件：修改 `开发实现process.md`
+- 实现方案：
+  1. 逐项对照开发文档 `6.1` 完成标准，复核 `ConversationCli -> MemoryReflectionService -> SystemPromptBuilder` 链路
+  2. 定向执行回归：`./scripts/run-tests.sh -q -Dtest=ConversationCliTest,SystemPromptBuilderTest,MemoryReflectionServiceTest test`
+  3. 核对关键验收点：`needs_memory` 分流、`memory_purpose` 规范化、`evidence_types/evidence_purposes` 按用途派生、`retrieval_hint` 空值回退、反思异常 fallback
+- 状态：已完成
+- 实际结果：
+  - 本轮未发现 Step 1/6 新增代码缺口，调用链保持完成态
+  - Step 1/6 关键行为在主链路与提示词层均有自动化测试覆盖，可直接进入下一步（Step 2/6）开发
+
+#### 迭代记录 - 2026-03-31 16:05
+
+- 增强目标：继续执行 Step 2/6（6.2 记忆证据追踪），对齐 `/memory-insights` 与 `/memory-debug` 的 trace 兼容解析规则，避免洞察统计在跨版本/跨来源数据下偏差
+- 涉及文件：修改 `src/main/java/com/memsys/memory/MemoryTraceInsightService.java`、修改 `src/test/java/com/memsys/memory/MemoryTraceInsightServiceTest.java`、修改 `开发文档.md`、修改 `开发实现process.md`
+- 实现方案：
+  1. `MemoryTraceInsightService` 新增统一读取入口，兼容 `snake_case/camelCase` 字段（如 `memory_loaded/memoryLoaded`、`retrieved_* / used_*` 与 camelCase 对应字段）
+  2. 反思对象解析新增别名兼容：`reflection`、`reflection_result`、`reflectionResult`，并支持字符串化 JSON 对象
+  3. Skills 统计新增别名兼容：`loaded_skills/loadedSkills/retrieved_skills/retrievedSkills`
+  4. 列表字段新增字符串化/二次字符串化 JSON 解析（如 `"[]"`、`"\"[... ]\""`），避免统计链路把列表误判为单字符串
+  5. 布尔解析补齐 `yes/no/y/n/是/否`，用于 `memory_loaded` 与 `needs_memory` 聚合统计
+  6. 新增测试 `analyzeRecentTracesShouldParseAliasAndStringifiedTraceFields`，覆盖字段别名 + 字符串化 JSON + legacy 布尔字面量组合场景
+  7. 在开发文档 `6.2` 完成标准新增第 26 条，明确 `/memory-insights` 与 `/memory-debug` 兼容解析一致性约束
+- 状态：已完成
+- 实际结果：
+  - `/memory-insights` 在历史 trace 的命名差异、字符串化字段和 legacy 布尔值场景下可稳定统计，不再出现 skills 检索量或 needs_memory 比率异常漂移
+  - Step 2/6 从“调试视图可读”扩展到“洞察报表可比”，降低跨版本数据分析误判风险
+  - 定向测试通过：`./scripts/run-tests.sh -q -Dtest=MemoryTraceInsightServiceTest test`

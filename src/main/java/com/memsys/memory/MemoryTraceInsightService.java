@@ -1,5 +1,7 @@
 package com.memsys.memory;
 
+import com.fasterxml.jackson.core.type.TypeReference;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.memsys.memory.storage.MemoryStorage;
 import org.springframework.stereotype.Service;
 
@@ -18,6 +20,7 @@ import java.util.stream.Collectors;
 public class MemoryTraceInsightService {
 
     private static final int DEFAULT_LIMIT = 50;
+    private static final ObjectMapper TRACE_PARSER = new ObjectMapper();
 
     private final MemoryStorage storage;
 
@@ -73,34 +76,36 @@ public class MemoryTraceInsightService {
         Map<String, PurposeAccumulator> purposeStats = new LinkedHashMap<>();
 
         for (Map<String, Object> trace : safeTraces) {
-            boolean memoryLoaded = toBoolean(trace.get("memory_loaded"));
+            boolean memoryLoaded = toBoolean(readFirstNonNull(trace, "memory_loaded", "memoryLoaded"));
             if (memoryLoaded) {
                 memoryLoadedCount++;
             }
 
-            Map<String, Object> reflection = asMap(trace.get("reflection"));
-            Boolean needsMemory = toNullableBoolean(reflection.get("needs_memory"));
+            Map<String, Object> reflection = parseReflection(trace);
+            Boolean needsMemory = toNullableBoolean(readFirstNonNull(reflection, "needs_memory", "needsMemory"));
             if (needsMemory == null) {
                 unknownNeedsMemoryCount++;
             } else if (needsMemory) {
                 needsMemoryCount++;
             }
-            String reason = normalizeText(reflection.get("reason"));
+            String reason = normalizeText(readFirstNonNull(reflection, "reason"));
             if (!reason.isBlank()) {
                 increment(reasonFreq, reason);
             }
-            for (String purpose : asStringList(reflection.get("evidence_purposes"))) {
+            List<String> normalizedPurposes = normalizePurposes(readPurposes(reflection));
+            for (String purpose : normalizedPurposes) {
                 increment(purposeFreq, purpose);
             }
 
-            List<String> retrievedInsightsList = asStringList(trace.get("retrieved_insights"));
-            List<String> usedInsightsList = asStringList(trace.get("used_insights"));
-            List<String> retrievedExamplesList = asStringList(trace.get("retrieved_examples"));
-            List<String> usedExamplesList = asStringList(trace.get("used_examples"));
-            List<String> loadedSkillsList = asStringList(trace.get("loaded_skills"));
-            List<String> usedSkillsList = asStringList(trace.get("used_skills"));
-            List<String> retrievedTasksList = asStringList(trace.get("retrieved_tasks"));
-            List<String> usedTasksList = asStringList(trace.get("used_tasks"));
+            List<String> retrievedInsightsList = readTraceList(trace, "retrieved_insights", "retrievedInsights");
+            List<String> usedInsightsList = readTraceList(trace, "used_insights", "usedInsights");
+            List<String> retrievedExamplesList = readTraceList(trace, "retrieved_examples", "retrievedExamples");
+            List<String> usedExamplesList = readTraceList(trace, "used_examples", "usedExamples");
+            List<String> loadedSkillsList = readTraceList(
+                    trace, "loaded_skills", "loadedSkills", "retrieved_skills", "retrievedSkills");
+            List<String> usedSkillsList = readTraceList(trace, "used_skills", "usedSkills");
+            List<String> retrievedTasksList = readTraceList(trace, "retrieved_tasks", "retrievedTasks");
+            List<String> usedTasksList = readTraceList(trace, "used_tasks", "usedTasks");
 
             retrievedInsights += retrievedInsightsList.size();
             usedInsights += usedInsightsList.size();
@@ -115,11 +120,7 @@ public class MemoryTraceInsightService {
                 increment(skillFreq, skill);
             }
 
-            List<String> purposesForTrace = asStringList(reflection.get("evidence_purposes")).stream()
-                    .map(p -> p.toLowerCase(Locale.ROOT))
-                    .distinct()
-                    .toList();
-            for (String purpose : purposesForTrace) {
+            for (String purpose : normalizedPurposes) {
                 PurposeAccumulator acc = purposeStats.computeIfAbsent(purpose, ignored -> new PurposeAccumulator());
                 acc.samples++;
                 if (memoryLoaded) {
@@ -273,17 +274,18 @@ public class MemoryTraceInsightService {
         int usedTasks = 0;
 
         for (Map<String, Object> trace : traces) {
-            if (toBoolean(trace.get("memory_loaded"))) {
+            if (toBoolean(readFirstNonNull(trace, "memory_loaded", "memoryLoaded"))) {
                 memoryLoaded++;
             }
-            retrievedInsights += asStringList(trace.get("retrieved_insights")).size();
-            usedInsights += asStringList(trace.get("used_insights")).size();
-            retrievedExamples += asStringList(trace.get("retrieved_examples")).size();
-            usedExamples += asStringList(trace.get("used_examples")).size();
-            retrievedSkills += asStringList(trace.get("loaded_skills")).size();
-            usedSkills += asStringList(trace.get("used_skills")).size();
-            retrievedTasks += asStringList(trace.get("retrieved_tasks")).size();
-            usedTasks += asStringList(trace.get("used_tasks")).size();
+            retrievedInsights += readTraceList(trace, "retrieved_insights", "retrievedInsights").size();
+            usedInsights += readTraceList(trace, "used_insights", "usedInsights").size();
+            retrievedExamples += readTraceList(trace, "retrieved_examples", "retrievedExamples").size();
+            usedExamples += readTraceList(trace, "used_examples", "usedExamples").size();
+            retrievedSkills += readTraceList(
+                    trace, "loaded_skills", "loadedSkills", "retrieved_skills", "retrievedSkills").size();
+            usedSkills += readTraceList(trace, "used_skills", "usedSkills").size();
+            retrievedTasks += readTraceList(trace, "retrieved_tasks", "retrievedTasks").size();
+            usedTasks += readTraceList(trace, "used_tasks", "usedTasks").size();
         }
 
         return new WindowMetrics(
@@ -334,6 +336,17 @@ public class MemoryTraceInsightService {
         if (value instanceof Map<?, ?> raw) {
             return (Map<String, Object>) raw;
         }
+        if (value instanceof String rawText) {
+            String text = unwrapJsonString(rawText);
+            if (text != null && text.startsWith("{") && text.endsWith("}")) {
+                try {
+                    return TRACE_PARSER.readValue(text, new TypeReference<Map<String, Object>>() {
+                    });
+                } catch (Exception ignored) {
+                    return Map.of();
+                }
+            }
+        }
         return Map.of();
     }
 
@@ -351,13 +364,14 @@ public class MemoryTraceInsightService {
         }
         if (value instanceof String text) {
             String normalized = text.trim();
-            return normalized.isEmpty() ? List.of() : List.of(normalized);
-        }
-        if (value instanceof List<?> rawList) {
-            return ((List<Object>) rawList).stream()
-                    .map(this::normalizeText)
-                    .filter(s -> !s.isBlank())
-                    .toList();
+            if (normalized.isEmpty()) {
+                return List.of();
+            }
+            List<String> parsed = parseStringListFromJsonText(normalized);
+            if (!parsed.isEmpty()) {
+                return parsed;
+            }
+            return List.of(normalized);
         }
         return List.of();
     }
@@ -367,7 +381,12 @@ public class MemoryTraceInsightService {
             return b;
         }
         String text = normalizeText(value).toLowerCase(Locale.ROOT);
-        return "true".equals(text) || "1".equals(text) || "yes".equals(text) || "on".equals(text);
+        return "true".equals(text)
+                || "1".equals(text)
+                || "yes".equals(text)
+                || "y".equals(text)
+                || "on".equals(text)
+                || "是".equals(text);
     }
 
     private Boolean toNullableBoolean(Object value) {
@@ -375,13 +394,121 @@ public class MemoryTraceInsightService {
             return b;
         }
         String text = normalizeText(value).toLowerCase(Locale.ROOT);
-        if ("true".equals(text) || "1".equals(text) || "yes".equals(text) || "on".equals(text)) {
+        if ("true".equals(text)
+                || "1".equals(text)
+                || "yes".equals(text)
+                || "y".equals(text)
+                || "on".equals(text)
+                || "是".equals(text)) {
             return true;
         }
-        if ("false".equals(text) || "0".equals(text) || "no".equals(text) || "off".equals(text)) {
+        if ("false".equals(text)
+                || "0".equals(text)
+                || "no".equals(text)
+                || "n".equals(text)
+                || "off".equals(text)
+                || "否".equals(text)) {
             return false;
         }
         return null;
+    }
+
+    private Object readFirstNonNull(Map<String, Object> source, String... keys) {
+        if (source == null || source.isEmpty() || keys == null) {
+            return null;
+        }
+        for (String key : keys) {
+            if (key == null || key.isBlank()) {
+                continue;
+            }
+            Object value = source.get(key);
+            if (value != null) {
+                return value;
+            }
+        }
+        return null;
+    }
+
+    private Map<String, Object> parseReflection(Map<String, Object> trace) {
+        if (trace == null || trace.isEmpty()) {
+            return Map.of();
+        }
+        Object reflectionObj = readFirstNonNull(trace, "reflection", "reflection_result", "reflectionResult");
+        Map<String, Object> reflection = asMap(reflectionObj);
+        if (!reflection.isEmpty()) {
+            return reflection;
+        }
+        return trace;
+    }
+
+    private List<String> readPurposes(Map<String, Object> reflection) {
+        List<String> purposes = asStringList(readFirstNonNull(
+                reflection, "evidence_purposes", "evidencePurposes"));
+        if (!purposes.isEmpty()) {
+            return purposes;
+        }
+        return asStringList(readFirstNonNull(
+                reflection, "evidence_purpose", "evidencePurpose"));
+    }
+
+    private List<String> readTraceList(Map<String, Object> trace, String... keys) {
+        return asStringList(readFirstNonNull(trace, keys));
+    }
+
+    private List<String> normalizePurposes(List<String> purposes) {
+        if (purposes == null || purposes.isEmpty()) {
+            return List.of();
+        }
+        return purposes.stream()
+                .map(this::normalizeText)
+                .map(p -> p.toLowerCase(Locale.ROOT))
+                .filter(p -> !p.isBlank())
+                .distinct()
+                .toList();
+    }
+
+    private List<String> parseStringListFromJsonText(String rawText) {
+        String text = unwrapJsonString(rawText);
+        if (text == null || text.isBlank() || !text.startsWith("[") || !text.endsWith("]")) {
+            return List.of();
+        }
+        try {
+            List<Object> values = TRACE_PARSER.readValue(text, new TypeReference<List<Object>>() {
+            });
+            List<String> items = new ArrayList<>();
+            for (Object value : values) {
+                String normalized = normalizeText(value);
+                if (!normalized.isBlank()) {
+                    items.add(normalized);
+                }
+            }
+            return items;
+        } catch (Exception ignored) {
+            return List.of();
+        }
+    }
+
+    private String unwrapJsonString(String rawText) {
+        if (rawText == null) {
+            return null;
+        }
+        String text = rawText.trim();
+        if (text.isBlank()) {
+            return text;
+        }
+        if ((text.startsWith("{") && text.endsWith("}"))
+                || (text.startsWith("[") && text.endsWith("]"))) {
+            return text;
+        }
+        if (text.length() >= 2 && text.startsWith("\"") && text.endsWith("\"")) {
+            try {
+                String unwrapped = TRACE_PARSER.readValue(text, String.class);
+                return unwrapped == null ? null : unwrapped.trim();
+            } catch (Exception ignored) {
+                return text;
+            }
+        }
+        return text;
     }
 
     private String normalizeText(Object value) {
