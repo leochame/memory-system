@@ -1736,21 +1736,23 @@ public class ConversationCli {
         if (source == null || source.isEmpty() || key == null || key.isBlank()) {
             return Map.of();
         }
-        String prefix = key + ".";
         Map<String, Object> nested = new LinkedHashMap<>();
         for (Map.Entry<String, Object> entry : source.entrySet()) {
             String entryKey = entry.getKey();
-            if (entryKey == null || !entryKey.startsWith(prefix)) {
+            if (entryKey == null) {
                 continue;
             }
-            String suffix = entryKey.substring(prefix.length());
-            if (suffix.isBlank()) {
+            String suffix = flattenedKeySuffix(entryKey, key);
+            if (suffix == null || suffix.isBlank()) {
                 continue;
             }
-            String[] parts = suffix.split("\\.");
+            List<String> parts = splitFlattenedPath(suffix);
+            if (parts.isEmpty()) {
+                continue;
+            }
             Map<String, Object> cursor = nested;
-            for (int i = 0; i < parts.length - 1; i++) {
-                String part = parts[i];
+            for (int i = 0; i < parts.size() - 1; i++) {
+                String part = parts.get(i);
                 if (part.isBlank()) {
                     continue;
                 }
@@ -1763,12 +1765,60 @@ public class ConversationCli {
                     cursor = (Map<String, Object>) existingMap;
                 }
             }
-            String leaf = parts[parts.length - 1];
+            String leaf = parts.get(parts.size() - 1);
             if (!leaf.isBlank()) {
                 cursor.put(leaf, entry.getValue());
             }
         }
         return nested;
+    }
+
+    private String flattenedKeySuffix(String entryKey, String key) {
+        if (entryKey.startsWith(key + ".")) {
+            return entryKey.substring(key.length() + 1);
+        }
+        if (entryKey.startsWith(key + "[")) {
+            return entryKey.substring(key.length());
+        }
+        return null;
+    }
+
+    private List<String> splitFlattenedPath(String suffix) {
+        if (suffix == null || suffix.isBlank()) {
+            return List.of();
+        }
+        List<String> parts = new ArrayList<>();
+        StringBuilder token = new StringBuilder();
+        for (int i = 0; i < suffix.length(); i++) {
+            char ch = suffix.charAt(i);
+            if (ch == '.') {
+                if (!token.isEmpty()) {
+                    parts.add(token.toString());
+                    token.setLength(0);
+                }
+                continue;
+            }
+            if (ch == '[') {
+                if (!token.isEmpty()) {
+                    parts.add(token.toString());
+                    token.setLength(0);
+                }
+                int closeIdx = suffix.indexOf(']', i + 1);
+                if (closeIdx > i + 1) {
+                    String bracketToken = suffix.substring(i + 1, closeIdx).trim();
+                    if (!bracketToken.isBlank()) {
+                        parts.add(bracketToken);
+                    }
+                    i = closeIdx;
+                }
+                continue;
+            }
+            token.append(ch);
+        }
+        if (!token.isEmpty()) {
+            parts.add(token.toString());
+        }
+        return parts;
     }
 
     private String normalizeMemoryPurpose(String memoryPurpose, boolean needsMemory) {

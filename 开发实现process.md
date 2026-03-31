@@ -1925,3 +1925,32 @@
   - `/memory-debug` 与 `/memory-insights` 可稳定解析 map 形式证据列表，并正确统计 retrieved/used 覆盖率
   - 否定型标记值（`false/no/off/0`）不再误计入命中，降低跨来源 trace 的统计偏差风险
   - 定向测试通过：`export JAVA_HOME=$(/usr/libexec/java_home) && mvn -q -Dtest=ConversationCliTest,MemoryTraceInsightServiceTest test`
+
+#### 迭代记录 - 2026-03-31 23:59（长期演化年表）
+
+- 增强目标：继续执行 Step 6/6（调研与文档更新），围绕 Memory-System 打造“更多内容”的第十七层方案，将内容体系升级为“长期记忆演化年表 + 纵向研究资产”
+- 涉及文件：修改 `开发文档.md`、修改 `开发实现process.md`
+- 实现方案：
+  1. 将开发文档版本升级至 `v4.34`，在 `5.10` 新增 `5.10.27 Step 6/6 内容扩展蓝图（第十七层：长期记忆演化年表与纵向研究资产）`
+  2. 新增 8 类纵向研究资产：`周度记忆快照卡`、`主题连续性追踪卡`、`记忆漂移观察卡`、`个性化收益对照卡`、`任务履约趋势卡`、`主动服务命中卡`、`证据健康体检卡`、`论文图表素材卡`
+  3. 固化三层时间窗口（7d/30d/90d）与“基线对照 + 演化解释 + 下周期验证点”约束，并新增索引字段：`evolution_track_id/time_window/baseline_ref/current_ref/delta_summary/drift_signal/backlog_link/next_checkpoint`
+  4. 在开发文档新增 `6.29 需求二十七`，将目录规范、窗口约束、基线对照、回流要求与季度验收标准转化为可执行条款
+- 状态：已完成
+- 实际结果：
+  - Step 6/6 从“选题评分与回流实验”进一步升级为“纵向可验证内容体系”，可稳定回答“记忆系统是否在长期变好”
+  - 围绕记忆系统形成“周快照 -> 月趋势 -> 季报告 -> 漂移告警 -> 反馈回流”的长期内容闭环，可直接支撑答辩、论文和迭代决策
+
+#### 迭代记录 - 2026-03-31 19:20
+
+- 增强目标：继续执行 Step 2/6（6.2 记忆证据追踪），补齐历史 trace 在“中括号路径扁平字段”格式下的兼容解析，避免 `/memory-debug` 与 `/memory-insights` 在数组索引导出数据上出现覆盖率误判
+- 涉及文件：修改 `src/main/java/com/memsys/cli/ConversationCli.java`、修改 `src/main/java/com/memsys/memory/MemoryTraceInsightService.java`、修改 `src/test/java/com/memsys/cli/ConversationCliTest.java`、修改 `src/test/java/com/memsys/memory/MemoryTraceInsightServiceTest.java`、修改 `开发文档.md`、修改 `开发实现process.md`
+- 实现方案：
+  1. 在 `ConversationCli.readFlattenedSubtree(...)` 增加中括号路径子树重建能力，兼容 `reflection[needs_memory]`、`evidence[retrieved][insights][0]`、`loaded[skills][1]` 等扁平字段
+  2. 在 `MemoryTraceInsightService.readFlattenedSubtree(...)` 同步复用同级解析规则，确保 `/memory-insights` 与 `/memory-debug` 兼容口径一致
+  3. 新增 `getLastEvidenceTraceShouldParseFlattenedBracketPathTraceFields`，覆盖 `/memory-debug` 在 bracket-path 场景下的反思字段与四类证据解析
+  4. 新增 `analyzeRecentTracesShouldParseFlattenedBracketPathTraceFields`，覆盖 `/memory-insights` 在 bracket-path 场景下的 retrieved/used 统计一致性
+  5. 同步开发文档 `6.2` 完成标准新增第 36 条，明确“中括号路径扁平字段兼容”约束
+- 状态：已完成
+- 实际结果：
+  - `/memory-debug` 与 `/memory-insights` 可稳定回读 `reflection[needs_memory]`、`evidence[retrieved][insights][0]`、`retrieved[examples][0]`、`loaded[skills][1]` 等 bracket-path 字段，不再因数组索引扁平导出造成覆盖率偏差
+  - Step 2/6 的跨来源 trace 兼容能力从“点路径扁平字段”扩展到“中括号路径扁平字段”，降低外部系统对接后的排障成本
