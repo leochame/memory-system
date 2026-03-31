@@ -94,6 +94,41 @@ public record ReflectionResult(
         };
     }
 
+    public static String normalizeEvidenceType(String evidenceType) {
+        if (evidenceType == null || evidenceType.isBlank()) {
+            return null;
+        }
+        String compact = evidenceType.trim()
+                .toUpperCase(java.util.Locale.ROOT)
+                .replaceAll("[^A-Z]", "");
+        return switch (compact) {
+            case "USERINSIGHT" -> "USER_INSIGHT";
+            case "SESSIONSUMMARY" -> "SESSION_SUMMARY";
+            case "TASK" -> "TASK";
+            case "EXAMPLE" -> "EXAMPLE";
+            case "SKILL" -> "SKILL";
+            case "RECENTHISTORY" -> "RECENT_HISTORY";
+            default -> null;
+        };
+    }
+
+    public static String normalizeEvidencePurpose(String purpose) {
+        if (purpose == null || purpose.isBlank()) {
+            return null;
+        }
+        String compact = purpose.trim()
+                .toLowerCase(java.util.Locale.ROOT)
+                .replaceAll("[^a-z]", "");
+        return switch (compact) {
+            case "personalization" -> "personalization";
+            case "continuity" -> "continuity";
+            case "constraint" -> "constraint";
+            case "experience" -> "experience";
+            case "followup" -> "followup";
+            default -> null;
+        };
+    }
+
     private static String normalizePurposeKey(String memoryPurpose) {
         String normalized = canonicalMemoryPurpose(memoryPurpose);
         if (normalized == null) {

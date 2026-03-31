@@ -1607,3 +1607,57 @@
 - 实际结果：
   - `/memory-debug [N]` 历史视图在跨系统导出的 epoch 时间戳场景下可稳定显示时间，不再退化为 `(unknown)`
   - 定向测试通过：`./scripts/run-tests.sh -q -Dtest=ConversationCliTest test`
+
+#### 迭代记录 - 2026-03-31 23:58
+
+- 增强目标：继续执行 Step 6/6（调研与文档更新），围绕 Memory-System 打造“更多内容”的第十层方案，将内容体系升级为“记忆产品化内容 + 演示资产库”
+- 涉及文件：修改 `开发文档.md`、修改 `开发实现process.md`
+- 实现方案：
+  1. 将开发文档版本升级至 `v4.22`，在 `5.10` 新增 `5.10.20 Step 6/6 内容扩展蓝图（第十层：记忆产品化内容与演示资产库）`
+  2. 新增 8 类产品化内容资产：`记忆能力说明卡`、`一分钟场景演示卡`、`失败到修复故事卡`、`指标解读讲义卡`、`答辩问答速查卡`、`论文图表说明卡`、`版本差异发布卡`、`对外协作邀请卡`
+  3. 固化产品化执行机制（周快演示/双周问题解答/月对外发布）与新增索引字段：`product_card_id/audience_type/scenario_script_ref/qa_bundle_ref/demo_ready/proof_level/last_replay_at/publish_window`
+  4. 在开发文档新增 `6.22 需求二十`，将产品化目录规范、`demo_ready` 回放约束、公开发布可信约束与双周执行小结转化为可验收条款
+- 状态：已完成
+- 实际结果：
+  - Step 6/6 从“基准化资产与公开评测包”进一步升级为“面向受众的产品化内容资产库”，可直接服务开发沟通、答辩演示、论文撰写与对外交流
+  - 围绕记忆系统形成“证据采集 -> 资产编排 -> 回放校验 -> 发布分发 -> 反馈回流”的可持续内容闭环，后续可按索引字段稳定运营和审计
+
+#### 迭代记录 - 2026-03-31 23:59
+
+- 增强目标：继续执行 Step 1/6（6.1 Memory Reflection 调用链）健壮性加固，补齐 `evidence_types/evidence_purposes` 在分隔符与命名风格差异下的归一化兼容，避免语义正确输入被误判为非法后回退默认值
+- 涉及文件：修改 `src/main/java/com/memsys/memory/model/ReflectionResult.java`、修改 `src/main/java/com/memsys/memory/MemoryReflectionService.java`、修改 `src/main/java/com/memsys/cli/ConversationCli.java`、修改 `src/main/java/com/memsys/prompt/SystemPromptBuilder.java`、修改 `src/test/java/com/memsys/memory/MemoryReflectionServiceTest.java`、修改 `src/test/java/com/memsys/cli/ConversationCliTest.java`、修改 `开发文档.md`、修改 `开发实现process.md`
+- 实现方案：
+  1. 在 `ReflectionResult` 增加统一证据字段标准化入口，兼容 `recent-history/recentHistory`、`follow-up/followUp` 等写法
+  2. 将 `MemoryReflectionService`、`ConversationCli`、`SystemPromptBuilder` 的证据类型/用途归一化逻辑统一改为调用该入口，避免多处规则漂移
+  3. 补充主链路与反思服务回归测试，覆盖别名输入场景
+  4. 同步开发文档 6.1 完成标准，补充证据字段别名兼容约束
+- 状态：已完成
+- 实际修改文件：
+  - 修改 `src/main/java/com/memsys/memory/model/ReflectionResult.java`
+  - 修改 `src/main/java/com/memsys/memory/MemoryReflectionService.java`
+  - 修改 `src/main/java/com/memsys/cli/ConversationCli.java`
+  - 修改 `src/main/java/com/memsys/prompt/SystemPromptBuilder.java`
+  - 修改 `src/test/java/com/memsys/memory/model/ReflectionResultTest.java`
+  - 修改 `src/test/java/com/memsys/memory/MemoryReflectionServiceTest.java`
+  - 修改 `src/test/java/com/memsys/cli/ConversationCliTest.java`
+  - 修改 `开发文档.md`
+  - 修改 `开发实现process.md`
+- 实际结果：
+  - Step 1/6 调用链现在可兼容 `evidence_types/evidence_purposes` 的 hyphen/snake/camel 输入（如 `recent-history/recentHistory`、`follow-up/followUp`），并统一归一化为标准枚举值
+  - 反思服务、CLI 主链路、System Prompt 三层证据字段归一化规则一致，降低“语义正确但被判非法”导致的默认值误回退风险
+  - 定向测试通过：`./scripts/run-tests.sh -q -Dtest=ReflectionResultTest,MemoryReflectionServiceTest,SystemPromptBuilderTest,ConversationCliTest test`
+  - 编译通过：`export JAVA_HOME=$(/usr/libexec/java_home) && mvn compile -q`
+
+#### 迭代记录 - 2026-03-31 16:45
+
+- 增强目标：继续执行 Step 2/6（6.2 记忆证据追踪），补齐历史 trace 在微秒/纳秒 epoch 时间戳下的兼容解析，避免 `/memory-debug [N]` 在跨系统高精度时间格式中出现异常时间
+- 涉及文件：修改 `src/main/java/com/memsys/cli/ConversationCli.java`、修改 `src/test/java/com/memsys/cli/ConversationCliTest.java`、修改 `开发文档.md`、修改 `开发实现process.md`
+- 实现方案：
+  1. 扩展 `ConversationCli.parseEpochTimestamp(String)` 的数字匹配范围：从 `10-17` 位提升到 `10-19` 位，覆盖秒/毫秒/微秒/纳秒场景
+  2. 扩展 `ConversationCli.parseEpochTimestamp(double)` 的量纲识别阈值：新增微秒（`>=1e15`）与纳秒（`>=1e18`）到毫秒的换算分支
+  3. 新增回归测试 `getRecentEvidenceTracesShouldParseEpochMicroAndNanoTimestampFormats`，覆盖“微秒数字 + 纳秒数字字符串”组合场景
+  4. 同步开发文档 `6.2` 完成标准，新增“高精度 epoch 时间戳兼容”条款
+- 状态：已完成
+- 实际结果：
+  - `/memory-debug [N]` 历史视图可稳定回读 16-19 位高精度 epoch 时间，不再受跨系统时间单位差异影响
+  - Step 2/6 时间线兼容能力从“秒/毫秒”扩展到“秒/毫秒/微秒/纳秒”，降低历史数据导入后的排障成本

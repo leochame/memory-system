@@ -8,7 +8,6 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
-import java.util.Objects;
 import java.util.Set;
 
 @Component
@@ -260,11 +259,8 @@ public class SystemPromptBuilder {
             return List.of();
         }
         Set<String> normalized = evidenceTypes.stream()
-                .filter(Objects::nonNull)
-                .map(String::trim)
-                .filter(s -> !s.isBlank())
-                .map(s -> s.toUpperCase(Locale.ROOT))
-                .filter(ReflectionResult.KNOWN_EVIDENCE_TYPES::contains)
+                .map(ReflectionResult::normalizeEvidenceType)
+                .filter(type -> type != null && ReflectionResult.KNOWN_EVIDENCE_TYPES.contains(type))
                 .collect(java.util.stream.Collectors.toCollection(LinkedHashSet::new));
         if (!normalized.isEmpty()) {
             return List.copyOf(normalized);
@@ -282,11 +278,8 @@ public class SystemPromptBuilder {
             return List.of();
         }
         Set<String> normalized = evidencePurposes.stream()
-                .filter(Objects::nonNull)
-                .map(String::trim)
-                .filter(s -> !s.isBlank())
-                .map(s -> s.toLowerCase(Locale.ROOT))
-                .filter(ReflectionResult.KNOWN_PURPOSES::contains)
+                .map(ReflectionResult::normalizeEvidencePurpose)
+                .filter(purpose -> purpose != null && ReflectionResult.KNOWN_PURPOSES.contains(purpose))
                 .collect(java.util.stream.Collectors.toCollection(LinkedHashSet::new));
         if (!normalized.isEmpty()) {
             return List.copyOf(normalized);

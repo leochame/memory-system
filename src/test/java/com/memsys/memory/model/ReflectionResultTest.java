@@ -49,4 +49,21 @@ class ReflectionResultTest {
         assertThat(ReflectionResult.defaultPurposesForMemoryPurpose("not needed"))
                 .isEqualTo(List.of());
     }
+
+    @Test
+    void normalizeEvidenceFieldsShouldSupportHyphenSnakeAndCamelForms() {
+        assertThat(ReflectionResult.normalizeEvidenceType("recent-history"))
+                .isEqualTo("RECENT_HISTORY");
+        assertThat(ReflectionResult.normalizeEvidenceType("sessionSummary"))
+                .isEqualTo("SESSION_SUMMARY");
+        assertThat(ReflectionResult.normalizeEvidenceType("user_insight"))
+                .isEqualTo("USER_INSIGHT");
+
+        assertThat(ReflectionResult.normalizeEvidencePurpose("follow-up"))
+                .isEqualTo("followup");
+        assertThat(ReflectionResult.normalizeEvidencePurpose("followUp"))
+                .isEqualTo("followup");
+        assertThat(ReflectionResult.normalizeEvidencePurpose("EXPERIENCE"))
+                .isEqualTo("experience");
+    }
 }

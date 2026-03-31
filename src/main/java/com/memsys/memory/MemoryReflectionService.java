@@ -137,8 +137,8 @@ public class MemoryReflectionService {
             return List.of();
         }
         List<String> normalized = evidenceTypes == null ? List.of() : evidenceTypes.stream()
-                .map(type -> type == null ? "" : type.trim().toUpperCase(Locale.ROOT))
-                .filter(type -> !type.isBlank() && ReflectionResult.KNOWN_EVIDENCE_TYPES.contains(type))
+                .map(ReflectionResult::normalizeEvidenceType)
+                .filter(type -> type != null && ReflectionResult.KNOWN_EVIDENCE_TYPES.contains(type))
                 .distinct()
                 .toList();
         if (!normalized.isEmpty()) {
@@ -154,8 +154,8 @@ public class MemoryReflectionService {
             return List.of();
         }
         List<String> normalized = purposes == null ? List.of() : purposes.stream()
-                .map(p -> p == null ? "" : p.trim().toLowerCase(Locale.ROOT))
-                .filter(p -> !p.isBlank() && ReflectionResult.KNOWN_PURPOSES.contains(p))
+                .map(ReflectionResult::normalizeEvidencePurpose)
+                .filter(p -> p != null && ReflectionResult.KNOWN_PURPOSES.contains(p))
                 .distinct()
                 .toList();
         if (normalized.isEmpty()) {

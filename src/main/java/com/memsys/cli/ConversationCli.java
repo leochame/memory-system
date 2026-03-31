@@ -1006,10 +1006,8 @@ public class ConversationCli {
             return Set.of();
         }
         return reflection.evidence_purposes().stream()
+                .map(ReflectionResult::normalizeEvidencePurpose)
                 .filter(Objects::nonNull)
-                .map(String::trim)
-                .filter(s -> !s.isBlank())
-                .map(s -> s.toLowerCase(Locale.ROOT))
                 .collect(Collectors.toCollection(LinkedHashSet::new));
     }
 
@@ -1018,10 +1016,8 @@ public class ConversationCli {
             return Set.of();
         }
         return reflection.evidence_types().stream()
+                .map(ReflectionResult::normalizeEvidenceType)
                 .filter(Objects::nonNull)
-                .map(String::trim)
-                .filter(s -> !s.isBlank())
-                .map(s -> s.toUpperCase(Locale.ROOT))
                 .collect(Collectors.toCollection(LinkedHashSet::new));
     }
 
@@ -1506,7 +1502,7 @@ public class ConversationCli {
             return null;
         }
         String normalized = text.trim();
-        if (!normalized.matches("[-+]?\\d{10,17}(\\.\\d+)?")) {
+        if (!normalized.matches("[-+]?\\d{10,19}(\\.\\d+)?")) {
             return null;
         }
         try {
@@ -1522,7 +1518,11 @@ public class ConversationCli {
         }
         double abs = Math.abs(rawEpoch);
         long epochMillis;
-        if (abs >= 1_000_000_000_000d) {
+        if (abs >= 1_000_000_000_000_000_000d) {
+            epochMillis = (long) (rawEpoch / 1_000_000d);
+        } else if (abs >= 1_000_000_000_000_000d) {
+            epochMillis = (long) (rawEpoch / 1_000d);
+        } else if (abs >= 1_000_000_000_000d) {
             epochMillis = (long) rawEpoch;
         } else if (abs >= 1_000_000_000d) {
             epochMillis = (long) (rawEpoch * 1000d);
@@ -1644,11 +1644,8 @@ public class ConversationCli {
             return List.of();
         }
         LinkedHashSet<String> normalized = evidenceTypes.stream()
-                .filter(Objects::nonNull)
-                .map(String::trim)
-                .filter(s -> !s.isBlank())
-                .map(s -> s.toUpperCase(Locale.ROOT))
-                .filter(ReflectionResult.KNOWN_EVIDENCE_TYPES::contains)
+                .map(ReflectionResult::normalizeEvidenceType)
+                .filter(type -> type != null && ReflectionResult.KNOWN_EVIDENCE_TYPES.contains(type))
                 .collect(Collectors.toCollection(LinkedHashSet::new));
         if (!normalized.isEmpty()) {
             return List.copyOf(normalized);
@@ -1666,11 +1663,8 @@ public class ConversationCli {
             return List.of();
         }
         LinkedHashSet<String> normalized = evidencePurposes.stream()
-                .filter(Objects::nonNull)
-                .map(String::trim)
-                .filter(s -> !s.isBlank())
-                .map(s -> s.toLowerCase(Locale.ROOT))
-                .filter(ReflectionResult.KNOWN_PURPOSES::contains)
+                .map(ReflectionResult::normalizeEvidencePurpose)
+                .filter(purpose -> purpose != null && ReflectionResult.KNOWN_PURPOSES.contains(purpose))
                 .collect(Collectors.toCollection(LinkedHashSet::new));
         if (!normalized.isEmpty()) {
             return List.copyOf(normalized);

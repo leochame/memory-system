@@ -142,6 +142,28 @@ class MemoryReflectionServiceTest {
     }
 
     @Test
+    void reflectShouldNormalizeHyphenAndCamelEvidenceAliases() {
+        LlmExtractionService extractionService = mock(LlmExtractionService.class);
+        when(extractionService.reflectMemoryNeed(anyString())).thenReturn(
+                new MemoryReflectionResult(
+                        true,
+                        "CONTINUITY",
+                        "需要延续上下文",
+                        92d,
+                        "优先检索近期上下文",
+                        List.of("recent-history", "sessionSummary"),
+                        List.of("follow-up", "experienceReuse")
+                )
+        );
+
+        MemoryReflectionService service = new MemoryReflectionService(extractionService);
+        ReflectionResult result = service.reflect("继续", "上次讨论了计划");
+
+        assertThat(result.evidence_types()).containsExactly("RECENT_HISTORY", "SESSION_SUMMARY");
+        assertThat(result.evidence_purposes()).containsExactly("followup");
+    }
+
+    @Test
     void reflectShouldFixContradictingNotNeededPurposeWhenNeedsMemoryIsTrue() {
         LlmExtractionService extractionService = mock(LlmExtractionService.class);
         when(extractionService.reflectMemoryNeed(anyString())).thenReturn(

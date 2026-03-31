@@ -979,6 +979,53 @@ class ConversationCliTest {
     }
 
     @Test
+    void processUserMessageShouldNormalizeEvidenceAliasesFromReflectionService() {
+        MemoryStorage storage = new MemoryStorage(tempDir.toString());
+        storage.writeMetadata(Map.of(
+                "global_controls", Map.of(
+                        "use_saved_memories", true,
+                        "use_chat_history", false
+                )
+        ));
+        SkillService skillService = new SkillService(tempDir.toString());
+        RecordingLlmClient llmClient = new RecordingLlmClient();
+
+        ConversationCli conversationCli = new ConversationCli(
+                llmClient,
+                storage,
+                new MemoryManager(storage, 100, 30, 15),
+                null,
+                evidenceAliasReflectionService(),
+                null,
+                null,
+                new AgentGuideService(tempDir.resolve("missing-Agent.md").toString(), tempDir.toString()),
+                new SystemPromptBuilder(),
+                new NoopMemoryAsyncService(),
+                null,
+                skillService,
+                null,
+                toolsWithoutRag(skillService),
+                40,
+                15,
+                false,
+                0.35,
+                5
+        );
+
+        String reply = conversationCli.processUserMessage("继续");
+        assertThat(reply).isEqualTo("assistant reply");
+
+        ReflectionResult reflection = conversationCli.getLastReflectionResult();
+        assertThat(reflection).isNotNull();
+        assertThat(reflection.evidence_types()).containsExactly("TASK", "RECENT_HISTORY");
+        assertThat(reflection.evidence_purposes()).containsExactly("followup");
+
+        String systemPrompt = llmClient.capturedSystemPrompts.get(0);
+        assertThat(systemPrompt).contains("evidence_types: TASK, RECENT_HISTORY");
+        assertThat(systemPrompt).contains("evidence_purposes: followup");
+    }
+
+    @Test
     void processUserMessageWithMemoryForEvalShouldFallbackWhenReflectionServiceReturnsNull() {
         MemoryStorage storage = new MemoryStorage(tempDir.toString());
         storage.writeMetadata(Map.of(
@@ -2300,6 +2347,82 @@ class ConversationCliTest {
     }
 
     @Test
+    void getRecentEvidenceTracesShouldParseEpochMicroAndNanoTimestampFormats() {
+        MemoryStorage storage = new MemoryStorage(tempDir.toString());
+        storage.writeMetadata(Map.of(
+                "global_controls", Map.of(
+                        "use_saved_memories", true,
+                        "use_chat_history", false
+                )
+        ));
+        SkillService skillService = new SkillService(tempDir.toString());
+        RecordingLlmClient llmClient = new RecordingLlmClient();
+        ConversationCli conversationCli = new ConversationCli(
+                llmClient,
+                storage,
+                new MemoryManager(storage, 100, 30, 15),
+                null,
+                alwaysNeedMemoryReflectionService(),
+                null,
+                null,
+                new AgentGuideService(tempDir.resolve("missing-Agent.md").toString(), tempDir.toString()),
+                new SystemPromptBuilder(),
+                new NoopMemoryAsyncService(),
+                null,
+                skillService,
+                null,
+                toolsWithoutRag(skillService),
+                40,
+                15,
+                false,
+                0.35,
+                5
+        );
+
+        long epochMicros = 1_711_881_005_123_000L;
+        long epochNanos = 1_711_881_010_456_000_000L;
+
+        Map<String, Object> epochMicrosTrace = new LinkedHashMap<>();
+        epochMicrosTrace.put("timestamp", epochMicros);
+        epochMicrosTrace.put("user_message", "epoch micros");
+        epochMicrosTrace.put("memory_loaded", true);
+        epochMicrosTrace.put("reflection", Map.of("needs_memory", true, "reason", "epoch-micros"));
+        epochMicrosTrace.put("retrieved_insights", List.of());
+        epochMicrosTrace.put("used_insights", List.of());
+        epochMicrosTrace.put("retrieved_examples", List.of());
+        epochMicrosTrace.put("used_examples", List.of());
+        epochMicrosTrace.put("loaded_skills", List.of());
+        epochMicrosTrace.put("used_skills", List.of());
+        epochMicrosTrace.put("retrieved_tasks", List.of());
+        epochMicrosTrace.put("used_tasks", List.of());
+        epochMicrosTrace.put("used_evidence_summary", "none");
+        storage.appendMemoryEvidenceTrace(epochMicrosTrace);
+
+        Map<String, Object> epochNanosTrace = new LinkedHashMap<>();
+        epochNanosTrace.put("timestamp", String.valueOf(epochNanos));
+        epochNanosTrace.put("user_message", "epoch nanos");
+        epochNanosTrace.put("memory_loaded", true);
+        epochNanosTrace.put("reflection", Map.of("needs_memory", true, "reason", "epoch-nanos"));
+        epochNanosTrace.put("retrieved_insights", List.of());
+        epochNanosTrace.put("used_insights", List.of());
+        epochNanosTrace.put("retrieved_examples", List.of());
+        epochNanosTrace.put("used_examples", List.of());
+        epochNanosTrace.put("loaded_skills", List.of());
+        epochNanosTrace.put("used_skills", List.of());
+        epochNanosTrace.put("retrieved_tasks", List.of());
+        epochNanosTrace.put("used_tasks", List.of());
+        epochNanosTrace.put("used_evidence_summary", "none");
+        storage.appendMemoryEvidenceTrace(epochNanosTrace);
+
+        List<MemoryEvidenceTrace> traces = conversationCli.getRecentEvidenceTraces(2);
+        assertThat(traces).hasSize(2);
+        assertThat(traces.get(0).timestamp()).isEqualTo(
+                Instant.ofEpochMilli(epochMicros / 1_000L).atZone(ZoneId.systemDefault()).toLocalDateTime());
+        assertThat(traces.get(1).timestamp()).isEqualTo(
+                Instant.ofEpochMilli(epochNanos / 1_000_000L).atZone(ZoneId.systemDefault()).toLocalDateTime());
+    }
+
+    @Test
     void getRecentEvidenceTracesShouldIncludeInMemoryLatestWhenPersistedWriteLagging() {
         MemoryStorage storage = new MemoryStorage(tempDir.toString());
         storage.writeMetadata(Map.of(
@@ -2546,6 +2669,21 @@ class ConversationCliTest {
                         "优先看最近任务",
                         List.of("INVALID"),
                         List.of("INVALID")
+                ));
+        return reflectionService;
+    }
+
+    private MemoryReflectionService evidenceAliasReflectionService() {
+        MemoryReflectionService reflectionService = mock(MemoryReflectionService.class);
+        when(reflectionService.reflect(anyString(), anyString()))
+                .thenReturn(new ReflectionResult(
+                        true,
+                        "ACTION_FOLLOWUP",
+                        "需要跟进任务",
+                        0.89d,
+                        "优先看最近任务",
+                        List.of("task", "recentHistory"),
+                        List.of("follow-up", "n/a")
                 ));
         return reflectionService;
     }
