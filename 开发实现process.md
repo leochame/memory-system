@@ -1984,3 +1984,49 @@
 - 实际结果：
   - `/memory-debug` 与 `/memory-insights` 可稳定回读 `reflection/needs_memory`、`evidence/retrieved/insights/0`、`retrieved/examples/0`、`loaded/skills/1` 等 slash-path 字段，不再因路径风格差异导致覆盖率偏差
   - Step 2/6 的跨来源 trace 兼容能力从“点路径 + 中括号路径”扩展到“斜杠路径”，跨系统导入数据的可诊断性进一步提升
+
+#### 迭代记录 - 2026-03-31 20:02
+
+- 增强目标：继续执行 Step 6/6（调研与文档更新），围绕 Memory-System 打造“更多内容”的第十八层方案，将内容体系升级为“证据驱动内容实验室 + 发布流水线”。
+- 涉及文件：修改 `开发文档.md`、修改 `开发实现process.md`
+- 实现方案：
+  1. 将开发文档版本升级至 `v4.37`，在 `5.10` 新增 `5.10.28 Step 6/6 内容扩展蓝图（第十八层：证据驱动内容实验室与发布流水线）`。
+  2. 基于外部调研抽象 8 类实验型内容资产：`证据实验设计卡`、`基线对照运行卡`、`失败样本解剖卡`、`受众分发改写卡`、`发布回执实验卡`、`稳定性周报卡`、`复现实验脚本卡`、`季度内容结论公报卡`。
+  3. 固化执行约束（周度对照实验、证据三要素绑定、失败样本配额、发布反馈回流）并新增索引字段：`experiment_id/hypothesis/baseline_ref/variant_ref/metric_guardrail/audience_variant/distribution_channel/feedback_to_backlog_ref`。
+  4. 在开发文档新增 `6.30 需求二十八`，将实验目录规范、对照实验约束、证据绑定、失败配额与回流闭环转为可验收条款。
+  5. 补充调研参考来源：`Generative Agents`、`MemGPT`、`LangSmith Evaluation`、`Letta Stateful Agents`。
+- 状态：已完成
+- 实际结果：
+  - Step 6/6 从“纵向演化观察”进一步升级为“实验驱动内容生产”，每条内容可绑定实验假设、基线对照与证据回放。
+  - 围绕记忆系统形成“实验设计 -> 对照运行 -> 发布分发 -> 反馈回流 -> 下轮复测”的内容闭环，内容产能与可信度可同步提升。
+
+#### 迭代记录 - 2026-03-31 20:07
+
+- 增强目标：围绕 Step 1/6（6.1 Memory Reflection 调用链）按开发文档 `v4.37` 复核当前项目并完成验证闭环
+- 涉及文件：修改 `开发实现process.md`
+- 实现方案：
+  1. 对照 `开发文档.md` 6.1 的 5 项“需要完成”与 5 项“完成标准”，逐项复核 `ReflectionResult -> MemoryReflectionService -> ConversationCli -> SystemPromptBuilder` 调用链
+  2. 重点核查标准 4/5：`needs_memory=true` 时默认值按 `memory_purpose` 派生（如 `ACTION_FOLLOWUP -> TASK + followup`），以及 `recent-history/recentHistory`、`follow-up/followUp` 别名归一化
+  3. 执行定向回归：`./scripts/run-tests.sh -q -Dtest=ReflectionResultTest,MemoryReflectionServiceTest,SystemPromptBuilderTest,ConversationCliTest test`
+  4. 执行编译校验：`export JAVA_HOME=$(/usr/libexec/java_home) && mvn compile -q`
+- 状态：已完成
+- 实际结果：
+  - 当前实现与开发文档 `6.1` 保持一致，本轮未发现需新增代码的缺口
+  - Step 1/6 在主链路、提示词层、别名归一化与失败回退语义上均保持稳定
+  - 定向测试与编译均通过
+
+#### 迭代记录 - 2026-03-31 20:18
+
+- 增强目标：继续执行 Step 2/6（6.2 记忆证据追踪），补齐历史 trace 在“字段大小写 + 分隔符漂移”格式下的兼容解析，避免 `/memory-debug` 与 `/memory-insights` 在跨系统导出数据上因命名风格差异丢字段
+- 涉及文件：修改 `src/main/java/com/memsys/cli/ConversationCli.java`、修改 `src/main/java/com/memsys/memory/MemoryTraceInsightService.java`、修改 `src/test/java/com/memsys/cli/ConversationCliTest.java`、修改 `src/test/java/com/memsys/memory/MemoryTraceInsightServiceTest.java`、修改 `开发文档.md`、修改 `开发实现process.md`
+- 实现方案：
+  1. 在 `ConversationCli.readFirstNonNull(...)` 增加 `readByNormalizedKey(...)` 归一化匹配：字段名统一按“仅保留字母数字 + 小写”匹配，兼容 `snake_case/camelCase/UPPER_CASE/kebab-case` 差异
+  2. 在 `MemoryTraceInsightService.readFirstNonNull(...)` 同步复用同级规则，确保 `/memory-insights` 与 `/memory-debug` 的字段解析口径一致
+  3. 新增 `getLastEvidenceTraceShouldParseKebabAndUppercaseTraceFields`，覆盖 `/memory-debug` 在 `MEMORY-LOADED/REFLECTION-RESULT/NEEDS-MEMORY/RETRIEVED-INSIGHTS` 等命名风格下的回读
+  4. 新增 `analyzeRecentTracesShouldParseKebabAndUppercaseTraceFields`，覆盖 `/memory-insights` 在 kebab + uppercase 字段下的 retrieved/used 统计一致性
+  5. 同步开发文档 `6.2` 完成标准新增第 38 条，明确“字段命名风格漂移兼容”约束
+- 状态：已完成
+- 实际结果：
+  - `/memory-debug` 与 `/memory-insights` 可稳定解析 `MEMORY-LOADED`、`REFLECTION-RESULT`、`NEEDS-MEMORY`、`RETRIEVED-INSIGHTS` 等字段，不再因命名风格差异导致证据统计缺失
+  - Step 2/6 的跨来源 trace 兼容能力从“路径风格兼容”扩展到“字段命名风格兼容”，进一步降低跨系统导入后的排障成本
+  - 定向测试通过：`export JAVA_HOME=$(/usr/libexec/java_home) && mvn -q -Dtest=ConversationCliTest,MemoryTraceInsightServiceTest test`

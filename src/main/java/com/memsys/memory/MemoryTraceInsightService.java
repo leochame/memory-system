@@ -486,12 +486,50 @@ public class MemoryTraceInsightService {
             if (value != null) {
                 return value;
             }
+            Object normalizedMatch = readByNormalizedKey(source, key);
+            if (normalizedMatch != null) {
+                return normalizedMatch;
+            }
             Map<String, Object> flattenedSubtree = readFlattenedSubtree(source, key);
             if (!flattenedSubtree.isEmpty()) {
                 return flattenedSubtree;
             }
         }
         return null;
+    }
+
+    private Object readByNormalizedKey(Map<String, Object> source, String key) {
+        if (source == null || source.isEmpty() || key == null || key.isBlank()) {
+            return null;
+        }
+        String normalizedKey = normalizeLookupKey(key);
+        if (normalizedKey.isBlank()) {
+            return null;
+        }
+        for (Map.Entry<String, Object> entry : source.entrySet()) {
+            String entryKey = entry.getKey();
+            if (entryKey == null || entryKey.isBlank()) {
+                continue;
+            }
+            if (normalizedKey.equals(normalizeLookupKey(entryKey))) {
+                return entry.getValue();
+            }
+        }
+        return null;
+    }
+
+    private String normalizeLookupKey(String key) {
+        if (key == null || key.isBlank()) {
+            return "";
+        }
+        StringBuilder sb = new StringBuilder(key.length());
+        for (int i = 0; i < key.length(); i++) {
+            char ch = key.charAt(i);
+            if (Character.isLetterOrDigit(ch)) {
+                sb.append(Character.toLowerCase(ch));
+            }
+        }
+        return sb.toString();
     }
 
     @SuppressWarnings("unchecked")

@@ -455,6 +455,45 @@ class MemoryTraceInsightServiceTest {
     }
 
     @Test
+    void analyzeRecentTracesShouldParseKebabAndUppercaseTraceFields() {
+        MemoryStorage storage = new MemoryStorage(tempDir.toString());
+        MemoryTraceInsightService service = new MemoryTraceInsightService(storage);
+
+        Map<String, Object> trace = new LinkedHashMap<>();
+        trace.put("MEMORY-LOADED", "YES");
+        trace.put("REFLECTION-RESULT", Map.of(
+                "NEEDS-MEMORY", "Y",
+                "REASON", "kebab uppercase trace",
+                "EVIDENCE-PURPOSE", "follow-up"
+        ));
+        trace.put("RETRIEVED-INSIGHTS", "insight-a, insight-b");
+        trace.put("USED-INSIGHTS", "insight-b");
+        trace.put("RETRIEVED-EXAMPLES", "example-a");
+        trace.put("USED-EXAMPLES", "example-a");
+        trace.put("RETRIEVED-SKILLS", "debugging | planner");
+        trace.put("USED-SKILLS", "planner");
+        trace.put("RETRIEVED-TASKS", "task-a");
+        trace.put("USED-TASKS", "task-a");
+        storage.appendMemoryEvidenceTrace(trace);
+
+        MemoryTraceInsightService.InsightReport report = service.analyzeRecentTraces(20);
+
+        assertThat(report.sampleSize()).isEqualTo(1);
+        assertThat(report.memoryLoadedRate()).isEqualTo(1.0d);
+        assertThat(report.needsMemoryRate()).isEqualTo(1.0d);
+        assertThat(report.unknownNeedsMemoryRate()).isZero();
+        assertThat(report.insightStat().retrieved()).isEqualTo(2);
+        assertThat(report.insightStat().used()).isEqualTo(1);
+        assertThat(report.exampleStat().retrieved()).isEqualTo(1);
+        assertThat(report.exampleStat().used()).isEqualTo(1);
+        assertThat(report.skillStat().retrieved()).isEqualTo(2);
+        assertThat(report.skillStat().used()).isEqualTo(1);
+        assertThat(report.taskStat().retrieved()).isEqualTo(1);
+        assertThat(report.taskStat().used()).isEqualTo(1);
+        assertThat(report.topPurposes()).containsExactly("follow-up (1)");
+    }
+
+    @Test
     void analyzeRecentTracesShouldParseMapStyleEvidenceFields() {
         MemoryStorage storage = new MemoryStorage(tempDir.toString());
         MemoryTraceInsightService service = new MemoryTraceInsightService(storage);
