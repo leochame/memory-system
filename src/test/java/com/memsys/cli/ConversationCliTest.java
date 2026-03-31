@@ -877,6 +877,56 @@ class ConversationCliTest {
     }
 
     @Test
+    void processUserMessageShouldDeriveEvidenceDefaultsFromMemoryPurpose() {
+        MemoryStorage storage = new MemoryStorage(tempDir.toString());
+        storage.writeMetadata(Map.of(
+                "global_controls", Map.of(
+                        "use_saved_memories", true,
+                        "use_chat_history", false
+                )
+        ));
+        SkillService skillService = new SkillService(tempDir.toString());
+        RecordingLlmClient llmClient = new RecordingLlmClient();
+
+        ConversationCli conversationCli = new ConversationCli(
+                llmClient,
+                storage,
+                new MemoryManager(storage, 100, 30, 15),
+                null,
+                actionFollowupMalformedEvidenceReflectionService(),
+                null,
+                null,
+                new AgentGuideService(tempDir.resolve("missing-Agent.md").toString(), tempDir.toString()),
+                new SystemPromptBuilder(),
+                new NoopMemoryAsyncService(),
+                null,
+                skillService,
+                null,
+                toolsWithoutRag(skillService),
+                40,
+                15,
+                false,
+                0.35,
+                5
+        );
+
+        String reply = conversationCli.processUserMessage("继续跟进我上次安排的任务");
+        assertThat(reply).isEqualTo("assistant reply");
+
+        ReflectionResult reflection = conversationCli.getLastReflectionResult();
+        assertThat(reflection).isNotNull();
+        assertThat(reflection.needs_memory()).isTrue();
+        assertThat(reflection.memory_purpose()).isEqualTo("ACTION_FOLLOWUP");
+        assertThat(reflection.evidence_types()).containsExactly("TASK", "RECENT_HISTORY");
+        assertThat(reflection.evidence_purposes()).containsExactly("followup");
+
+        String systemPrompt = llmClient.capturedSystemPrompts.get(0);
+        assertThat(systemPrompt).contains("memory_purpose: ACTION_FOLLOWUP");
+        assertThat(systemPrompt).contains("evidence_types: TASK, RECENT_HISTORY");
+        assertThat(systemPrompt).contains("evidence_purposes: followup");
+    }
+
+    @Test
     void processUserMessageWithMemoryForEvalShouldFallbackWhenReflectionServiceReturnsNull() {
         MemoryStorage storage = new MemoryStorage(tempDir.toString());
         storage.writeMetadata(Map.of(
@@ -1854,6 +1904,71 @@ class ConversationCliTest {
     }
 
     @Test
+    void getLastEvidenceTraceShouldParseReflectionAliasAndRetrievedSkillsAlias() {
+        MemoryStorage storage = new MemoryStorage(tempDir.toString());
+        storage.writeMetadata(Map.of(
+                "global_controls", Map.of(
+                        "use_saved_memories", true,
+                        "use_chat_history", false
+                )
+        ));
+        SkillService skillService = new SkillService(tempDir.toString());
+        RecordingLlmClient llmClient = new RecordingLlmClient();
+        ConversationCli conversationCli = new ConversationCli(
+                llmClient,
+                storage,
+                new MemoryManager(storage, 100, 30, 15),
+                null,
+                alwaysNeedMemoryReflectionService(),
+                null,
+                null,
+                new AgentGuideService(tempDir.resolve("missing-Agent.md").toString(), tempDir.toString()),
+                new SystemPromptBuilder(),
+                new NoopMemoryAsyncService(),
+                null,
+                skillService,
+                null,
+                toolsWithoutRag(skillService),
+                40,
+                15,
+                false,
+                0.35,
+                5
+        );
+
+        Map<String, Object> traceRecord = new LinkedHashMap<>();
+        traceRecord.put("timestamp", LocalDateTime.now().toString());
+        traceRecord.put("user_message", "legacy alias trace");
+        traceRecord.put("memory_loaded", true);
+        traceRecord.put("reflection_result", Map.of(
+                "needs_memory", true,
+                "memory_purpose", "ACTION_FOLLOWUP",
+                "reason", "legacy reflection alias",
+                "evidence_types", List.of("invalid"),
+                "evidence_purposes", List.of("invalid")
+        ));
+        traceRecord.put("retrieved_insights", List.of());
+        traceRecord.put("used_insights", List.of());
+        traceRecord.put("retrieved_examples", List.of());
+        traceRecord.put("used_examples", List.of());
+        traceRecord.put("retrieved_skills", List.of("debugging", "planner"));
+        traceRecord.put("used_skills", List.of("planner"));
+        traceRecord.put("retrieved_tasks", List.of("task: 跟进周报"));
+        traceRecord.put("used_tasks", List.of("task: 跟进周报"));
+        traceRecord.put("used_evidence_summary", "skills 1/2");
+        storage.appendMemoryEvidenceTrace(traceRecord);
+
+        MemoryEvidenceTrace trace = conversationCli.getLastEvidenceTrace();
+        assertThat(trace).isNotNull();
+        assertThat(trace.reflection()).isNotNull();
+        assertThat(trace.reflection().memory_purpose()).isEqualTo("ACTION_FOLLOWUP");
+        assertThat(trace.reflection().evidence_types()).containsExactly("TASK", "RECENT_HISTORY");
+        assertThat(trace.reflection().evidence_purposes()).containsExactly("followup");
+        assertThat(trace.loadedSkills()).containsExactly("debugging", "planner");
+        assertThat(trace.usedSkills()).containsExactly("planner");
+    }
+
+    @Test
     void getLastEvidenceTraceShouldParseYesNoBooleanLegacyFields() {
         MemoryStorage storage = new MemoryStorage(tempDir.toString());
         storage.writeMetadata(Map.of(
@@ -2273,6 +2388,21 @@ class ConversationCliTest {
                         "N/A",
                         List.of("RECENT_HISTORY"),
                         List.of("continuity")
+                ));
+        return reflectionService;
+    }
+
+    private MemoryReflectionService actionFollowupMalformedEvidenceReflectionService() {
+        MemoryReflectionService reflectionService = mock(MemoryReflectionService.class);
+        when(reflectionService.reflect(anyString(), anyString()))
+                .thenReturn(new ReflectionResult(
+                        true,
+                        "ACTION_FOLLOWUP",
+                        "需要跟进任务",
+                        0.89d,
+                        "优先看最近任务",
+                        List.of("INVALID"),
+                        List.of("INVALID")
                 ));
         return reflectionService;
     }

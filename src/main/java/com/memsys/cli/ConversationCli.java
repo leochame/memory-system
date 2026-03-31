@@ -1449,7 +1449,12 @@ public class ConversationCli {
                 normalizeStringList(readFirstNonNull(record, "used_insights", "usedInsights")),
                 normalizeStringList(readFirstNonNull(record, "retrieved_examples", "retrievedExamples")),
                 normalizeStringList(readFirstNonNull(record, "used_examples", "usedExamples")),
-                normalizeStringList(readFirstNonNull(record, "loaded_skills", "loadedSkills")),
+                normalizeStringList(readFirstNonNull(
+                        record,
+                        "loaded_skills",
+                        "loadedSkills",
+                        "retrieved_skills",
+                        "retrievedSkills")),
                 normalizeStringList(readFirstNonNull(record, "used_skills", "usedSkills")),
                 normalizeStringList(readFirstNonNull(record, "retrieved_tasks", "retrievedTasks")),
                 normalizeStringList(readFirstNonNull(record, "used_tasks", "usedTasks")),
@@ -1490,7 +1495,7 @@ public class ConversationCli {
         if (record == null || record.isEmpty()) {
             return null;
         }
-        Object reflectionObj = record.get("reflection");
+        Object reflectionObj = readFirstNonNull(record, "reflection", "reflection_result", "reflectionResult");
         if (reflectionObj instanceof Map<?, ?> rawMap) {
             ReflectionResult nested = parseReflectionMap((Map<String, Object>) rawMap);
             if (nested != null) {

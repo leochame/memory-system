@@ -1490,3 +1490,45 @@
 - 实际结果：
   - 历史 trace 中 `confidence="85%"` / `confidence="85 %"` / `confidence="85％"` 可稳定归一化为 `0.85`
   - `/memory-debug` 与 `/memory-debug [N]` 在跨系统导出置信度格式下展示更稳定，减少默认值回退造成的诊断偏差
+
+#### 迭代记录 - 2026-03-31 18:25
+
+- 增强目标：继续执行 Step 6/6（调研与文档更新），围绕 Memory-System 打造“更多内容”的第八层方案，将内容体系升级为“生态协作化 + 共创回流”
+- 涉及文件：修改 `开发文档.md`、修改 `开发实现process.md`
+- 实现方案：
+  1. 将开发文档版本升级至 `v4.18`，在 `5.10` 新增 `5.10.18 Step 6/6 内容扩展蓝图（第八层：生态协作化与共创回流）`
+  2. 新增 8 类协作型内容资产：`复测任务单`、`外部误判回收卡`、`修复收益对照卡`、`协作专题共创卡`、`复测贡献榜`、`答辩外部证明卡`、`论文外部有效性卡`、`共创回流追踪卡`
+  3. 固化协作执行机制（周任务批次/失败样本回收/双周修复收益对照/月度贡献与闭环追踪）与新增索引字段：`collab_batch_id/contributor_type/retest_case_count/valid_issue_count/fix_adoption_count/external_proof_level/closure_status/impact_summary`
+  4. 在开发文档新增 `6.20 需求十八`，将协作目录规范、失败样本占比、72 小时回流约束与双周执行小结转化为可验收条款
+- 状态：已完成
+- 实际结果：
+  - Step 6/6 从“场景赛题化挑战集”进一步升级为“外部协作复测 + 共创回流”机制，内容体系可持续吸收外部样本并反哺开发
+  - 围绕记忆系统形成“复测任务 -> 误判回收 -> 修复采纳 -> 外部再验证 -> 答辩/论文复用”的新闭环，进一步增强可验证性与说服力
+
+#### 迭代记录 - 2026-03-31 15:10
+
+- 增强目标：围绕 Step 1/6（6.1 Memory Reflection 调用链）执行文档对齐复核，并补齐主链路级回归用例，确保“按 `memory_purpose` 派生默认证据”在 `ConversationCli -> SystemPromptBuilder` 链路稳定成立
+- 涉及文件：修改 `src/test/java/com/memsys/cli/ConversationCliTest.java`、修改 `开发实现process.md`
+- 实现方案：
+  1. 新增测试 `processUserMessageShouldDeriveEvidenceDefaultsFromMemoryPurpose`
+  2. 构造 `needs_memory=true + memory_purpose=ACTION_FOLLOWUP + evidence_types/evidence_purposes 非法` 场景
+  3. 断言主链路反思结果被规范化为 `evidence_types=TASK, RECENT_HISTORY` 与 `evidence_purposes=followup`
+  4. 同时断言系统提示词显式包含上述派生字段，避免“运行时已修正但 Prompt 未消费”的回归
+- 状态：已完成
+- 实际结果：
+  - Step 1/6 关键验收项“默认值按 `memory_purpose` 派生，不统一回退 continuity”已在主链路层增加自动化保护
+  - 定向测试通过：`export JAVA_HOME=$(/usr/libexec/java_home) && mvn -q -Dtest=ConversationCliTest test`
+
+#### 迭代记录 - 2026-03-31 22:20
+
+- 增强目标：继续执行 Step 2/6（6.2 记忆证据追踪），补齐历史 trace 在字段别名差异下的兼容解析，避免 `/memory-debug` 将 Skills 检索量误判为 0
+- 涉及文件：修改 `src/main/java/com/memsys/cli/ConversationCli.java`、修改 `src/test/java/com/memsys/cli/ConversationCliTest.java`、修改 `开发文档.md`、修改 `开发实现process.md`
+- 实现方案：
+  1. 在 `ConversationCli.parseReflection(...)` 中补充反思对象别名读取：`reflection_result`、`reflectionResult`
+  2. 在 `ConversationCli.parseEvidenceTrace(...)` 中补充 Skills 检索字段别名读取：`retrieved_skills`、`retrievedSkills`，与既有 `loaded_skills/loadedSkills` 统一归并
+  3. 新增回归测试 `getLastEvidenceTraceShouldParseReflectionAliasAndRetrievedSkillsAlias`，覆盖“反思字段别名 + Skills 检索字段别名 + 证据默认值派生”组合场景
+  4. 同步开发文档 6.2 完成标准，新增字段别名兼容约束（`reflection_result/reflectionResult`、`retrieved_skills/retrievedSkills`）
+- 状态：已完成
+- 实际结果：
+  - `/memory-debug` 与 `/memory-debug [N]` 在跨系统导出的字段命名差异下可稳定回读反思对象与 Skills 检索列表
+  - Skills 覆盖率诊断不再因字段别名差异退化为 `0/N`，Step 2/6 的跨来源 trace 可观测性进一步提升
