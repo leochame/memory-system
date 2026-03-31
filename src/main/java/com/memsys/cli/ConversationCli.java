@@ -1,5 +1,7 @@
 package com.memsys.cli;
 
+import com.fasterxml.jackson.core.type.TypeReference;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.memsys.llm.LlmClient;
 import com.memsys.memory.ConversationSummaryService;
 import com.memsys.memory.model.Memory;
@@ -43,6 +45,7 @@ public class ConversationCli {
     private static final int BASE_PROFILE_MAX_CHARS = 800;
     private static final int FAST_RAG_MAX_RESULTS = 3;
     private static final int FAST_EXAMPLE_MAX_RESULTS = 2;
+    private static final ObjectMapper TRACE_PARSER = new ObjectMapper();
 
     private final LlmClient llmClient;
     private final MemoryStorage storage;
@@ -1408,6 +1411,11 @@ public class ConversationCli {
             if (nested != null) {
                 return nested;
             }
+        } else if (reflectionObj instanceof String rawText) {
+            ReflectionResult nested = parseReflectionFromJsonText(rawText);
+            if (nested != null) {
+                return nested;
+            }
         }
         // 兼容早期 trace：reflection 字段缺失，反思字段直接扁平存储在顶层。
         return parseReflectionMap(record);
@@ -1455,7 +1463,49 @@ public class ConversationCli {
         if (text.isBlank()) {
             return List.of();
         }
+        List<String> parsedFromJson = parseStringListFromJsonText(text);
+        if (!parsedFromJson.isEmpty()) {
+            return parsedFromJson;
+        }
         return List.of(text);
+    }
+
+    @SuppressWarnings("unchecked")
+    private ReflectionResult parseReflectionFromJsonText(String rawText) {
+        if (rawText == null) {
+            return null;
+        }
+        String text = rawText.trim();
+        if (text.isBlank() || !text.startsWith("{") || !text.endsWith("}")) {
+            return null;
+        }
+        try {
+            Map<String, Object> reflectionMap = TRACE_PARSER.readValue(text, new TypeReference<Map<String, Object>>() {
+            });
+            return parseReflectionMap(reflectionMap);
+        } catch (Exception ignored) {
+            return null;
+        }
+    }
+
+    private List<String> parseStringListFromJsonText(String rawText) {
+        if (rawText == null) {
+            return List.of();
+        }
+        String text = rawText.trim();
+        if (text.isBlank() || !text.startsWith("[") || !text.endsWith("]")) {
+            return List.of();
+        }
+        try {
+            List<Object> values = TRACE_PARSER.readValue(text, new TypeReference<List<Object>>() {
+            });
+            return values.stream()
+                    .map(this::normalizeText)
+                    .filter(s -> !s.isBlank())
+                    .toList();
+        } catch (Exception ignored) {
+            return List.of();
+        }
     }
 
     private String normalizeText(Object value) {

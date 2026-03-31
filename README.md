@@ -552,6 +552,18 @@ scheduling:
 
 ## 真实 API E2E 回归（手动）
 
+本地跑单测/全量测试（自动兜底 `JAVA_HOME`）：
+
+```bash
+./scripts/run-tests.sh
+```
+
+也可透传 Maven 参数：
+
+```bash
+./scripts/run-tests.sh -q -Dtest=ConversationCliTest test
+```
+
 默认测试不会调用真实模型。需要手动开启：
 
 ```bash

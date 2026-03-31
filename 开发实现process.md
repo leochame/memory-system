@@ -996,3 +996,32 @@
 - 实际结果：
   - 形成了围绕现有命令与文件资产的内容生产闭环（`/memory-insights`、`/memory-scenes`、`/tasks`）
   - 后续迭代可以按统一模板持续产出周复盘、案例卡与任务闭环卡，直接服务答辩和论文写作
+
+#### 迭代记录 - 2026-03-31 11:55
+
+- 增强目标：继续执行 Step 6/6（调研深化），把“内容化产出”从方向描述升级为可执行规范（模板字段、目录结构、节奏指标）
+- 涉及文件：修改 `开发文档.md`、修改 `开发实现process.md`
+- 实现方案：
+  1. 扩展开发文档 5.10：补齐四条内容支柱（质量/场景/闭环/研究）与六类内容资产池优先级
+  2. 明确统一模板字段（时间窗口、数据来源、关键指标、证据片段、结论、下一步动作）与目录规范（`.memory/content-assets/**`）
+  3. 强化开发文档 6.9：从“三类模板”升级为“五类模板”，补充命名规则、周度产出节奏、回归响应时效约束
+  4. 将验收标准从“可生成内容”提升为“可持续运营”：周度产出基线 + 48 小时回归告警闭环
+- 状态：已完成
+- 实际结果：
+  - Step 6/6 从“文档补充”升级为“内容运营规范”，后续迭代可按固定口径持续沉淀
+  - 围绕记忆系统的数据资产形成统一产出协议，减少论文、答辩、周报间的口径漂移风险
+
+#### 迭代记录 - 2026-03-31 12:40
+
+- 增强目标：继续执行 Step 2/6（6.2 记忆证据追踪），补齐 legacy trace 在“字符串化 JSON 字段”下的兼容解析能力，避免 `/memory-debug` 展示退化为原始字符串
+- 涉及文件：修改 `src/main/java/com/memsys/cli/ConversationCli.java`、修改 `src/test/java/com/memsys/cli/ConversationCliTest.java`、修改 `开发文档.md`、修改 `开发实现process.md`
+- 实现方案：
+  1. `ConversationCli.parseReflection()` 增加 `reflection` 字段为 JSON 字符串时的回读解析分支（`{...}` → 结构化 `ReflectionResult`）
+  2. `ConversationCli.normalizeStringList()` 增加 JSON 数组字符串解析（`[...]`），覆盖 `retrieved_* / used_* / loaded_skills` 等列表字段
+  3. 保持现有三态语义约束：`needs_memory` 仍需可明确解析才构造 `ReflectionResult`
+  4. 新增回归测试 `getLastEvidenceTraceShouldParseStringifiedReflectionAndListFields`，验证字符串化 reflection 与字符串化列表字段可被正确解析
+  5. 同步开发文档 6.2 完成标准，新增“字符串化 JSON 兼容”约束
+- 状态：已完成
+- 实际结果：
+  - 历史 trace 即使存在 `"reflection":"{...}"`、`"retrieved_insights":"[...]"` 等 legacy 形态，也可被 `/memory-debug` 正常消费
+  - 降低了手工修复/跨版本迁移后 trace 可视化退化风险，提升证据追踪链路的可用性

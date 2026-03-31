@@ -158,11 +158,30 @@ public final class Schemas {
                 .build());
         props.put("evidence_types", JsonArraySchema.builder()
                 .description("Expected evidence types: USER_INSIGHT, SESSION_SUMMARY, TASK, EXAMPLE, SKILL, RECENT_HISTORY")
-                .items(JsonStringSchema.builder().description("evidence type").build())
+                .items(JsonEnumSchema.builder()
+                        .description("evidence type")
+                        .enumValues(List.of(
+                                "USER_INSIGHT",
+                                "SESSION_SUMMARY",
+                                "TASK",
+                                "EXAMPLE",
+                                "SKILL",
+                                "RECENT_HISTORY"
+                        ))
+                        .build())
                 .build());
         props.put("evidence_purposes", JsonArraySchema.builder()
                 .description("Legacy purpose list for backward compatibility: personalization, continuity, constraint, experience, followup")
-                .items(JsonStringSchema.builder().description("evidence purpose").build())
+                .items(JsonEnumSchema.builder()
+                        .description("evidence purpose")
+                        .enumValues(List.of(
+                                "personalization",
+                                "continuity",
+                                "constraint",
+                                "experience",
+                                "followup"
+                        ))
+                        .build())
                 .build());
 
         return JsonSchema.builder()
