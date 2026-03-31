@@ -29,6 +29,7 @@ import org.springframework.stereotype.Component;
 import java.time.LocalDateTime;
 import java.time.OffsetDateTime;
 import java.time.ZoneId;
+import java.time.Instant;
 import java.time.format.DateTimeFormatter;
 import java.util.*;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -1466,9 +1467,19 @@ public class ConversationCli {
         if (value == null) {
             return null;
         }
+        if (value instanceof Number number) {
+            LocalDateTime parsedFromEpoch = parseEpochTimestamp(number.doubleValue());
+            if (parsedFromEpoch != null) {
+                return parsedFromEpoch;
+            }
+        }
         String text = normalizeText(value);
         if (text.isBlank()) {
             return null;
+        }
+        LocalDateTime parsedFromEpochText = parseEpochTimestamp(text);
+        if (parsedFromEpochText != null) {
+            return parsedFromEpochText;
         }
         try {
             return LocalDateTime.parse(text);
@@ -1486,6 +1497,43 @@ public class ConversationCli {
             return LocalDateTime.parse(text, DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss"));
         } catch (Exception ignored) {
             // ignore malformed timestamp and keep null for resilient CLI display
+            return null;
+        }
+    }
+
+    private LocalDateTime parseEpochTimestamp(String text) {
+        if (text == null) {
+            return null;
+        }
+        String normalized = text.trim();
+        if (!normalized.matches("[-+]?\\d{10,17}(\\.\\d+)?")) {
+            return null;
+        }
+        try {
+            return parseEpochTimestamp(Double.parseDouble(normalized));
+        } catch (NumberFormatException ignored) {
+            return null;
+        }
+    }
+
+    private LocalDateTime parseEpochTimestamp(double rawEpoch) {
+        if (Double.isNaN(rawEpoch) || Double.isInfinite(rawEpoch)) {
+            return null;
+        }
+        double abs = Math.abs(rawEpoch);
+        long epochMillis;
+        if (abs >= 1_000_000_000_000d) {
+            epochMillis = (long) rawEpoch;
+        } else if (abs >= 1_000_000_000d) {
+            epochMillis = (long) (rawEpoch * 1000d);
+        } else {
+            return null;
+        }
+        try {
+            return Instant.ofEpochMilli(epochMillis)
+                    .atZone(ZoneId.systemDefault())
+                    .toLocalDateTime();
+        } catch (Exception ignored) {
             return null;
         }
     }

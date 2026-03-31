@@ -25,7 +25,9 @@ import org.junit.jupiter.api.io.TempDir;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.time.Instant;
 import java.time.LocalDateTime;
+import java.time.ZoneId;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -2219,6 +2221,82 @@ class ConversationCliTest {
         List<MemoryEvidenceTrace> traces = conversationCli.getRecentEvidenceTraces(2);
         assertThat(traces).hasSize(2);
         assertThat(traces.get(0).timestamp()).isEqualTo(traces.get(1).timestamp());
+    }
+
+    @Test
+    void getRecentEvidenceTracesShouldParseEpochTimestampFormats() {
+        MemoryStorage storage = new MemoryStorage(tempDir.toString());
+        storage.writeMetadata(Map.of(
+                "global_controls", Map.of(
+                        "use_saved_memories", true,
+                        "use_chat_history", false
+                )
+        ));
+        SkillService skillService = new SkillService(tempDir.toString());
+        RecordingLlmClient llmClient = new RecordingLlmClient();
+        ConversationCli conversationCli = new ConversationCli(
+                llmClient,
+                storage,
+                new MemoryManager(storage, 100, 30, 15),
+                null,
+                alwaysNeedMemoryReflectionService(),
+                null,
+                null,
+                new AgentGuideService(tempDir.resolve("missing-Agent.md").toString(), tempDir.toString()),
+                new SystemPromptBuilder(),
+                new NoopMemoryAsyncService(),
+                null,
+                skillService,
+                null,
+                toolsWithoutRag(skillService),
+                40,
+                15,
+                false,
+                0.35,
+                5
+        );
+
+        long epochSeconds = 1_711_881_000L;
+        long epochMillis = 1_711_881_005_123L;
+
+        Map<String, Object> epochSecondTrace = new LinkedHashMap<>();
+        epochSecondTrace.put("timestamp", epochSeconds);
+        epochSecondTrace.put("user_message", "epoch seconds");
+        epochSecondTrace.put("memory_loaded", true);
+        epochSecondTrace.put("reflection", Map.of("needs_memory", true, "reason", "epoch-seconds"));
+        epochSecondTrace.put("retrieved_insights", List.of());
+        epochSecondTrace.put("used_insights", List.of());
+        epochSecondTrace.put("retrieved_examples", List.of());
+        epochSecondTrace.put("used_examples", List.of());
+        epochSecondTrace.put("loaded_skills", List.of());
+        epochSecondTrace.put("used_skills", List.of());
+        epochSecondTrace.put("retrieved_tasks", List.of());
+        epochSecondTrace.put("used_tasks", List.of());
+        epochSecondTrace.put("used_evidence_summary", "none");
+        storage.appendMemoryEvidenceTrace(epochSecondTrace);
+
+        Map<String, Object> epochMillisTrace = new LinkedHashMap<>();
+        epochMillisTrace.put("timestamp", String.valueOf(epochMillis));
+        epochMillisTrace.put("user_message", "epoch millis");
+        epochMillisTrace.put("memory_loaded", true);
+        epochMillisTrace.put("reflection", Map.of("needs_memory", true, "reason", "epoch-millis"));
+        epochMillisTrace.put("retrieved_insights", List.of());
+        epochMillisTrace.put("used_insights", List.of());
+        epochMillisTrace.put("retrieved_examples", List.of());
+        epochMillisTrace.put("used_examples", List.of());
+        epochMillisTrace.put("loaded_skills", List.of());
+        epochMillisTrace.put("used_skills", List.of());
+        epochMillisTrace.put("retrieved_tasks", List.of());
+        epochMillisTrace.put("used_tasks", List.of());
+        epochMillisTrace.put("used_evidence_summary", "none");
+        storage.appendMemoryEvidenceTrace(epochMillisTrace);
+
+        List<MemoryEvidenceTrace> traces = conversationCli.getRecentEvidenceTraces(2);
+        assertThat(traces).hasSize(2);
+        assertThat(traces.get(0).timestamp()).isEqualTo(
+                Instant.ofEpochSecond(epochSeconds).atZone(ZoneId.systemDefault()).toLocalDateTime());
+        assertThat(traces.get(1).timestamp()).isEqualTo(
+                Instant.ofEpochMilli(epochMillis).atZone(ZoneId.systemDefault()).toLocalDateTime());
     }
 
     @Test

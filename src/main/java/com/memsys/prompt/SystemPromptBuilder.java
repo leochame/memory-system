@@ -187,6 +187,9 @@ public class SystemPromptBuilder {
             prompt.append("- 若前端已提供明确标题/时间/命令，优先传 `title/due_at_iso/execute_command` 直接建任务\n");
         }
         prompt.append("- 当前系统支持定时任务与 IM 主动提醒；当用户提出提醒需求时，不要声称“无法主动提醒”\n");
+        prompt.append("- 在写任何结论、方案或需求条目之前，必须先检索项目内真实上下文（优先使用 `rg/grep/sed/head/tail/cat` 或 `load_skill`）\n");
+        prompt.append("- 每条关键信息都必须标注可追溯来源（文件路径/命令输出/trace 字段）；若无法确认来源，必须显式标记“待确认”\n");
+        prompt.append("- 严禁出现“没有来源但看起来合理就直接写入需求文档”的情况\n");
         prompt.append("- 请根据 messages 列表中的实际对话内容进行回复，同时参考背景信息提供个性化回复\n");
         prompt.append("\n请基于以上背景信息和 messages 列表中的实际对话内容，与用户进行对话。\n");
 

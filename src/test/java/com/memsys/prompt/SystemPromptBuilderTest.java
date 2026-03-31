@@ -60,6 +60,8 @@ class SystemPromptBuilderTest {
         assertThat(prompt).contains("run_shell_command(command, cwd)");
         assertThat(prompt).contains("run_python_script(script, args_json)");
         assertThat(prompt).contains("create_task(...)");
+        assertThat(prompt).contains("每条关键信息都必须标注可追溯来源");
+        assertThat(prompt).contains("必须显式标记“待确认”");
         assertThat(prompt).contains("## 3.5 记忆反思决策");
         assertThat(prompt).contains("needs_memory: true");
         assertThat(prompt).contains("memory_purpose: PERSONALIZATION");

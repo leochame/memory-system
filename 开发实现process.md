@@ -1592,3 +1592,18 @@
   - `/memory-insights` 在历史 trace 的命名差异、字符串化字段和 legacy 布尔值场景下可稳定统计，不再出现 skills 检索量或 needs_memory 比率异常漂移
   - Step 2/6 从“调试视图可读”扩展到“洞察报表可比”，降低跨版本数据分析误判风险
   - 定向测试通过：`./scripts/run-tests.sh -q -Dtest=MemoryTraceInsightServiceTest test`
+
+#### 迭代记录 - 2026-03-31 16:30
+
+- 增强目标：继续执行 Step 2/6（6.2 记忆证据追踪），补齐历史 trace 在 epoch 时间戳（秒/毫秒）格式下的兼容解析，避免 `/memory-debug [N]` 在跨来源数据上出现 `(unknown)` 时间
+- 涉及文件：修改 `src/main/java/com/memsys/cli/ConversationCli.java`、修改 `src/test/java/com/memsys/cli/ConversationCliTest.java`、修改 `开发文档.md`、修改 `开发实现process.md`
+- 实现方案：
+  1. 在 `ConversationCli.parseTraceTimestamp(...)` 中新增 epoch 时间戳解析分支，支持 `Number` 与数字字符串
+  2. 新增 `parseEpochTimestamp(...)` 解析逻辑：`10+` 位秒级时间戳与 `13+` 位毫秒级时间戳统一转换为本地 `LocalDateTime`
+  3. 保持原有时间戳兼容链路不变（`ISO_LOCAL_DATE_TIME` / `ISO_OFFSET_DATE_TIME` / `yyyy-MM-dd HH:mm:ss`），仅在这些格式不命中时走 epoch 解析
+  4. 新增测试 `getRecentEvidenceTracesShouldParseEpochTimestampFormats`，覆盖“秒级数字 + 毫秒级字符串”双场景
+  5. 同步开发文档 `6.2` 完成标准第 16 条，补充 epoch 秒/毫秒兼容要求
+- 状态：已完成
+- 实际结果：
+  - `/memory-debug [N]` 历史视图在跨系统导出的 epoch 时间戳场景下可稳定显示时间，不再退化为 `(unknown)`
+  - 定向测试通过：`./scripts/run-tests.sh -q -Dtest=ConversationCliTest test`
