@@ -262,6 +262,9 @@ public class SystemPromptBuilder {
 
     private List<String> normalizeEvidenceTypes(List<String> evidenceTypes, boolean needsMemory) {
         if (!needsMemory || evidenceTypes == null || evidenceTypes.isEmpty()) {
+            if (needsMemory) {
+                return List.of("USER_INSIGHT", "RECENT_HISTORY");
+            }
             return List.of();
         }
         Set<String> normalized = evidenceTypes.stream()
@@ -271,11 +274,17 @@ public class SystemPromptBuilder {
                 .map(s -> s.toUpperCase(Locale.ROOT))
                 .filter(ReflectionResult.KNOWN_EVIDENCE_TYPES::contains)
                 .collect(java.util.stream.Collectors.toCollection(LinkedHashSet::new));
-        return List.copyOf(normalized);
+        if (!normalized.isEmpty()) {
+            return List.copyOf(normalized);
+        }
+        return List.of("USER_INSIGHT", "RECENT_HISTORY");
     }
 
     private List<String> normalizeEvidencePurposes(List<String> evidencePurposes, boolean needsMemory) {
         if (!needsMemory || evidencePurposes == null || evidencePurposes.isEmpty()) {
+            if (needsMemory) {
+                return List.of("continuity");
+            }
             return List.of();
         }
         Set<String> normalized = evidencePurposes.stream()
@@ -285,7 +294,10 @@ public class SystemPromptBuilder {
                 .map(s -> s.toLowerCase(Locale.ROOT))
                 .filter(ReflectionResult.KNOWN_PURPOSES::contains)
                 .collect(java.util.stream.Collectors.toCollection(LinkedHashSet::new));
-        return List.copyOf(normalized);
+        if (!normalized.isEmpty()) {
+            return List.copyOf(normalized);
+        }
+        return List.of("continuity");
     }
 
     public String buildTemporaryPrompt() {

@@ -1261,3 +1261,32 @@
 - 实际结果：
   - `/memory-debug [N]` 历史视图在 `2026-03-31T18:30:00+08:00` 与 `2026-03-31 18:31:05` 两类历史时间戳上可稳定展示时间线
   - Step 2/6 在历史 trace 跨版本可读性与可诊断性上进一步增强
+
+#### 迭代记录 - 2026-03-31 22:10
+
+- 增强目标：继续执行 Step 6/6（调研与文档更新），围绕 Memory-System 打造“更多可持续内容”，把卡片化产出升级为系列栏目化执行机制
+- 涉及文件：修改 `开发文档.md`、修改 `开发实现process.md`
+- 实现方案：
+  1. 将开发文档版本升级至 `v4.8`，在 `5.10` 新增 `5.10.12 Step 6/6 内容扩展蓝图（第二层：栏目化与系列化）`
+  2. 固化 6 条系列栏目：`Memory Weekly Benchmark`、`Memory Failure Library`、`Scene Replay Pack`、`Governance Decision Log`、`Proactive Hit Report`、`Defense Snapshot`
+  3. 为系列内容新增统一字段：`series_name/episode_no/baseline_ref/delta_summary/decision`，确保可对照、可追踪、可决策
+  4. 在开发文档新增 `6.14 需求十二`，将系列栏目频率、基线对照约束、48 小时回流判断、周度执行小结转化为可验收条款
+- 状态：已完成
+- 实际结果：
+  - Step 6/6 从“内容卡模板化”进一步升级为“栏目化连续运营”，可稳定覆盖开发、场景、治理、主动服务与答辩素材
+  - 文档侧已形成“栏目定义 -> 模板字段 -> 执行频率 -> 验收标准”的完整闭环，后续可直接按周执行并追踪回流效果
+
+#### 迭代记录 - 2026-03-31 22:58
+
+- 增强目标：继续执行 Step 2/6（6.2 记忆证据追踪），补齐“needs_memory=true 但证据字段缺失/非法”场景下的默认兜底，确保 `/memory-debug` 与主提示词语义一致
+- 涉及文件：修改 `src/main/java/com/memsys/cli/ConversationCli.java`、修改 `src/test/java/com/memsys/cli/ConversationCliTest.java`、修改 `开发文档.md`、修改 `开发实现process.md`
+- 实现方案：
+  1. `ConversationCli.normalizeEvidenceTypes/normalizeEvidencePurposes` 增加默认回退：当 `needs_memory=true` 且字段为空或归一化后为空时，回退到 `USER_INSIGHT, RECENT_HISTORY` 与 `continuity`
+  2. `parseReflectionMap(...)` 调整 `evidence_purposes/evidence_purpose` 解析顺序：先合并原始字段，再统一归一化，避免合法 legacy 单值被默认值覆盖
+  3. 新增回归测试 `getLastEvidenceTraceShouldFallbackEvidenceFieldsWhenNeedsMemoryIsTrue`，覆盖“非法证据字段 -> 默认兜底”场景
+  4. 保持既有兼容语义：`needs_memory=false` 仍强制清空证据字段，`evidence_purpose` 合法值仍可被正确保留
+  5. 同步开发文档 6.2 完成标准，新增“needs_memory=true 时证据字段默认兜底”约束
+- 状态：已完成
+- 实际结果：
+  - `/memory-debug` 在历史 trace 的异常字段场景下不再展示空证据集合，且与 `SystemPromptBuilder` 的默认反思语义保持一致
+  - 定向测试通过：`./scripts/run-tests.sh -q -Dtest=ConversationCliTest,SystemPromptBuilderTest test`
