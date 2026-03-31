@@ -1892,17 +1892,24 @@ public class ConversationCli {
         if (text.isBlank()) {
             return text;
         }
-        if ((text.startsWith("{") && text.endsWith("}"))
-                || (text.startsWith("[") && text.endsWith("]"))) {
-            return text;
-        }
-        if (text.length() >= 2 && text.startsWith("\"") && text.endsWith("\"")) {
+        for (int depth = 0; depth < 6; depth++) {
+            if ((text.startsWith("{") && text.endsWith("}"))
+                    || (text.startsWith("[") && text.endsWith("]"))) {
+                return text;
+            }
+            if (text.length() < 2 || !text.startsWith("\"") || !text.endsWith("\"")) {
+                return text;
+            }
             try {
                 String unwrapped = TRACE_PARSER.readValue(text, String.class);
                 if (unwrapped == null) {
                     return null;
                 }
-                return unwrapped.trim();
+                String trimmed = unwrapped.trim();
+                if (trimmed.equals(text)) {
+                    return trimmed;
+                }
+                text = trimmed;
             } catch (Exception ignored) {
                 return text;
             }

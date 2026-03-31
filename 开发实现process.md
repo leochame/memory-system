@@ -1822,3 +1822,47 @@
   - `/memory-debug` 与 `/memory-insights` 在 legacy 导出的“逗号/分号/竖线/多行”证据字段下可正确拆分为多条证据，不再把整段文本计为单条
   - 分隔字符串中的项目符号（`- item`、`1. item`）可被规范化去噪，证据展示与覆盖率统计更稳定
   - 定向测试通过：`export JAVA_HOME=$(/usr/libexec/java_home) && mvn -q -Dtest=ConversationCliTest,MemoryTraceInsightServiceTest test`
+
+#### 迭代记录 - 2026-03-31 18:55
+
+- 增强目标：继续执行 Step 6/6（调研与文档更新），围绕 Memory-System 打造“更多内容”的第十五层方案，将内容体系升级为“场景剧本化 + 复盘栏目闭环”
+- 涉及文件：修改 `开发文档.md`、修改 `开发实现process.md`
+- 实现方案：
+  1. 将开发文档版本升级至 `v4.30`，在 `5.10` 新增 `5.10.25 Step 6/6 内容扩展蓝图（第十五层：场景剧本化与复盘栏目闭环）`
+  2. 新增 8 类栏目化内容资产：`场景剧本母版卡`、`周更场景回放卡`、`修复收益账本卡`、`失败样本精选卡`、`版本差异速报卡`、`栏目问答追更卡`、`证据缺口补齐卡`、`月度栏目收官卡`
+  3. 固化栏目闭环机制（回放 -> 对照 -> 发布 -> 回流）与新增索引字段：`column_id/scenario_script_id/baseline_run_ref/current_run_ref/delta_signal/failure_case_ref/feedback_to_backlog_ref/next_validation_due`
+  4. 在开发文档新增 `6.27 需求二十五`，将栏目目录规范、周更约束、失败占比约束、反馈回流与双周闭环标准转化为可验收条款
+- 状态：已完成
+- 实际结果：
+  - Step 6/6 从“证据图谱叙事 + 多受众改写”进一步升级为“栏目化持续运营”，同类场景可按周对照输出并持续回流优化
+  - 围绕记忆系统形成“场景剧本 -> 周更回放 -> 版本对照 -> 失败复盘 -> 反馈回流 -> 下次验证”的连续闭环，内容产能与可验证性同步提升
+
+#### 迭代记录 - 2026-03-31 18:08
+
+- 增强目标：围绕 Step 1/6（6.1 Memory Reflection 调用链）按开发文档 `v4.30` 复核当前项目，实现与规范的最新对齐
+- 涉及文件：修改 `开发实现process.md`
+- 实现方案：
+  1. 对照 `开发文档.md` 6.1 五项“需要完成”逐项核查 `ReflectionResult/Schemas/ConversationCli/SystemPromptBuilder` 的落点
+  2. 对照 `6.1` 完成标准 4/5，重点核查 `needs_memory=true` 时 `evidence_types/evidence_purposes` 默认值按 `memory_purpose` 派生、以及 hyphen/snake/camel 别名归一化
+  3. 执行 Step 1/6 定向回归：`ReflectionResultTest`、`MemoryReflectionServiceTest`、`SystemPromptBuilderTest`、`ConversationCliTest`
+- 状态：已完成
+- 实际结果：
+  - 当前实现与开发文档 `6.1` 保持一致，本轮未发现需要新增的代码缺口
+  - 主链路、提示词层、评测链路在反思失败回退与字段归一化语义上保持一致
+  - 定向测试通过：`./scripts/run-tests.sh -Dtest=ReflectionResultTest,MemoryReflectionServiceTest,SystemPromptBuilderTest,ConversationCliTest test`
+
+#### 迭代记录 - 2026-03-31 18:15
+
+- 增强目标：继续执行 Step 2/6（6.2 记忆证据追踪），补齐历史 trace 在“多层字符串化 JSON（>=3 层）”下的兼容解析，避免 `/memory-debug` 与 `/memory-insights` 回读为原始转义文本
+- 涉及文件：修改 `src/main/java/com/memsys/cli/ConversationCli.java`、修改 `src/main/java/com/memsys/memory/MemoryTraceInsightService.java`、修改 `src/test/java/com/memsys/cli/ConversationCliTest.java`、修改 `src/test/java/com/memsys/memory/MemoryTraceInsightServiceTest.java`、修改 `开发文档.md`、修改 `开发实现process.md`
+- 实现方案：
+  1. 将 `ConversationCli.unwrapJsonString(...)` 改为“多轮解包”策略：对被引号包裹的 JSON 字符串最多连续解包 6 层，直到落到 `{...}`/`[...]` 或非引号文本
+  2. 在 `MemoryTraceInsightService.unwrapJsonString(...)` 同步复用同级规则，确保 `/memory-insights` 与 `/memory-debug` 兼容口径一致
+  3. 新增 `getLastEvidenceTraceShouldParseMultiLayerStringifiedReflectionAndListFields`，覆盖 `reflection/retrieved/used` 三层字符串化场景
+  4. 新增 `analyzeRecentTracesShouldParseMultiLayerStringifiedTraceFields`，覆盖洞察统计链路在三层字符串化场景下的 `needs_memory` 与 `retrieved/used` 计数一致性
+  5. 同步开发文档 `6.2` 完成标准新增第 33 条，明确“多层字符串化 JSON 兼容”约束
+- 状态：已完成
+- 实际结果：
+  - `/memory-debug` 与 `/memory-insights` 在跨系统导入的多层转义 trace 下可稳定解包并恢复结构化字段，不再展示原始转义字符串
+  - Step 2/6 的历史 trace 兼容能力从“二次字符串化”扩展到“多层字符串化”，降低外部数据接入时的排障成本
+  - 定向测试通过：`export JAVA_HOME=$(/usr/libexec/java_home) && mvn -q -Dtest=ConversationCliTest,MemoryTraceInsightServiceTest test`

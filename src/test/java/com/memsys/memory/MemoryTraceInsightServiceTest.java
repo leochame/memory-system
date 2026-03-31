@@ -151,6 +151,43 @@ class MemoryTraceInsightServiceTest {
     }
 
     @Test
+    void analyzeRecentTracesShouldParseMultiLayerStringifiedTraceFields() {
+        MemoryStorage storage = new MemoryStorage(tempDir.toString());
+        MemoryTraceInsightService service = new MemoryTraceInsightService(storage);
+
+        String reflection = "{\"needsMemory\":\"y\",\"reason\":\"multi-layer\",\"evidencePurposes\":\"[\\\"followup\\\"]\"}";
+        String retrievedInsights = "[\"insight-a\",\"insight-b\"]";
+        String usedInsights = "[\"insight-a\"]";
+        String retrievedSkills = "[\"skill-a\",\"skill-b\"]";
+        String usedSkills = "[\"skill-a\"]";
+
+        Map<String, Object> trace = new LinkedHashMap<>();
+        trace.put("memoryLoaded", "yes");
+        trace.put("reflectionResult", quoteJsonString(quoteJsonString(reflection)));
+        trace.put("retrievedInsights", quoteJsonString(quoteJsonString(retrievedInsights)));
+        trace.put("usedInsights", quoteJsonString(quoteJsonString(usedInsights)));
+        trace.put("retrievedExamples", quoteJsonString(quoteJsonString("[]")));
+        trace.put("usedExamples", quoteJsonString(quoteJsonString("[]")));
+        trace.put("retrievedSkills", quoteJsonString(quoteJsonString(retrievedSkills)));
+        trace.put("usedSkills", quoteJsonString(quoteJsonString(usedSkills)));
+        trace.put("retrievedTasks", quoteJsonString(quoteJsonString("[\"task-a\"]")));
+        trace.put("usedTasks", quoteJsonString(quoteJsonString("[]")));
+        storage.appendMemoryEvidenceTrace(trace);
+
+        MemoryTraceInsightService.InsightReport report = service.analyzeRecentTraces(20);
+
+        assertThat(report.sampleSize()).isEqualTo(1);
+        assertThat(report.memoryLoadedRate()).isEqualTo(1.0d);
+        assertThat(report.needsMemoryRate()).isEqualTo(1.0d);
+        assertThat(report.unknownNeedsMemoryRate()).isZero();
+        assertThat(report.insightStat().retrieved()).isEqualTo(2);
+        assertThat(report.insightStat().used()).isEqualTo(1);
+        assertThat(report.skillStat().retrieved()).isEqualTo(2);
+        assertThat(report.skillStat().used()).isEqualTo(1);
+        assertThat(report.topPurposes()).containsExactly("followup (1)");
+    }
+
+    @Test
     void analyzeRecentTracesShouldNormalizeAndDeduplicatePurposesPerTrace() {
         MemoryStorage storage = new MemoryStorage(tempDir.toString());
         MemoryTraceInsightService service = new MemoryTraceInsightService(storage);
@@ -408,5 +445,11 @@ class MemoryTraceInsightServiceTest {
         trace.put("retrieved_tasks", retrievedTasks);
         trace.put("used_tasks", usedTasks);
         return trace;
+    }
+
+    private String quoteJsonString(String value) {
+        return "\"" + value
+                .replace("\\", "\\\\")
+                .replace("\"", "\\\"") + "\"";
     }
 }

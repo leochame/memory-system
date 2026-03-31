@@ -1434,6 +1434,73 @@ class ConversationCliTest {
     }
 
     @Test
+    void getLastEvidenceTraceShouldParseMultiLayerStringifiedReflectionAndListFields() {
+        MemoryStorage storage = new MemoryStorage(tempDir.toString());
+        storage.writeMetadata(Map.of(
+                "global_controls", Map.of(
+                        "use_saved_memories", true,
+                        "use_chat_history", false
+                )
+        ));
+        SkillService skillService = new SkillService(tempDir.toString());
+        RecordingLlmClient llmClient = new RecordingLlmClient();
+        ConversationCli conversationCli = new ConversationCli(
+                llmClient,
+                storage,
+                new MemoryManager(storage, 100, 30, 15),
+                null,
+                alwaysNeedMemoryReflectionService(),
+                null,
+                null,
+                new AgentGuideService(tempDir.resolve("missing-Agent.md").toString(), tempDir.toString()),
+                new SystemPromptBuilder(),
+                new NoopMemoryAsyncService(),
+                null,
+                skillService,
+                null,
+                toolsWithoutRag(skillService),
+                40,
+                15,
+                false,
+                0.35,
+                5
+        );
+
+        String reflection = "{\"needs_memory\":true,\"reason\":\"multi layer stringified reflection\",\"evidence_purposes\":[\"continuity\"]}";
+        String insights = "[\"food_preference: 不吃鱼\", \"project: memory-system\"]";
+        String usedInsights = "[\"project: memory-system\"]";
+        String skills = "[\"debugging\"]";
+        String emptyList = "[]";
+
+        Map<String, Object> traceRecord = new LinkedHashMap<>();
+        traceRecord.put("timestamp", LocalDateTime.now().toString());
+        traceRecord.put("user_message", "继续追踪");
+        traceRecord.put("memory_loaded", true);
+        traceRecord.put("reflection", quoteJsonString(quoteJsonString(reflection)));
+        traceRecord.put("retrieved_insights", quoteJsonString(quoteJsonString(insights)));
+        traceRecord.put("used_insights", quoteJsonString(quoteJsonString(usedInsights)));
+        traceRecord.put("retrieved_examples", quoteJsonString(quoteJsonString(emptyList)));
+        traceRecord.put("used_examples", quoteJsonString(quoteJsonString(emptyList)));
+        traceRecord.put("loaded_skills", quoteJsonString(quoteJsonString(skills)));
+        traceRecord.put("used_skills", quoteJsonString(quoteJsonString(skills)));
+        traceRecord.put("retrieved_tasks", quoteJsonString(quoteJsonString(emptyList)));
+        traceRecord.put("used_tasks", quoteJsonString(quoteJsonString(emptyList)));
+        traceRecord.put("used_evidence_summary", "insights 1/2");
+        storage.appendMemoryEvidenceTrace(traceRecord);
+
+        MemoryEvidenceTrace trace = conversationCli.getLastEvidenceTrace();
+        assertThat(trace).isNotNull();
+        assertThat(trace.reflection()).isNotNull();
+        assertThat(trace.reflection().needs_memory()).isTrue();
+        assertThat(trace.reflection().reason()).isEqualTo("multi layer stringified reflection");
+        assertThat(trace.reflection().evidence_purposes()).containsExactly("continuity");
+        assertThat(trace.retrievedInsights()).containsExactly("food_preference: 不吃鱼", "project: memory-system");
+        assertThat(trace.usedInsights()).containsExactly("project: memory-system");
+        assertThat(trace.loadedSkills()).containsExactly("debugging");
+        assertThat(trace.usedSkills()).containsExactly("debugging");
+    }
+
+    @Test
     void getLastEvidenceTraceShouldNormalizeReflectionEvidenceFields() {
         MemoryStorage storage = new MemoryStorage(tempDir.toString());
         storage.writeMetadata(Map.of(
@@ -2911,6 +2978,12 @@ class ConversationCliTest {
             }
             return true;
         }
+    }
+
+    private String quoteJsonString(String value) {
+        return "\"" + value
+                .replace("\\", "\\\\")
+                .replace("\"", "\\\"") + "\"";
     }
 
     private MemoryReflectionService alwaysNeedMemoryReflectionService() {
