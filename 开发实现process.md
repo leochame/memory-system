@@ -1690,3 +1690,18 @@
 - 实际结果：
   - `/memory-debug` 历史回读在对象数组格式下可输出稳定可读证据项，不再出现 `{name=...}` 形式噪声
   - `/memory-insights` 与 `/memory-debug` 在跨来源对象列表数据下保持一致统计，降低覆盖率误判风险
+
+#### 迭代记录 - 2026-03-31 17:40
+
+- 增强目标：继续执行 Step 2/6（6.2 记忆证据追踪），补齐历史 trace 在 null-like 证据项下的兼容过滤，避免 `/memory-debug` 与 `/memory-insights` 把噪声值计入覆盖率
+- 涉及文件：修改 `src/main/java/com/memsys/cli/ConversationCli.java`、修改 `src/main/java/com/memsys/memory/MemoryTraceInsightService.java`、修改 `src/test/java/com/memsys/cli/ConversationCliTest.java`、修改 `src/test/java/com/memsys/memory/MemoryTraceInsightServiceTest.java`、修改 `开发文档.md`、修改 `开发实现process.md`
+- 实现方案：
+  1. 在 `ConversationCli.normalizeStringList/normalizeListItem` 增加 null-like 过滤：`null/undefined/n/a/none`（大小写不敏感）在证据列表解析时统一丢弃
+  2. 在 `MemoryTraceInsightService.asStringList/normalizeListItem` 复用同级规则，确保 `/memory-insights` 统计不把噪声 token 当作真实证据
+  3. 新增 `getLastEvidenceTraceShouldIgnoreNullLikeEvidenceTokens`，覆盖字符串列表、字符串化 JSON 列表与大小写混合 token 的过滤行为
+  4. 新增 `analyzeRecentTracesShouldIgnoreNullLikeEvidenceTokens`，覆盖 null-like token 过滤后 `retrieved/used` 计数与用途统计的一致性
+  5. 同步开发文档 `6.2` 完成标准新增第 29 条，明确 null-like 证据项过滤约束
+- 状态：已完成
+- 实际结果：
+  - `/memory-debug` 历史回读不再展示 `null/undefined/n/a/none` 噪声证据，证据明细更可读
+  - `/memory-insights` 与 `/memory-debug` 在 null-like 场景下保持一致统计口径，覆盖率与用途洞察更稳定

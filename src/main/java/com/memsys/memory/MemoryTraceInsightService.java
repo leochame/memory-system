@@ -364,7 +364,7 @@ public class MemoryTraceInsightService {
         }
         if (value instanceof String text) {
             String normalized = text.trim();
-            if (normalized.isEmpty()) {
+            if (normalized.isEmpty() || isNullLike(normalized)) {
                 return List.of();
             }
             List<String> parsed = parseStringListFromJsonText(normalized);
@@ -531,10 +531,22 @@ public class MemoryTraceInsightService {
                     "value"
             ));
             if (!candidate.isBlank()) {
-                return candidate;
+                return isNullLike(candidate) ? "" : candidate;
             }
         }
-        return normalizeText(value);
+        String normalized = normalizeText(value);
+        return isNullLike(normalized) ? "" : normalized;
+    }
+
+    private boolean isNullLike(String value) {
+        if (value == null || value.isBlank()) {
+            return true;
+        }
+        String normalized = value.trim().toLowerCase(Locale.ROOT);
+        return "null".equals(normalized)
+                || "undefined".equals(normalized)
+                || "n/a".equals(normalized)
+                || "none".equals(normalized);
     }
 
     public record EvidenceStat(int retrieved, int used, double usageRate) {

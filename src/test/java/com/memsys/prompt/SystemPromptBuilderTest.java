@@ -340,6 +340,41 @@ class SystemPromptBuilderTest {
         assertThat(prompt).contains("evidence_purposes: followup");
     }
 
+    @Test
+    void buildSystemPromptShouldNormalizeEvidenceAliasesInPromptLayer() {
+        String prompt = builder.buildSystemPrompt(
+                "",
+                null,
+                null,
+                new ReflectionResult(
+                        true,
+                        "ACTION_FOLLOWUP",
+                        "需要跟进历史任务",
+                        0.88d,
+                        "优先检索近期任务上下文",
+                        List.of("recent-history", "recentHistory", "task"),
+                        List.of("follow-up", "followUp")
+                ),
+                List.<Map<String, Object>>of(),
+                null,
+                List.<String>of(),
+                false,
+                false,
+                false,
+                false,
+                false,
+                false,
+                List.<String>of(),
+                null,
+                List.<RagService.RelevantMemory>of(),
+                null
+        );
+
+        assertThat(prompt).contains("memory_purpose: ACTION_FOLLOWUP");
+        assertThat(prompt).contains("evidence_types: RECENT_HISTORY, TASK");
+        assertThat(prompt).contains("evidence_purposes: followup");
+    }
+
     private void assertSectionOrder(String prompt, String... sections) {
         int lastIndex = -1;
         for (String section : sections) {

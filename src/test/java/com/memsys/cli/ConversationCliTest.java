@@ -2137,6 +2137,71 @@ class ConversationCliTest {
     }
 
     @Test
+    void getLastEvidenceTraceShouldIgnoreNullLikeEvidenceTokens() {
+        MemoryStorage storage = new MemoryStorage(tempDir.toString());
+        storage.writeMetadata(Map.of(
+                "global_controls", Map.of(
+                        "use_saved_memories", true,
+                        "use_chat_history", false
+                )
+        ));
+        SkillService skillService = new SkillService(tempDir.toString());
+        RecordingLlmClient llmClient = new RecordingLlmClient();
+        ConversationCli conversationCli = new ConversationCli(
+                llmClient,
+                storage,
+                new MemoryManager(storage, 100, 30, 15),
+                null,
+                alwaysNeedMemoryReflectionService(),
+                null,
+                null,
+                new AgentGuideService(tempDir.resolve("missing-Agent.md").toString(), tempDir.toString()),
+                new SystemPromptBuilder(),
+                new NoopMemoryAsyncService(),
+                null,
+                skillService,
+                null,
+                toolsWithoutRag(skillService),
+                40,
+                15,
+                false,
+                0.35,
+                5
+        );
+
+        Map<String, Object> traceRecord = new LinkedHashMap<>();
+        traceRecord.put("timestamp", LocalDateTime.now().toString());
+        traceRecord.put("user_message", "继续优化");
+        traceRecord.put("memory_loaded", true);
+        traceRecord.put("reflection", Map.of(
+                "needs_memory", true,
+                "reason", "过滤噪声证据",
+                "evidence_purposes", List.of("followup")
+        ));
+        traceRecord.put("retrieved_insights", List.of("null", "undefined", "user_insights.md: 喜欢结构化输出"));
+        traceRecord.put("used_insights", List.of("n/a", "user_insights.md: 喜欢结构化输出"));
+        traceRecord.put("retrieved_examples", "\"[\\\"none\\\",\\\"答辩案例\\\"]\"");
+        traceRecord.put("used_examples", List.of("N/A", "答辩案例"));
+        traceRecord.put("loaded_skills", List.of("none", "debugging"));
+        traceRecord.put("used_skills", List.of("undefined", "debugging"));
+        traceRecord.put("retrieved_tasks", List.of("none", "提交周报"));
+        traceRecord.put("used_tasks", List.of("null", "提交周报"));
+        traceRecord.put("used_evidence_summary", "insights 1/1, examples 1/1, skills 1/1, tasks 1/1");
+        storage.appendMemoryEvidenceTrace(traceRecord);
+
+        MemoryEvidenceTrace trace = conversationCli.getLastEvidenceTrace();
+        assertThat(trace).isNotNull();
+        assertThat(trace.retrievedInsights()).containsExactly("user_insights.md: 喜欢结构化输出");
+        assertThat(trace.usedInsights()).containsExactly("user_insights.md: 喜欢结构化输出");
+        assertThat(trace.retrievedExamples()).containsExactly("答辩案例");
+        assertThat(trace.usedExamples()).containsExactly("答辩案例");
+        assertThat(trace.loadedSkills()).containsExactly("debugging");
+        assertThat(trace.usedSkills()).containsExactly("debugging");
+        assertThat(trace.retrievedTasks()).containsExactly("提交周报");
+        assertThat(trace.usedTasks()).containsExactly("提交周报");
+    }
+
+    @Test
     void getLastEvidenceTraceShouldParseYesNoBooleanLegacyFields() {
         MemoryStorage storage = new MemoryStorage(tempDir.toString());
         storage.writeMetadata(Map.of(

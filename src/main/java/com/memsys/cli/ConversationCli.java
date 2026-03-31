@@ -1683,7 +1683,7 @@ public class ConversationCli {
                     .toList();
         }
         String text = normalizeText(value);
-        if (text.isBlank()) {
+        if (text.isBlank() || isNullLike(text)) {
             return List.of();
         }
         List<String> parsedFromJson = parseStringListFromJsonText(text);
@@ -1747,10 +1747,11 @@ public class ConversationCli {
                     "value"
             ));
             if (!candidate.isBlank()) {
-                return candidate;
+                return isNullLike(candidate) ? "" : candidate;
             }
         }
-        return normalizeText(value);
+        String normalized = normalizeText(value);
+        return isNullLike(normalized) ? "" : normalized;
     }
 
     private String unwrapJsonString(String rawText) {
