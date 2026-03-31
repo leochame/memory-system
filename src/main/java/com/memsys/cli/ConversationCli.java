@@ -1821,6 +1821,12 @@ public class ConversationCli {
         if (entryKey.startsWith(key + "/")) {
             return entryKey.substring(key.length() + 1);
         }
+        if (entryKey.startsWith("/" + key + "/")) {
+            return entryKey.substring(key.length() + 2);
+        }
+        if (entryKey.startsWith("/" + key + "[")) {
+            return entryKey.substring(key.length() + 1);
+        }
         return null;
     }
 
@@ -1834,21 +1840,21 @@ public class ConversationCli {
             char ch = suffix.charAt(i);
             if (ch == '.' || ch == '/') {
                 if (!token.isEmpty()) {
-                    parts.add(token.toString());
+                    parts.add(decodeJsonPointerToken(token.toString()));
                     token.setLength(0);
                 }
                 continue;
             }
             if (ch == '[') {
                 if (!token.isEmpty()) {
-                    parts.add(token.toString());
+                    parts.add(decodeJsonPointerToken(token.toString()));
                     token.setLength(0);
                 }
                 int closeIdx = suffix.indexOf(']', i + 1);
                 if (closeIdx > i + 1) {
                     String bracketToken = suffix.substring(i + 1, closeIdx).trim();
                     if (!bracketToken.isBlank()) {
-                        parts.add(bracketToken);
+                        parts.add(decodeJsonPointerToken(bracketToken));
                     }
                     i = closeIdx;
                 }
@@ -1857,9 +1863,16 @@ public class ConversationCli {
             token.append(ch);
         }
         if (!token.isEmpty()) {
-            parts.add(token.toString());
+            parts.add(decodeJsonPointerToken(token.toString()));
         }
         return parts;
+    }
+
+    private String decodeJsonPointerToken(String token) {
+        if (token == null || token.isBlank()) {
+            return "";
+        }
+        return token.replace("~1", "/").replace("~0", "~");
     }
 
     private String normalizeMemoryPurpose(String memoryPurpose, boolean needsMemory) {

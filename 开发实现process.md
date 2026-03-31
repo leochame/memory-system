@@ -2030,3 +2030,47 @@
   - `/memory-debug` 与 `/memory-insights` 可稳定解析 `MEMORY-LOADED`、`REFLECTION-RESULT`、`NEEDS-MEMORY`、`RETRIEVED-INSIGHTS` 等字段，不再因命名风格差异导致证据统计缺失
   - Step 2/6 的跨来源 trace 兼容能力从“路径风格兼容”扩展到“字段命名风格兼容”，进一步降低跨系统导入后的排障成本
   - 定向测试通过：`export JAVA_HOME=$(/usr/libexec/java_home) && mvn -q -Dtest=ConversationCliTest,MemoryTraceInsightServiceTest test`
+
+#### 迭代记录 - 2026-03-31 20:27
+
+- 增强目标：继续执行 Step 6/6（调研与文档更新），围绕 Memory-System 打造“更多内容”的第十九层方案，将内容体系升级为“记忆场景基准集 + 内容复用引擎”。
+- 涉及文件：修改 `开发文档.md`、修改 `开发实现process.md`
+- 实现方案：
+  1. 将开发文档版本升级至 `v4.39`，在 `5.10` 新增 `5.10.29 Step 6/6 内容扩展蓝图（第十九层：记忆场景基准集与内容复用引擎）`。
+  2. 新增 8 类基准集资产：`场景基准题单卡`、`复现命令序列卡`、`跨周对照结果卡`、`失败到修复映射卡`、`答辩演示路径卡`、`论文实证引用卡`、`内容复用模板卡`、`季度基准稳定性公报卡`。
+  3. 固化执行机制：周度题单入池、历史题单复测、失败题单 72 小时处置、基准池内容复用约束。
+  4. 在开发文档新增 `6.31 需求二十九`，将目录规范、索引字段、入池门槛、周复测与失败处置规则转为可验收条款。
+- 状态：已完成
+- 实际结果：
+  - Step 6/6 从“实验驱动内容生产”进一步升级为“可复现基准资产驱动内容生产”，内容复用率与稳定性可被持续跟踪。
+  - 围绕记忆系统形成“题单沉淀 -> 命令复现 -> 跨周对照 -> 失败处置 -> 发布复用”的内容闭环，答辩与论文素材准备成本进一步降低。
+
+#### 迭代记录 - 2026-03-31 20:32
+
+- 增强目标：围绕 Step 1/6（6.1 Memory Reflection 调用链）按开发文档 `v4.39` 复核当前项目，完成本轮文档对齐验收
+- 涉及文件：修改 `开发实现process.md`
+- 实现方案：
+  1. 对照 `开发文档.md` 6.1 的 5 项“需要完成”核查 `LlmDtos/Schemas/ConversationCli/SystemPromptBuilder` 调用链落点
+  2. 对照完成标准 4/5 复核 `needs_memory=true` 时默认值按 `memory_purpose` 派生，以及 `evidence_types/evidence_purposes` hyphen/snake/camel 别名归一化
+  3. 执行 Step 1/6 定向回归：`export JAVA_HOME=$(/usr/libexec/java_home) && mvn -q -Dtest=ReflectionResultTest,MemoryReflectionServiceTest,SystemPromptBuilderTest,ConversationCliTest test`
+- 状态：已完成
+- 实际结果：
+  - 当前实现与开发文档 `v4.39` 的 Step 1/6 要求保持一致，本轮未发现需新增代码的缺口
+  - 主链路、提示词层与评测链路在“反思结果注入 + 默认值派生 + 失败稳定回退 + 别名归一化”语义上保持一致
+  - 定向回归通过
+
+#### 迭代记录 - 2026-03-31 20:45
+
+- 增强目标：继续执行 Step 2/6（6.2 记忆证据追踪），补齐历史 trace 在“JSON Pointer 前导斜杠路径”格式下的兼容解析，避免 `/memory-debug` 与 `/memory-insights` 在跨系统导出数据上出现覆盖率误判
+- 涉及文件：修改 `src/main/java/com/memsys/cli/ConversationCli.java`、修改 `src/main/java/com/memsys/memory/MemoryTraceInsightService.java`、修改 `src/test/java/com/memsys/cli/ConversationCliTest.java`、修改 `src/test/java/com/memsys/memory/MemoryTraceInsightServiceTest.java`、修改 `开发文档.md`、修改 `开发实现process.md`
+- 实现方案：
+  1. 在 `ConversationCli.flattenedKeySuffix(...)` 增加 `"/" + key + "/"` 与 `"/" + key + "["` 前缀识别，兼容 `/reflection/needs_memory`、`/retrieved/examples/0` 等 JSON Pointer 风格扁平键
+  2. 在 `ConversationCli.splitFlattenedPath(...)` 增加 JSON Pointer 转义解码（`~1 -> /`、`~0 -> ~`），保证跨系统导出键可稳定还原
+  3. 在 `MemoryTraceInsightService` 同步复用同级解析与转义解码规则，确保 `/memory-insights` 与 `/memory-debug` 口径一致
+  4. 新增 `getLastEvidenceTraceShouldParseFlattenedJsonPointerTraceFields`，覆盖 `/memory-debug` 在前导斜杠 JSON Pointer 场景下的反思字段与四类证据解析
+  5. 新增 `analyzeRecentTracesShouldParseFlattenedJsonPointerTraceFields`，覆盖 `/memory-insights` 在同场景下的 retrieved/used 统计一致性
+  6. 同步开发文档 `6.2` 完成标准新增第 39 条，明确“JSON Pointer 前导斜杠路径兼容”约束
+- 状态：已完成
+- 实际结果：
+  - `/memory-debug` 与 `/memory-insights` 可稳定回读 `/reflection/needs_memory`、`/evidence/retrieved/insights/0`、`/retrieved/examples/0`、`/loaded/skills/1` 等前导斜杠路径字段，不再因路径前缀差异导致证据统计缺失
+  - Step 2/6 的跨来源 trace 兼容能力从“斜杠路径”扩展到“JSON Pointer 前导斜杠路径 + `~1/~0` 转义”，进一步降低跨系统导入后的排障成本
