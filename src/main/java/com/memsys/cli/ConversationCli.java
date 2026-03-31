@@ -49,6 +49,7 @@ public class ConversationCli {
     private static final int FAST_RAG_MAX_RESULTS = 3;
     private static final int FAST_EXAMPLE_MAX_RESULTS = 2;
     private static final ObjectMapper TRACE_PARSER = new ObjectMapper();
+    private static final String DELIMITED_LIST_SPLIT_REGEX = "[,;|\\n，；]+";
 
     private final LlmClient llmClient;
     private final MemoryStorage storage;
@@ -1780,6 +1781,10 @@ public class ConversationCli {
         if (!parsedFromJson.isEmpty()) {
             return parsedFromJson;
         }
+        List<String> parsedFromDelimitedText = parseStringListFromDelimitedText(text);
+        if (!parsedFromDelimitedText.isEmpty()) {
+            return parsedFromDelimitedText;
+        }
         return List.of(text);
     }
 
@@ -1819,6 +1824,41 @@ public class ConversationCli {
         } catch (Exception ignored) {
             return List.of();
         }
+    }
+
+    private List<String> parseStringListFromDelimitedText(String rawText) {
+        String text = normalizeText(rawText);
+        if (text.isBlank()) {
+            return List.of();
+        }
+        if (!containsListDelimiter(text)) {
+            return List.of();
+        }
+        List<String> items = Arrays.stream(text.split(DELIMITED_LIST_SPLIT_REGEX))
+                .map(this::normalizeDelimitedToken)
+                .filter(s -> !s.isBlank())
+                .toList();
+        if (items.size() <= 1) {
+            return List.of();
+        }
+        return items;
+    }
+
+    private boolean containsListDelimiter(String text) {
+        return text.contains("\n")
+                || text.contains(",")
+                || text.contains("，")
+                || text.contains(";")
+                || text.contains("；")
+                || text.contains("|");
+    }
+
+    private String normalizeDelimitedToken(String token) {
+        if (token == null) {
+            return "";
+        }
+        String stripped = token.replaceFirst("^(?:[-*•]|\\d+[.)])\\s*", "");
+        return normalizeListItem(stripped);
     }
 
     @SuppressWarnings("unchecked")

@@ -343,6 +343,43 @@ class MemoryTraceInsightServiceTest {
         assertThat(report.topUsedSkills()).containsExactly("debugging (1)");
     }
 
+    @Test
+    void analyzeRecentTracesShouldParseDelimitedStringEvidenceFields() {
+        MemoryStorage storage = new MemoryStorage(tempDir.toString());
+        MemoryTraceInsightService service = new MemoryTraceInsightService(storage);
+
+        Map<String, Object> trace = new LinkedHashMap<>();
+        trace.put("memory_loaded", true);
+        trace.put("reflection", Map.of(
+                "needs_memory", true,
+                "reason", "分隔字符串兼容",
+                "evidence_purposes", List.of("followup")
+        ));
+        trace.put("retrieved_insights", "insight-a, insight-b; insight-c");
+        trace.put("used_insights", "insight-a | insight-c");
+        trace.put("retrieved_examples", "- example-a\n- example-b");
+        trace.put("used_examples", "example-a");
+        trace.put("loaded_skills", "debugging | planner");
+        trace.put("used_skills", "planner");
+        trace.put("retrieved_tasks", "1. task-a\n2. task-b");
+        trace.put("used_tasks", "task-b");
+        storage.appendMemoryEvidenceTrace(trace);
+
+        MemoryTraceInsightService.InsightReport report = service.analyzeRecentTraces(20);
+
+        assertThat(report.sampleSize()).isEqualTo(1);
+        assertThat(report.insightStat().retrieved()).isEqualTo(3);
+        assertThat(report.insightStat().used()).isEqualTo(2);
+        assertThat(report.exampleStat().retrieved()).isEqualTo(2);
+        assertThat(report.exampleStat().used()).isEqualTo(1);
+        assertThat(report.skillStat().retrieved()).isEqualTo(2);
+        assertThat(report.skillStat().used()).isEqualTo(1);
+        assertThat(report.taskStat().retrieved()).isEqualTo(2);
+        assertThat(report.taskStat().used()).isEqualTo(1);
+        assertThat(report.topUsedSkills()).containsExactly("planner (1)");
+        assertThat(report.topPurposes()).containsExactly("followup (1)");
+    }
+
     private Map<String, Object> trace(boolean memoryLoaded,
                                       boolean needsMemory,
                                       String purpose,

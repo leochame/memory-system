@@ -1792,3 +1792,33 @@
   - `/memory-debug` 与 `/memory-insights` 可稳定解析 `evidence.retrieved/used.*` 结构，不再因字段层级差异导致证据计数失真
   - Step 2/6 的跨来源 trace 兼容能力从“字段别名”扩展到“结构别名”，调试与洞察链路一致性进一步提升
   - 定向测试通过：`export JAVA_HOME=$(/usr/libexec/java_home) && mvn -q -Dtest=ConversationCliTest,MemoryTraceInsightServiceTest test`
+
+#### 迭代记录 - 2026-03-31 17:50
+
+- 增强目标：继续执行 Step 6/6（调研与文档更新），围绕 Memory-System 打造“更多内容”的第十四层方案，将内容体系升级为“证据图谱叙事 + 多受众改写”
+- 涉及文件：修改 `开发文档.md`、修改 `开发实现process.md`
+- 实现方案：
+  1. 将开发文档版本升级至 `v4.28`，在 `5.10` 新增 `5.10.24 Step 6/6 内容扩展蓝图（第十四层：证据图谱叙事与多受众改写）`
+  2. 新增 8 类图谱叙事型内容资产：`证据图谱卡`、`一证多稿卡`、`指标故事卡`、`反例辩论卡`、`术语统一卡`、`图表口播卡`、`受众反馈回执卡`、`口径漂移告警卡`
+  3. 固化多受众改写机制（同结论多版本、发布前口径对齐、每周图谱回放审查、48 小时漂移修正）并新增索引字段：`evidence_graph_id/source_trace_ids/audience_variant/claim_id/metric_window/consistency_status/narrative_template/drift_ticket_ref`
+  4. 在开发文档新增 `6.26 需求二十四`，将图谱叙事目录规范、一证多稿约束、口径一致性与漂移处置转化为可验收条款
+- 状态：已完成
+- 实际结果：
+  - Step 6/6 从“周主题策展”进一步升级为“证据到叙事”的多版本生产机制，同一条记忆证据可稳定转写为开发、答辩、论文和对外内容
+  - 围绕记忆系统形成“trace 证据 -> claim 结论 -> 多受众改写 -> 一致性校验 -> 漂移修正”的内容闭环，降低重复写作成本并提升内容可信度
+
+#### 迭代记录 - 2026-03-31 17:58
+
+- 增强目标：继续执行 Step 2/6（6.2 记忆证据追踪），补齐“分隔字符串证据列表”兼容解析，避免 `/memory-debug` 与 `/memory-insights` 将多条证据误判为单条
+- 涉及文件：修改 `src/main/java/com/memsys/cli/ConversationCli.java`、修改 `src/main/java/com/memsys/memory/MemoryTraceInsightService.java`、修改 `src/test/java/com/memsys/cli/ConversationCliTest.java`、修改 `src/test/java/com/memsys/memory/MemoryTraceInsightServiceTest.java`、修改 `开发文档.md`、修改 `开发实现process.md`
+- 实现方案：
+  1. 在 `ConversationCli.normalizeStringList(...)` 增加分隔字符串解析分支，支持逗号/分号/竖线/多行文本，并兼容 `- item`、`1. item` 形式的项目符号
+  2. 在 `MemoryTraceInsightService.asStringList(...)` 复用同级规则，确保 `/memory-insights` 与 `/memory-debug` 对同一历史 trace 的统计口径一致
+  3. 新增测试 `getLastEvidenceTraceShouldParseDelimitedStringEvidenceFields`，覆盖 `insights/examples/skills/tasks` 四类证据的分隔字符串解析
+  4. 新增测试 `analyzeRecentTracesShouldParseDelimitedStringEvidenceFields`，覆盖洞察统计链路对分隔字符串证据列表的 retrieved/used 计数一致性
+  5. 同步开发文档 `6.2` 完成标准新增第 32 条，明确分隔字符串证据列表兼容约束
+- 状态：已完成
+- 实际结果：
+  - `/memory-debug` 与 `/memory-insights` 在 legacy 导出的“逗号/分号/竖线/多行”证据字段下可正确拆分为多条证据，不再把整段文本计为单条
+  - 分隔字符串中的项目符号（`- item`、`1. item`）可被规范化去噪，证据展示与覆盖率统计更稳定
+  - 定向测试通过：`export JAVA_HOME=$(/usr/libexec/java_home) && mvn -q -Dtest=ConversationCliTest,MemoryTraceInsightServiceTest test`

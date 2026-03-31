@@ -6,6 +6,7 @@ import com.memsys.memory.storage.MemoryStorage;
 import org.springframework.stereotype.Service;
 
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collection;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -21,6 +22,7 @@ public class MemoryTraceInsightService {
 
     private static final int DEFAULT_LIMIT = 50;
     private static final ObjectMapper TRACE_PARSER = new ObjectMapper();
+    private static final String DELIMITED_LIST_SPLIT_REGEX = "[,;|\\n，；]+";
 
     private final MemoryStorage storage;
 
@@ -396,6 +398,10 @@ public class MemoryTraceInsightService {
             if (!parsed.isEmpty()) {
                 return parsed;
             }
+            List<String> parsedFromDelimitedText = parseStringListFromDelimitedText(normalized);
+            if (!parsedFromDelimitedText.isEmpty()) {
+                return parsedFromDelimitedText;
+            }
             return List.of(normalized);
         }
         return List.of();
@@ -542,6 +548,41 @@ public class MemoryTraceInsightService {
         } catch (Exception ignored) {
             return List.of();
         }
+    }
+
+    private List<String> parseStringListFromDelimitedText(String rawText) {
+        String text = normalizeText(rawText);
+        if (text.isBlank()) {
+            return List.of();
+        }
+        if (!containsListDelimiter(text)) {
+            return List.of();
+        }
+        List<String> items = Arrays.stream(text.split(DELIMITED_LIST_SPLIT_REGEX))
+                .map(this::normalizeDelimitedToken)
+                .filter(s -> !s.isBlank())
+                .toList();
+        if (items.size() <= 1) {
+            return List.of();
+        }
+        return items;
+    }
+
+    private boolean containsListDelimiter(String text) {
+        return text.contains("\n")
+                || text.contains(",")
+                || text.contains("，")
+                || text.contains(";")
+                || text.contains("；")
+                || text.contains("|");
+    }
+
+    private String normalizeDelimitedToken(String token) {
+        if (token == null) {
+            return "";
+        }
+        String stripped = token.replaceFirst("^(?:[-*•]|\\d+[.)])\\s*", "");
+        return normalizeListItem(stripped);
     }
 
     private String unwrapJsonString(String rawText) {
