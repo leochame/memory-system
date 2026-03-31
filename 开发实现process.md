@@ -1748,3 +1748,47 @@
 - 实际结果：
   - `/memory-debug` 与 `/memory-debug [N]` 在证据文本仅存在大小写或空白差异时不再误报“未使用”，证据浪费诊断更准确
   - 定向测试通过：`export JAVA_HOME=$(/usr/libexec/java_home) && mvn -q -Dtest=CliRunnerTest,MemoryEvidenceTraceTest test`
+
+#### 迭代记录 - 2026-03-31 23:58
+
+- 增强目标：继续执行 Step 6/6（调研与文档更新），围绕 Memory-System 打造“更多内容”的第十三层方案，将内容体系升级为“周主题策展 + 双轨编排 + 跨周复用”
+- 涉及文件：修改 `开发文档.md`、修改 `开发实现process.md`
+- 实现方案：
+  1. 将开发文档版本升级至 `v4.27`，在 `5.10` 新增 `5.10.23 Step 6/6 内容扩展蓝图（第十三层：周主题策展与双轨内容编排）`
+  2. 新增 8 类策展型内容资产：`周主题策展卡`、`主线结论卡`、`快报短内容卡`、`深度长内容卡`、`主题问答包卡`、`反例补洞卡`、`跨周复用卡`、`主题收官卡`
+  3. 固化双轨机制（生产轨 + 复核轨）与跨周复用约束，并新增索引字段：`theme_week/theme_name/track_type/content_tier/anchor_conclusion_id/counterexample_ref/reuse_from_ids/weekly_close_status`
+  4. 在开发文档新增 `6.25 需求二十三`，将主题目录规范、双轨编排、跨周复用、周收官与过程留痕转化为可验收条款
+- 状态：已完成
+- 实际结果：
+  - Step 6/6 从“课程化训练与认证化输出”进一步升级为“主题化稳定产能机制”，内容生产从零散扩展到按周策展的连续运营
+  - 围绕记忆系统形成“主题定义 -> 主线产出 -> 反例补洞 -> 跨周复用 -> 周收官 -> 反馈回流”的完整闭环，可直接支撑答辩材料与开发迭代双线复用
+
+#### 迭代记录 - 2026-03-31 18:40
+
+- 增强目标：围绕 Step 1/6（6.1 Memory Reflection 调用链）按开发文档 `v4.27` 复核当前项目并完成文档对齐
+- 涉及文件：修改 `开发实现process.md`
+- 实现方案：
+  1. 复核 Step 1/6 五项要求在现有代码中的落点：结构化决策对象/schema、`ConversationCli` 反思阶段、按反思结果控制记忆加载、反思结果注入 `SystemPromptBuilder`、失败稳定回退
+  2. 复核完成标准 4/5：`needs_memory=true` 时 `evidence_types/evidence_purposes` 默认值按 `memory_purpose` 派生，且支持 hyphen/snake/camel 别名归一化
+  3. 执行 Step 1/6 定向回归：`ReflectionResultTest`、`MemoryReflectionServiceTest`、`SystemPromptBuilderTest`、`ConversationCliTest`
+- 状态：已完成
+- 实际结果：
+  - 当前实现与开发文档 `6.1` 保持一致，本轮未发现需要新增的代码缺口
+  - Step 1/6 调用链在主链路、提示词层与回退路径均可稳定闭环
+  - 定向测试通过：`JAVA_HOME=$(/usr/libexec/java_home) mvn -q -Dtest=ReflectionResultTest,MemoryReflectionServiceTest,SystemPromptBuilderTest,ConversationCliTest test`
+
+#### 迭代记录 - 2026-03-31 17:42
+
+- 增强目标：继续执行 Step 2/6（6.2 记忆证据追踪），补齐嵌套证据结构（`evidence.retrieved/used.*`）的兼容解析，避免 `/memory-debug` 与 `/memory-insights` 在跨系统 trace 上把覆盖率误判为 0
+- 涉及文件：修改 `src/main/java/com/memsys/cli/ConversationCli.java`、修改 `src/main/java/com/memsys/memory/MemoryTraceInsightService.java`、修改 `src/test/java/com/memsys/cli/ConversationCliTest.java`、修改 `src/test/java/com/memsys/memory/MemoryTraceInsightServiceTest.java`、修改 `开发文档.md`、修改 `开发实现process.md`
+- 实现方案：
+  1. 在 `ConversationCli.parseEvidenceTrace(...)` 新增 `readTraceList(...)` 统一读取入口：优先读取既有顶层字段，缺失时回退读取 `evidence` 嵌套结构
+  2. 支持 `evidence.retrieved.*` / `evidence.used.*` 分组，以及 `loaded` 作为检索组别别名；支持 `insights/examples/skills/tasks` 的复数/单数与列表后缀字段
+  3. 在 `MemoryTraceInsightService` 复用同级解析规则，保证 `/memory-insights` 与 `/memory-debug` 对嵌套结构统计口径一致
+  4. 新增回归测试 `getLastEvidenceTraceShouldParseNestedEvidenceGroups` 与 `analyzeRecentTracesShouldParseNestedEvidenceGroups`，覆盖嵌套检索/使用列表统计
+  5. 同步开发文档 `6.2` 完成标准新增第 31 条，明确嵌套证据结构兼容约束
+- 状态：已完成
+- 实际结果：
+  - `/memory-debug` 与 `/memory-insights` 可稳定解析 `evidence.retrieved/used.*` 结构，不再因字段层级差异导致证据计数失真
+  - Step 2/6 的跨来源 trace 兼容能力从“字段别名”扩展到“结构别名”，调试与洞察链路一致性进一步提升
+  - 定向测试通过：`export JAVA_HOME=$(/usr/libexec/java_home) && mvn -q -Dtest=ConversationCliTest,MemoryTraceInsightServiceTest test`

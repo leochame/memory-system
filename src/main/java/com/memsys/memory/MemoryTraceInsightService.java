@@ -97,15 +97,28 @@ public class MemoryTraceInsightService {
                 increment(purposeFreq, purpose);
             }
 
-            List<String> retrievedInsightsList = readTraceList(trace, "retrieved_insights", "retrievedInsights");
-            List<String> usedInsightsList = readTraceList(trace, "used_insights", "usedInsights");
-            List<String> retrievedExamplesList = readTraceList(trace, "retrieved_examples", "retrievedExamples");
-            List<String> usedExamplesList = readTraceList(trace, "used_examples", "usedExamples");
+            List<String> retrievedInsightsList = readTraceList(
+                    trace, "retrieved", "insights", "retrieved_insights", "retrievedInsights");
+            List<String> usedInsightsList = readTraceList(
+                    trace, "used", "insights", "used_insights", "usedInsights");
+            List<String> retrievedExamplesList = readTraceList(
+                    trace, "retrieved", "examples", "retrieved_examples", "retrievedExamples");
+            List<String> usedExamplesList = readTraceList(
+                    trace, "used", "examples", "used_examples", "usedExamples");
             List<String> loadedSkillsList = readTraceList(
-                    trace, "loaded_skills", "loadedSkills", "retrieved_skills", "retrievedSkills");
-            List<String> usedSkillsList = readTraceList(trace, "used_skills", "usedSkills");
-            List<String> retrievedTasksList = readTraceList(trace, "retrieved_tasks", "retrievedTasks");
-            List<String> usedTasksList = readTraceList(trace, "used_tasks", "usedTasks");
+                    trace,
+                    "retrieved",
+                    "skills",
+                    "loaded_skills",
+                    "loadedSkills",
+                    "retrieved_skills",
+                    "retrievedSkills");
+            List<String> usedSkillsList = readTraceList(
+                    trace, "used", "skills", "used_skills", "usedSkills");
+            List<String> retrievedTasksList = readTraceList(
+                    trace, "retrieved", "tasks", "retrieved_tasks", "retrievedTasks");
+            List<String> usedTasksList = readTraceList(
+                    trace, "used", "tasks", "used_tasks", "usedTasks");
 
             retrievedInsights += retrievedInsightsList.size();
             usedInsights += usedInsightsList.size();
@@ -277,15 +290,27 @@ public class MemoryTraceInsightService {
             if (toBoolean(readFirstNonNull(trace, "memory_loaded", "memoryLoaded"))) {
                 memoryLoaded++;
             }
-            retrievedInsights += readTraceList(trace, "retrieved_insights", "retrievedInsights").size();
-            usedInsights += readTraceList(trace, "used_insights", "usedInsights").size();
-            retrievedExamples += readTraceList(trace, "retrieved_examples", "retrievedExamples").size();
-            usedExamples += readTraceList(trace, "used_examples", "usedExamples").size();
+            retrievedInsights += readTraceList(
+                    trace, "retrieved", "insights", "retrieved_insights", "retrievedInsights").size();
+            usedInsights += readTraceList(
+                    trace, "used", "insights", "used_insights", "usedInsights").size();
+            retrievedExamples += readTraceList(
+                    trace, "retrieved", "examples", "retrieved_examples", "retrievedExamples").size();
+            usedExamples += readTraceList(
+                    trace, "used", "examples", "used_examples", "usedExamples").size();
             retrievedSkills += readTraceList(
-                    trace, "loaded_skills", "loadedSkills", "retrieved_skills", "retrievedSkills").size();
-            usedSkills += readTraceList(trace, "used_skills", "usedSkills").size();
-            retrievedTasks += readTraceList(trace, "retrieved_tasks", "retrievedTasks").size();
-            usedTasks += readTraceList(trace, "used_tasks", "usedTasks").size();
+                    trace,
+                    "retrieved",
+                    "skills",
+                    "loaded_skills",
+                    "loadedSkills",
+                    "retrieved_skills",
+                    "retrievedSkills").size();
+            usedSkills += readTraceList(trace, "used", "skills", "used_skills", "usedSkills").size();
+            retrievedTasks += readTraceList(
+                    trace, "retrieved", "tasks", "retrieved_tasks", "retrievedTasks").size();
+            usedTasks += readTraceList(
+                    trace, "used", "tasks", "used_tasks", "usedTasks").size();
         }
 
         return new WindowMetrics(
@@ -451,8 +476,39 @@ public class MemoryTraceInsightService {
                 reflection, "evidence_purpose", "evidencePurpose"));
     }
 
-    private List<String> readTraceList(Map<String, Object> trace, String... keys) {
-        return asStringList(readFirstNonNull(trace, keys));
+    private List<String> readTraceList(Map<String, Object> trace,
+                                       String group,
+                                       String category,
+                                       String... keys) {
+        List<String> direct = asStringList(readFirstNonNull(trace, keys));
+        if (!direct.isEmpty()) {
+            return direct;
+        }
+        Map<String, Object> evidence = asMap(readFirstNonNull(trace, "evidence", "evidence_trace", "evidenceTrace"));
+        if (evidence.isEmpty()) {
+            return List.of();
+        }
+        List<String> directFromEvidence = asStringList(readFirstNonNull(evidence, keys));
+        if (!directFromEvidence.isEmpty()) {
+            return directFromEvidence;
+        }
+        Map<String, Object> grouped = asMap(readFirstNonNull(
+                evidence,
+                group,
+                toCamel(group),
+                "retrieved".equals(group) ? "loaded" : null
+        ));
+        if (grouped.isEmpty()) {
+            return List.of();
+        }
+        String singular = singular(category);
+        String[] groupedKeys = new String[4 + keys.length];
+        groupedKeys[0] = category;
+        groupedKeys[1] = singular;
+        groupedKeys[2] = category + "_list";
+        groupedKeys[3] = toCamel(category) + "List";
+        System.arraycopy(keys, 0, groupedKeys, 4, keys.length);
+        return asStringList(readFirstNonNull(grouped, groupedKeys));
     }
 
     private List<String> normalizePurposes(List<String> purposes) {
@@ -547,6 +603,38 @@ public class MemoryTraceInsightService {
                 || "undefined".equals(normalized)
                 || "n/a".equals(normalized)
                 || "none".equals(normalized);
+    }
+
+    private String toCamel(String snakeOrWord) {
+        if (snakeOrWord == null || snakeOrWord.isBlank()) {
+            return "";
+        }
+        String[] parts = snakeOrWord.split("_");
+        if (parts.length == 0) {
+            return snakeOrWord;
+        }
+        StringBuilder sb = new StringBuilder(parts[0]);
+        for (int i = 1; i < parts.length; i++) {
+            String part = parts[i];
+            if (part.isBlank()) {
+                continue;
+            }
+            sb.append(Character.toUpperCase(part.charAt(0)));
+            if (part.length() > 1) {
+                sb.append(part.substring(1));
+            }
+        }
+        return sb.toString();
+    }
+
+    private String singular(String plural) {
+        if (plural == null || plural.isBlank()) {
+            return "";
+        }
+        if (plural.endsWith("s") && plural.length() > 1) {
+            return plural.substring(0, plural.length() - 1);
+        }
+        return plural;
     }
 
     public record EvidenceStat(int retrieved, int used, double usageRate) {

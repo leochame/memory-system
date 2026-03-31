@@ -2137,6 +2137,149 @@ class ConversationCliTest {
     }
 
     @Test
+    void getLastEvidenceTraceShouldParseNestedEvidenceGroups() {
+        MemoryStorage storage = new MemoryStorage(tempDir.toString());
+        storage.writeMetadata(Map.of(
+                "global_controls", Map.of(
+                        "use_saved_memories", true,
+                        "use_chat_history", false
+                )
+        ));
+        SkillService skillService = new SkillService(tempDir.toString());
+        RecordingLlmClient llmClient = new RecordingLlmClient();
+        ConversationCli conversationCli = new ConversationCli(
+                llmClient,
+                storage,
+                new MemoryManager(storage, 100, 30, 15),
+                null,
+                alwaysNeedMemoryReflectionService(),
+                null,
+                null,
+                new AgentGuideService(tempDir.resolve("missing-Agent.md").toString(), tempDir.toString()),
+                new SystemPromptBuilder(),
+                new NoopMemoryAsyncService(),
+                null,
+                skillService,
+                null,
+                toolsWithoutRag(skillService),
+                40,
+                15,
+                false,
+                0.35,
+                5
+        );
+
+        Map<String, Object> traceRecord = new LinkedHashMap<>();
+        traceRecord.put("timestamp", LocalDateTime.now().toString());
+        traceRecord.put("user_message", "nested evidence trace");
+        traceRecord.put("memory_loaded", true);
+        traceRecord.put("reflection", Map.of(
+                "needs_memory", true,
+                "memory_purpose", "ACTION_FOLLOWUP",
+                "reason", "nested evidence groups",
+                "evidence_purposes", List.of("followup")
+        ));
+        traceRecord.put("evidence", Map.of(
+                "retrieved", Map.of(
+                        "insights", List.of("insight-a", "insight-b"),
+                        "examples", List.of("example-a"),
+                        "skills", List.of("debugging", "planner"),
+                        "tasks", List.of("task-a")
+                ),
+                "used", Map.of(
+                        "insights", List.of("insight-a"),
+                        "examples", List.of("example-a"),
+                        "skills", List.of("debugging"),
+                        "tasks", List.of("task-a")
+                )
+        ));
+        traceRecord.put("used_evidence_summary", "nested evidence parsed");
+        storage.appendMemoryEvidenceTrace(traceRecord);
+
+        MemoryEvidenceTrace trace = conversationCli.getLastEvidenceTrace();
+        assertThat(trace).isNotNull();
+        assertThat(trace.retrievedInsights()).containsExactly("insight-a", "insight-b");
+        assertThat(trace.usedInsights()).containsExactly("insight-a");
+        assertThat(trace.retrievedExamples()).containsExactly("example-a");
+        assertThat(trace.usedExamples()).containsExactly("example-a");
+        assertThat(trace.loadedSkills()).containsExactly("debugging", "planner");
+        assertThat(trace.usedSkills()).containsExactly("debugging");
+        assertThat(trace.retrievedTasks()).containsExactly("task-a");
+        assertThat(trace.usedTasks()).containsExactly("task-a");
+    }
+
+    @Test
+    void getLastEvidenceTraceShouldParseNestedEvidenceGroupsWithLegacyKeys() {
+        MemoryStorage storage = new MemoryStorage(tempDir.toString());
+        storage.writeMetadata(Map.of(
+                "global_controls", Map.of(
+                        "use_saved_memories", true,
+                        "use_chat_history", false
+                )
+        ));
+        SkillService skillService = new SkillService(tempDir.toString());
+        RecordingLlmClient llmClient = new RecordingLlmClient();
+        ConversationCli conversationCli = new ConversationCli(
+                llmClient,
+                storage,
+                new MemoryManager(storage, 100, 30, 15),
+                null,
+                alwaysNeedMemoryReflectionService(),
+                null,
+                null,
+                new AgentGuideService(tempDir.resolve("missing-Agent.md").toString(), tempDir.toString()),
+                new SystemPromptBuilder(),
+                new NoopMemoryAsyncService(),
+                null,
+                skillService,
+                null,
+                toolsWithoutRag(skillService),
+                40,
+                15,
+                false,
+                0.35,
+                5
+        );
+
+        Map<String, Object> traceRecord = new LinkedHashMap<>();
+        traceRecord.put("timestamp", LocalDateTime.now().toString());
+        traceRecord.put("user_message", "nested evidence legacy keys");
+        traceRecord.put("memory_loaded", true);
+        traceRecord.put("reflection", Map.of(
+                "needs_memory", true,
+                "memory_purpose", "ACTION_FOLLOWUP",
+                "reason", "nested evidence legacy keys",
+                "evidence_purposes", List.of("followup")
+        ));
+        traceRecord.put("evidence", Map.of(
+                "retrieved", Map.of(
+                        "retrieved_insights", List.of("insight-a"),
+                        "retrieved_examples", List.of("example-a"),
+                        "loaded_skills", List.of("debugging"),
+                        "retrieved_tasks", List.of("task-a")
+                ),
+                "used", Map.of(
+                        "used_insights", List.of("insight-a"),
+                        "used_examples", List.of("example-a"),
+                        "used_skills", List.of("debugging"),
+                        "used_tasks", List.of("task-a")
+                )
+        ));
+        storage.appendMemoryEvidenceTrace(traceRecord);
+
+        MemoryEvidenceTrace trace = conversationCli.getLastEvidenceTrace();
+        assertThat(trace).isNotNull();
+        assertThat(trace.retrievedInsights()).containsExactly("insight-a");
+        assertThat(trace.usedInsights()).containsExactly("insight-a");
+        assertThat(trace.retrievedExamples()).containsExactly("example-a");
+        assertThat(trace.usedExamples()).containsExactly("example-a");
+        assertThat(trace.loadedSkills()).containsExactly("debugging");
+        assertThat(trace.usedSkills()).containsExactly("debugging");
+        assertThat(trace.retrievedTasks()).containsExactly("task-a");
+        assertThat(trace.usedTasks()).containsExactly("task-a");
+    }
+
+    @Test
     void getLastEvidenceTraceShouldIgnoreNullLikeEvidenceTokens() {
         MemoryStorage storage = new MemoryStorage(tempDir.toString());
         storage.writeMetadata(Map.of(

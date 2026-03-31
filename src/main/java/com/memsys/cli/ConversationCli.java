@@ -1442,21 +1442,111 @@ public class ConversationCli {
                 normalizeText(readFirstNonNull(record, "user_message", "userMessage")),
                 reflection,
                 parseBoolean(readFirstNonNull(record, "memory_loaded", "memoryLoaded"), false),
-                normalizeStringList(readFirstNonNull(record, "retrieved_insights", "retrievedInsights")),
-                normalizeStringList(readFirstNonNull(record, "used_insights", "usedInsights")),
-                normalizeStringList(readFirstNonNull(record, "retrieved_examples", "retrievedExamples")),
-                normalizeStringList(readFirstNonNull(record, "used_examples", "usedExamples")),
-                normalizeStringList(readFirstNonNull(
+                readTraceList(record, "retrieved", "insights", "retrieved_insights", "retrievedInsights"),
+                readTraceList(record, "used", "insights", "used_insights", "usedInsights"),
+                readTraceList(record, "retrieved", "examples", "retrieved_examples", "retrievedExamples"),
+                readTraceList(record, "used", "examples", "used_examples", "usedExamples"),
+                readTraceList(
                         record,
+                        "retrieved",
+                        "skills",
                         "loaded_skills",
                         "loadedSkills",
                         "retrieved_skills",
-                        "retrievedSkills")),
-                normalizeStringList(readFirstNonNull(record, "used_skills", "usedSkills")),
-                normalizeStringList(readFirstNonNull(record, "retrieved_tasks", "retrievedTasks")),
-                normalizeStringList(readFirstNonNull(record, "used_tasks", "usedTasks")),
+                        "retrievedSkills"),
+                readTraceList(record, "used", "skills", "used_skills", "usedSkills"),
+                readTraceList(record, "retrieved", "tasks", "retrieved_tasks", "retrievedTasks"),
+                readTraceList(record, "used", "tasks", "used_tasks", "usedTasks"),
                 normalizeText(readFirstNonNull(record, "used_evidence_summary", "usedEvidenceSummary"))
         );
+    }
+
+    private List<String> readTraceList(Map<String, Object> record,
+                                       String group,
+                                       String category,
+                                       String... directKeys) {
+        List<String> direct = normalizeStringList(readFirstNonNull(record, directKeys));
+        if (!direct.isEmpty()) {
+            return direct;
+        }
+        Map<String, Object> evidence = asMap(readFirstNonNull(record, "evidence", "evidence_trace", "evidenceTrace"));
+        if (evidence.isEmpty()) {
+            return List.of();
+        }
+
+        List<String> directFromEvidence = normalizeStringList(readFirstNonNull(evidence, directKeys));
+        if (!directFromEvidence.isEmpty()) {
+            return directFromEvidence;
+        }
+
+        String categorySingular = singular(category);
+        Map<String, Object> grouped = asMap(readFirstNonNull(
+                evidence,
+                group,
+                toCamel(group),
+                "retrieved".equals(group) ? "loaded" : null
+        ));
+        if (grouped.isEmpty()) {
+            return List.of();
+        }
+        String[] groupedKeys = new String[4 + directKeys.length];
+        groupedKeys[0] = category;
+        groupedKeys[1] = categorySingular;
+        groupedKeys[2] = category + "_list";
+        groupedKeys[3] = toCamel(category) + "List";
+        System.arraycopy(directKeys, 0, groupedKeys, 4, directKeys.length);
+        return normalizeStringList(readFirstNonNull(grouped, groupedKeys));
+    }
+
+    @SuppressWarnings("unchecked")
+    private Map<String, Object> asMap(Object value) {
+        if (value instanceof Map<?, ?> raw) {
+            return (Map<String, Object>) raw;
+        }
+        if (value instanceof String rawText) {
+            String text = unwrapJsonString(rawText);
+            if (text != null && text.startsWith("{") && text.endsWith("}")) {
+                try {
+                    return TRACE_PARSER.readValue(text, new TypeReference<Map<String, Object>>() {
+                    });
+                } catch (Exception ignored) {
+                    return Map.of();
+                }
+            }
+        }
+        return Map.of();
+    }
+
+    private String toCamel(String snakeOrWord) {
+        if (snakeOrWord == null || snakeOrWord.isBlank()) {
+            return "";
+        }
+        String[] parts = snakeOrWord.split("_");
+        if (parts.length == 0) {
+            return snakeOrWord;
+        }
+        StringBuilder sb = new StringBuilder(parts[0]);
+        for (int i = 1; i < parts.length; i++) {
+            String part = parts[i];
+            if (part.isBlank()) {
+                continue;
+            }
+            sb.append(Character.toUpperCase(part.charAt(0)));
+            if (part.length() > 1) {
+                sb.append(part.substring(1));
+            }
+        }
+        return sb.toString();
+    }
+
+    private String singular(String plural) {
+        if (plural == null || plural.isBlank()) {
+            return "";
+        }
+        if (plural.endsWith("s") && plural.length() > 1) {
+            return plural.substring(0, plural.length() - 1);
+        }
+        return plural;
     }
 
     private LocalDateTime parseTraceTimestamp(Object value) {

@@ -221,6 +221,92 @@ class MemoryTraceInsightServiceTest {
     }
 
     @Test
+    void analyzeRecentTracesShouldParseNestedEvidenceGroups() {
+        MemoryStorage storage = new MemoryStorage(tempDir.toString());
+        MemoryTraceInsightService service = new MemoryTraceInsightService(storage);
+
+        Map<String, Object> trace = new LinkedHashMap<>();
+        trace.put("memory_loaded", true);
+        trace.put("reflection", Map.of(
+                "needs_memory", true,
+                "reason", "nested evidence",
+                "evidence_purposes", List.of("followup")
+        ));
+        trace.put("evidence", Map.of(
+                "retrieved", Map.of(
+                        "insights", List.of("i-1", "i-2"),
+                        "examples", List.of("e-1"),
+                        "skills", List.of("s-1", "s-2"),
+                        "tasks", List.of("t-1")
+                ),
+                "used", Map.of(
+                        "insights", List.of("i-1"),
+                        "examples", List.of("e-1"),
+                        "skills", List.of("s-1"),
+                        "tasks", List.of("t-1")
+                )
+        ));
+        storage.appendMemoryEvidenceTrace(trace);
+
+        MemoryTraceInsightService.InsightReport report = service.analyzeRecentTraces(20);
+
+        assertThat(report.sampleSize()).isEqualTo(1);
+        assertThat(report.insightStat().retrieved()).isEqualTo(2);
+        assertThat(report.insightStat().used()).isEqualTo(1);
+        assertThat(report.exampleStat().retrieved()).isEqualTo(1);
+        assertThat(report.exampleStat().used()).isEqualTo(1);
+        assertThat(report.skillStat().retrieved()).isEqualTo(2);
+        assertThat(report.skillStat().used()).isEqualTo(1);
+        assertThat(report.taskStat().retrieved()).isEqualTo(1);
+        assertThat(report.taskStat().used()).isEqualTo(1);
+        assertThat(report.topUsedSkills()).containsExactly("s-1 (1)");
+        assertThat(report.topPurposes()).containsExactly("followup (1)");
+    }
+
+    @Test
+    void analyzeRecentTracesShouldParseNestedEvidenceGroupsWithLegacyKeys() {
+        MemoryStorage storage = new MemoryStorage(tempDir.toString());
+        MemoryTraceInsightService service = new MemoryTraceInsightService(storage);
+
+        Map<String, Object> trace = new LinkedHashMap<>();
+        trace.put("memory_loaded", true);
+        trace.put("reflection", Map.of(
+                "needs_memory", true,
+                "reason", "nested evidence legacy keys",
+                "evidence_purposes", List.of("followup")
+        ));
+        trace.put("evidence", Map.of(
+                "retrieved", Map.of(
+                        "retrieved_insights", List.of("i-1", "i-2"),
+                        "retrieved_examples", List.of("e-1"),
+                        "loaded_skills", List.of("s-1"),
+                        "retrieved_tasks", List.of("t-1")
+                ),
+                "used", Map.of(
+                        "used_insights", List.of("i-1"),
+                        "used_examples", List.of("e-1"),
+                        "used_skills", List.of("s-1"),
+                        "used_tasks", List.of("t-1")
+                )
+        ));
+        storage.appendMemoryEvidenceTrace(trace);
+
+        MemoryTraceInsightService.InsightReport report = service.analyzeRecentTraces(20);
+
+        assertThat(report.sampleSize()).isEqualTo(1);
+        assertThat(report.insightStat().retrieved()).isEqualTo(2);
+        assertThat(report.insightStat().used()).isEqualTo(1);
+        assertThat(report.exampleStat().retrieved()).isEqualTo(1);
+        assertThat(report.exampleStat().used()).isEqualTo(1);
+        assertThat(report.skillStat().retrieved()).isEqualTo(1);
+        assertThat(report.skillStat().used()).isEqualTo(1);
+        assertThat(report.taskStat().retrieved()).isEqualTo(1);
+        assertThat(report.taskStat().used()).isEqualTo(1);
+        assertThat(report.topUsedSkills()).containsExactly("s-1 (1)");
+        assertThat(report.topPurposes()).containsExactly("followup (1)");
+    }
+
+    @Test
     void analyzeRecentTracesShouldIgnoreNullLikeEvidenceTokens() {
         MemoryStorage storage = new MemoryStorage(tempDir.toString());
         MemoryTraceInsightService service = new MemoryTraceInsightService(storage);
