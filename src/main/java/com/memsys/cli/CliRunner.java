@@ -931,16 +931,10 @@ public class CliRunner implements CommandLineRunner {
         printSystem(trace.buildDisplaySummary());
     }
 
-    @SuppressWarnings("unchecked")
     private void showMemoryDebugHistory(int limit) {
-        List<Map<String, Object>> traces = storage.readMemoryEvidenceTraces(limit);
+        List<MemoryEvidenceTrace> traces = conversationCli.getRecentEvidenceTraces(limit);
         if (traces.isEmpty()) {
-            MemoryEvidenceTrace trace = conversationCli.getLastEvidenceTrace();
-            if (trace == null) {
-                printSystem("暂无记忆反思记录。请先发送一条消息，再使用 /memory-debug 查看。");
-                return;
-            }
-            printSystem(trace.buildDisplaySummary());
+            printSystem("暂无记忆反思记录。请先发送一条消息，再使用 /memory-debug 查看。");
             return;
         }
 
@@ -951,31 +945,24 @@ public class CliRunner implements CommandLineRunner {
         sb.append(String.format("▸ 最近 %d 条 evidence trace（最新在前）\n\n", traces.size()));
 
         for (int i = traces.size() - 1, rank = 1; i >= 0; i--, rank++) {
-            Map<String, Object> t = traces.get(i);
-            String timestamp = safeString(t.get("timestamp"));
+            MemoryEvidenceTrace trace = traces.get(i);
+            String timestamp = trace.timestamp() == null ? "" : trace.timestamp().toString();
             if (timestamp.isBlank()) {
                 timestamp = "(unknown)";
             }
-            String userMessage = truncateForDisplay(safeString(t.get("user_message")), 80);
+            String userMessage = truncateForDisplay(trace.userMessage(), 80);
+            String needsMemoryLabel = traceNeedsMemoryLabel(trace);
+            String reason = traceReason(trace);
 
-            Map<String, Object> reflection = t.get("reflection") instanceof Map<?, ?> map
-                    ? (Map<String, Object>) map
-                    : Map.of();
-            String needsMemoryLabel = needsMemoryLabelFromRaw(reflection.get("needs_memory"));
-            String reason = safeString(reflection.get("reason"));
-            if (reason.isBlank()) {
-                reason = "reflection_missing";
-            }
-
-            List<String> retrievedInsights = toStringList(t.get("retrieved_insights"));
-            List<String> retrievedExamples = toStringList(t.get("retrieved_examples"));
-            List<String> loadedSkills = toStringList(t.get("loaded_skills"));
-            List<String> retrievedTasks = toStringList(t.get("retrieved_tasks"));
-            List<String> usedInsights = toStringList(t.get("used_insights"));
-            List<String> usedExamples = toStringList(t.get("used_examples"));
-            List<String> usedSkills = toStringList(t.get("used_skills"));
-            List<String> usedTasks = toStringList(t.get("used_tasks"));
-            String usedSummary = safeString(t.get("used_evidence_summary"));
+            List<String> retrievedInsights = trace.retrievedInsights();
+            List<String> retrievedExamples = trace.retrievedExamples();
+            List<String> loadedSkills = trace.loadedSkills();
+            List<String> retrievedTasks = trace.retrievedTasks();
+            List<String> usedInsights = trace.usedInsights();
+            List<String> usedExamples = trace.usedExamples();
+            List<String> usedSkills = trace.usedSkills();
+            List<String> usedTasks = trace.usedTasks();
+            String usedSummary = trace.usedEvidenceSummary() == null ? "" : trace.usedEvidenceSummary().trim();
 
             sb.append(String.format("── #%d %s ──\n", rank, timestamp));
             sb.append(String.format("  需要记忆: %s\n", needsMemoryLabel));
@@ -997,17 +984,6 @@ public class CliRunner implements CommandLineRunner {
         }
 
         printSystem(sb.toString());
-    }
-
-    private List<String> toStringList(Object value) {
-        if (value instanceof List<?> list) {
-            return list.stream()
-                    .map(String::valueOf)
-                    .map(String::trim)
-                    .filter(s -> !s.isBlank() && !"null".equalsIgnoreCase(s))
-                    .toList();
-        }
-        return List.of();
     }
 
     // ========== 记忆系统展示命令（Phase 8） ==========

@@ -1265,6 +1265,31 @@ public class ConversationCli {
         }
     }
 
+    /**
+     * 获取最近 N 轮的 Memory Evidence Trace（按时间顺序），供 /memory-debug [N] 使用。
+     * 解析失败的记录会被跳过；当持久化记录为空时，回退内存态最近一轮。
+     */
+    public List<MemoryEvidenceTrace> getRecentEvidenceTraces(int limit) {
+        int effectiveLimit = limit <= 0 ? 1 : limit;
+        try {
+            List<Map<String, Object>> records = storage.readMemoryEvidenceTraces(effectiveLimit);
+            List<MemoryEvidenceTrace> traces = records.stream()
+                    .map(this::parseEvidenceTrace)
+                    .filter(Objects::nonNull)
+                    .toList();
+            if (!traces.isEmpty()) {
+                return traces;
+            }
+        } catch (Exception e) {
+            log.debug("Failed to load recent evidence traces from storage: {}", e.getMessage());
+        }
+
+        if (lastEvidenceTrace != null) {
+            return List.of(lastEvidenceTrace);
+        }
+        return List.of();
+    }
+
     @SuppressWarnings("unchecked")
     private MemoryEvidenceTrace parseEvidenceTrace(Map<String, Object> record) {
         if (record == null || record.isEmpty()) {

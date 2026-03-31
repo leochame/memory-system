@@ -868,6 +868,88 @@ class ConversationCliTest {
         assertThat(trace.reflection()).isNull();
     }
 
+    @Test
+    void getRecentEvidenceTracesShouldReuseNormalizedParsingForHistoryView() {
+        MemoryStorage storage = new MemoryStorage(tempDir.toString());
+        storage.writeMetadata(Map.of(
+                "global_controls", Map.of(
+                        "use_saved_memories", true,
+                        "use_chat_history", false
+                )
+        ));
+        SkillService skillService = new SkillService(tempDir.toString());
+        RecordingLlmClient llmClient = new RecordingLlmClient();
+        ConversationCli conversationCli = new ConversationCli(
+                llmClient,
+                storage,
+                new MemoryManager(storage, 100, 30, 15),
+                null,
+                alwaysNeedMemoryReflectionService(),
+                null,
+                null,
+                new AgentGuideService(tempDir.resolve("missing-Agent.md").toString(), tempDir.toString()),
+                new SystemPromptBuilder(),
+                new NoopMemoryAsyncService(),
+                null,
+                skillService,
+                null,
+                toolsWithoutRag(skillService),
+                40,
+                15,
+                false,
+                0.35,
+                5
+        );
+
+        Map<String, Object> traceRecord1 = new LinkedHashMap<>();
+        traceRecord1.put("timestamp", LocalDateTime.now().minusMinutes(1).toString());
+        traceRecord1.put("user_message", "根据我的偏好推荐");
+        traceRecord1.put("memory_loaded", true);
+        traceRecord1.put("reflection", Map.of(
+                "needs_memory", true,
+                "reason", "需要历史偏好",
+                "evidence_purposes", List.of("personalization")
+        ));
+        traceRecord1.put("retrieved_insights", List.of("food_preference: 不吃鱼"));
+        traceRecord1.put("used_insights", List.of("food_preference: 不吃鱼"));
+        traceRecord1.put("retrieved_examples", List.of());
+        traceRecord1.put("used_examples", List.of());
+        traceRecord1.put("loaded_skills", List.of("debugging"));
+        traceRecord1.put("used_skills", List.of());
+        traceRecord1.put("retrieved_tasks", List.of());
+        traceRecord1.put("used_tasks", List.of());
+        traceRecord1.put("used_evidence_summary", "insights 1/1");
+        storage.appendMemoryEvidenceTrace(traceRecord1);
+
+        Map<String, Object> traceRecord2 = new LinkedHashMap<>();
+        traceRecord2.put("timestamp", LocalDateTime.now().toString());
+        traceRecord2.put("user_message", "null");
+        traceRecord2.put("memory_loaded", true);
+        traceRecord2.put("reflection", Map.of(
+                "reason", "legacy trace without needs_memory",
+                "evidence_purposes", List.of("continuity")
+        ));
+        traceRecord2.put("retrieved_insights", java.util.Arrays.asList("null", null, "user_insights.md: 偏好简洁"));
+        traceRecord2.put("used_insights", List.of());
+        traceRecord2.put("retrieved_examples", List.of());
+        traceRecord2.put("used_examples", List.of());
+        traceRecord2.put("loaded_skills", List.of());
+        traceRecord2.put("used_skills", List.of());
+        traceRecord2.put("retrieved_tasks", List.of());
+        traceRecord2.put("used_tasks", List.of());
+        traceRecord2.put("used_evidence_summary", "null");
+        storage.appendMemoryEvidenceTrace(traceRecord2);
+
+        List<MemoryEvidenceTrace> traces = conversationCli.getRecentEvidenceTraces(2);
+        assertThat(traces).hasSize(2);
+
+        MemoryEvidenceTrace latest = traces.get(1);
+        assertThat(latest.reflection()).isNull();
+        assertThat(latest.userMessage()).isEmpty();
+        assertThat(latest.retrievedInsights()).containsExactly("user_insights.md: 偏好简洁");
+        assertThat(latest.usedEvidenceSummary()).isEmpty();
+    }
+
     private List<BaseTool> toolsWithoutRag(SkillService skillService) {
         return List.of(
                 new SearchRagTool(null, false, 5, 0.35),

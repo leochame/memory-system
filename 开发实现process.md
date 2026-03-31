@@ -925,3 +925,17 @@
 - 实际结果：
   - `/memory-debug` 在仅从 `memory_evidence_traces.jsonl` 回读时，不再把缺字段误显示为“不需要记忆”
   - 记忆证据追踪在“内存态/持久化回读/历史窗口”三条路径上的 `needs_memory` 语义保持一致
+
+#### 迭代记录 - 2026-03-31 08:40
+
+- 增强目标：继续执行 Step 2/6（6.2 记忆证据追踪），统一 `/memory-debug` 单轮与历史窗口的 trace 解析路径，消除历史视图与单轮视图字段清洗不一致风险
+- 涉及文件：修改 `src/main/java/com/memsys/cli/ConversationCli.java`、修改 `src/main/java/com/memsys/cli/CliRunner.java`、修改 `src/test/java/com/memsys/cli/ConversationCliTest.java`、修改 `开发文档.md`、修改 `开发实现process.md`
+- 实现方案：
+  1. `ConversationCli` 新增 `getRecentEvidenceTraces(int limit)`，统一负责“读取持久化 trace + 规范化解析 + 内存态回退”
+  2. `CliRunner.showMemoryDebugHistory(int limit)` 改为消费 `MemoryEvidenceTrace` 对象，不再直接读取原始 map 字段
+  3. 历史视图的 `needs_memory/reason/user_message/retrieved-used` 展示全部复用同一规范化结果
+  4. 新增回归测试覆盖“历史窗口读取也应清洗 null-like 字段与 legacy reflection”的场景
+- 状态：已完成
+- 实际结果：
+  - `/memory-debug [N]` 与 `/memory-debug` 的三态语义和字段清洗行为保持一致
+  - 历史 trace 中的 `null` 字符串与缺失字段不会在历史视图中造成误导展示
