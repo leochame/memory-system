@@ -2858,3 +2858,33 @@
 - 实际结果：
   - `/memory-debug` 与 `/memory-insights` 可稳定回读 `reflection⟹needs_memory`、`evidence⟹retrieved⟹insights⟹0`、`retrieved⟹examples⟹0`、`loaded⟹skills⟹1` 以及 `# ⟹ reflection ⟹ ...` 等 Unicode-double-line-long-arrow-path 字段，不再因 `⟹` 路径风格导致证据统计缺失
   - Step 2/6 的跨来源 trace 兼容能力从“Unicode 长箭头路径”扩展到“Unicode 双线长箭头路径”，进一步降低跨系统规则链路/日志数据导入后的排障成本
+
+#### 迭代记录 - 2026-04-01 11:45
+
+- 增强目标：继续执行 Step 6/6（调研与文档更新），围绕记忆系统在“14 天收敛执行”基础上补齐“28 天内容货架”机制，把更多内容产出从单条发布升级为分层资产运营
+- 涉及文件：修改 `开发文档.md`、修改 `开发实现process.md`
+- 实现方案：
+  1. 将开发文档版本升级至 `v4.71`，保持更新日期为 `2026-04-01`
+  2. 在 `5.10` 新增 `5.10.43 Step 6/6 调研执行版（28 天内容货架：快照卡 + 案例卡 + 专题包）`
+  3. 在开发文档新增 `6.43 需求四十一`，固化内容分层字段、目录规范、快照/案例/专题三层准入规则与回流约束
+  4. 将验收标准统一到“周快照产能 + 周案例回放 + 月专题打包 + 失败样本占比”四条主线，避免内容规模增长后再次失控
+- 状态：已完成
+- 实际结果：
+  - Step 6/6 从“14 天冲刺收敛”进一步升级为“28 天内容货架运营”，可稳定回答“每天记什么、每周讲什么、每月沉淀什么”
+  - 新增字段（`content_tier/snapshot_id/case_id/topic_pack_id/before_after/replay_result/audience_versions/publish_state`）后，可在同一索引中追踪“快照 -> 案例 -> 专题 -> 回流验证”链路
+  - 本次变更为文档调研更新，无代码逻辑改动，无需运行测试
+
+#### 迭代记录 - 2026-04-01 12:10
+
+- 增强目标：继续执行 Step 2/6（6.2 记忆证据追踪），补齐历史 trace 在“Unicode 黑箭头路径扁平字段（`➡/➡️`）”格式下的兼容解析，避免 `/memory-debug` 与 `/memory-insights` 在跨系统协作文档/聊天记录导出数据上出现覆盖率误判
+- 涉及文件：修改 `src/main/java/com/memsys/cli/ConversationCli.java`、修改 `src/main/java/com/memsys/memory/MemoryTraceInsightService.java`、修改 `src/test/java/com/memsys/cli/ConversationCliTest.java`、修改 `src/test/java/com/memsys/memory/MemoryTraceInsightServiceTest.java`、修改 `开发文档.md`、修改 `开发实现process.md`
+- 实现方案：
+  1. 在 `ConversationCli.flattenedKeySuffix(...)`、`trimLeadingFragmentDelimiter(...)` 与 `splitFlattenedPath(...)` 增加 `➡` 分隔符识别，并兼容可选变体选择符（`➡️`）与 fragment 前缀空白形式
+  2. 在 `MemoryTraceInsightService` 同步应用同级 Unicode-right-arrow-path 解析规则，确保 `/memory-insights` 与 `/memory-debug` 的历史 trace 兼容口径一致
+  3. 新增 `getLastEvidenceTraceShouldParseFlattenedUnicodeRightArrowPathTraceFieldsWithFragmentDelimiterWhitespace`，覆盖 `/memory-debug` 在 `# ➡ reflection ➡ needs_memory`、`evidence ➡ retrieved ➡ insights ➡ 0`、`loaded ➡ skills ➡ 0` 等场景下的回读
+  4. 新增 `analyzeRecentTracesShouldParseFlattenedUnicodeRightArrowPathTraceFieldsWithFragmentDelimiterWhitespace`，覆盖 `/memory-insights` 在同场景下的 retrieved/used 统计一致性
+  5. 同步开发文档升级至 `v4.72`，并在 `6.2` 完成标准新增第 61 条，明确“Unicode 黑箭头路径扁平字段兼容（含 fragment + 分隔符空白 + emoji 变体）”约束
+- 状态：已完成
+- 实际结果：
+  - `/memory-debug` 与 `/memory-insights` 可稳定回读 `reflection➡needs_memory`、`evidence➡retrieved➡insights➡0`、`retrieved➡examples➡0`、`loaded➡skills➡1` 以及 `# ➡ reflection ➡ ...` / `# ➡️ reflection ➡️ ...` 等 Unicode-right-arrow-path 字段，不再因 `➡/➡️` 路径风格导致证据统计缺失
+  - Step 2/6 的跨来源 trace 兼容能力从“Unicode 双线长箭头路径”扩展到“Unicode 黑箭头路径”，进一步降低跨系统协作文档/聊天记录导入后的排障成本

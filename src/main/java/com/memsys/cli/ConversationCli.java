@@ -49,7 +49,7 @@ public class ConversationCli {
     private static final int FAST_RAG_MAX_RESULTS = 3;
     private static final int FAST_EXAMPLE_MAX_RESULTS = 2;
     private static final ObjectMapper TRACE_PARSER = new ObjectMapper();
-    private static final String DELIMITED_LIST_SPLIT_REGEX = "[,;|\\n，；]+";
+    private static final String DELIMITED_LIST_SPLIT_REGEX = "[,;|\\n，；｜]+";
 
     private final LlmClient llmClient;
     private final MemoryStorage storage;
@@ -1869,6 +1869,8 @@ public class ConversationCli {
         int fatArrowDelimiterLength = 0;
         boolean unicodeArrowDelimiter = false;
         int unicodeArrowDelimiterLength = 0;
+        boolean unicodeRightArrowDelimiter = false;
+        int unicodeRightArrowDelimiterLength = 0;
         boolean unicodeFatArrowDelimiter = false;
         int unicodeFatArrowDelimiterLength = 0;
         boolean unicodeMapstoDelimiter = false;
@@ -1911,6 +1913,13 @@ public class ConversationCli {
                 delimiterIndex = i;
                 unicodeArrowDelimiter = true;
                 unicodeArrowDelimiterLength = unicodeArrowLength;
+                break;
+            }
+            int unicodeRightArrowLength = matchUnicodeRightArrowDelimiter(candidate, i);
+            if (unicodeRightArrowLength > 0) {
+                delimiterIndex = i;
+                unicodeRightArrowDelimiter = true;
+                unicodeRightArrowDelimiterLength = unicodeRightArrowLength;
                 break;
             }
             int unicodeFatArrowLength = matchUnicodeFatArrowDelimiter(candidate, i);
@@ -1989,6 +1998,9 @@ public class ConversationCli {
         if (unicodeArrowDelimiter) {
             return candidate.substring(delimiterIndex + unicodeArrowDelimiterLength);
         }
+        if (unicodeRightArrowDelimiter) {
+            return candidate.substring(delimiterIndex + unicodeRightArrowDelimiterLength);
+        }
         if (unicodeFatArrowDelimiter) {
             return candidate.substring(delimiterIndex + unicodeFatArrowDelimiterLength);
         }
@@ -2026,6 +2038,10 @@ public class ConversationCli {
         int unicodeArrowDelimiterLength = matchUnicodeArrowDelimiter(fragment, 0);
         if (unicodeArrowDelimiterLength > 0) {
             return fragment.substring(unicodeArrowDelimiterLength).stripLeading();
+        }
+        int unicodeRightArrowDelimiterLength = matchUnicodeRightArrowDelimiter(fragment, 0);
+        if (unicodeRightArrowDelimiterLength > 0) {
+            return fragment.substring(unicodeRightArrowDelimiterLength).stripLeading();
         }
         int unicodeFatArrowDelimiterLength = matchUnicodeFatArrowDelimiter(fragment, 0);
         if (unicodeFatArrowDelimiterLength > 0) {
@@ -2118,6 +2134,15 @@ public class ConversationCli {
                     token.setLength(0);
                 }
                 i += unicodeArrowLength - 1;
+                continue;
+            }
+            int unicodeRightArrowLength = matchUnicodeRightArrowDelimiter(suffix, i);
+            if (unicodeRightArrowLength > 0) {
+                if (!token.isEmpty()) {
+                    addDecodedPathToken(parts, token);
+                    token.setLength(0);
+                }
+                i += unicodeRightArrowLength - 1;
                 continue;
             }
             int unicodeFatArrowLength = matchUnicodeFatArrowDelimiter(suffix, i);
@@ -2247,6 +2272,20 @@ public class ConversationCli {
             return 0;
         }
         int index = start + 1;
+        while (index < value.length() && Character.isWhitespace(value.charAt(index))) {
+            index++;
+        }
+        return index - start;
+    }
+
+    private int matchUnicodeRightArrowDelimiter(String value, int start) {
+        if (value == null || start < 0 || start >= value.length() || value.charAt(start) != '➡') {
+            return 0;
+        }
+        int index = start + 1;
+        if (index < value.length() && value.charAt(index) == '\uFE0F') {
+            index++;
+        }
         while (index < value.length() && Character.isWhitespace(value.charAt(index))) {
             index++;
         }
@@ -2521,7 +2560,8 @@ public class ConversationCli {
                 || text.contains("，")
                 || text.contains(";")
                 || text.contains("；")
-                || text.contains("|");
+                || text.contains("|")
+                || text.contains("｜");
     }
 
     private String normalizeDelimitedToken(String token) {

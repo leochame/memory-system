@@ -151,6 +151,39 @@ class MemoryTraceInsightServiceTest {
     }
 
     @Test
+    void analyzeRecentTracesShouldParseFullWidthPipeDelimitedStringListFields() {
+        MemoryStorage storage = new MemoryStorage(tempDir.toString());
+        MemoryTraceInsightService service = new MemoryTraceInsightService(storage);
+
+        Map<String, Object> trace = new LinkedHashMap<>();
+        trace.put("memoryLoaded", "yes");
+        trace.put("reflectionResult",
+                "{\"needsMemory\":\"y\",\"reason\":\"fullwidth pipe list\",\"evidencePurposes\":\"[\\\"followup\\\"]\"}");
+        trace.put("retrievedInsights", "insight-a｜insight-b");
+        trace.put("usedInsights", "insight-b");
+        trace.put("retrievedExamples", "example-a｜example-b");
+        trace.put("usedExamples", "example-b");
+        trace.put("retrievedSkills", "skill-a｜skill-b");
+        trace.put("usedSkills", "skill-a");
+        trace.put("retrievedTasks", "task-a｜task-b");
+        trace.put("usedTasks", "task-b");
+        storage.appendMemoryEvidenceTrace(trace);
+
+        MemoryTraceInsightService.InsightReport report = service.analyzeRecentTraces(20);
+
+        assertThat(report.sampleSize()).isEqualTo(1);
+        assertThat(report.insightStat().retrieved()).isEqualTo(2);
+        assertThat(report.insightStat().used()).isEqualTo(1);
+        assertThat(report.exampleStat().retrieved()).isEqualTo(2);
+        assertThat(report.exampleStat().used()).isEqualTo(1);
+        assertThat(report.skillStat().retrieved()).isEqualTo(2);
+        assertThat(report.skillStat().used()).isEqualTo(1);
+        assertThat(report.taskStat().retrieved()).isEqualTo(2);
+        assertThat(report.taskStat().used()).isEqualTo(1);
+        assertThat(report.topPurposes()).containsExactly("followup (1)");
+    }
+
+    @Test
     void analyzeRecentTracesShouldParseMultiLayerStringifiedTraceFields() {
         MemoryStorage storage = new MemoryStorage(tempDir.toString());
         MemoryTraceInsightService service = new MemoryTraceInsightService(storage);
@@ -1083,6 +1116,44 @@ class MemoryTraceInsightServiceTest {
         trace.put("retrieved → tasks → 0", "t-1");
         trace.put("retrieved → tasks → 1", "t-2");
         trace.put("used → tasks → 0", "t-2");
+        storage.appendMemoryEvidenceTrace(trace);
+
+        MemoryTraceInsightService.InsightReport report = service.analyzeRecentTraces(20);
+
+        assertThat(report.sampleSize()).isEqualTo(1);
+        assertThat(report.insightStat().retrieved()).isEqualTo(2);
+        assertThat(report.insightStat().used()).isEqualTo(1);
+        assertThat(report.exampleStat().retrieved()).isEqualTo(1);
+        assertThat(report.exampleStat().used()).isEqualTo(1);
+        assertThat(report.skillStat().retrieved()).isEqualTo(2);
+        assertThat(report.skillStat().used()).isEqualTo(1);
+        assertThat(report.taskStat().retrieved()).isEqualTo(2);
+        assertThat(report.taskStat().used()).isEqualTo(1);
+        assertThat(report.topUsedSkills()).containsExactly("s-2 (1)");
+        assertThat(report.topPurposes()).containsExactly("followup (1)");
+    }
+
+    @Test
+    void analyzeRecentTracesShouldParseFlattenedUnicodeRightArrowPathTraceFieldsWithFragmentDelimiterWhitespace() {
+        MemoryStorage storage = new MemoryStorage(tempDir.toString());
+        MemoryTraceInsightService service = new MemoryTraceInsightService(storage);
+
+        Map<String, Object> trace = new LinkedHashMap<>();
+        trace.put("memory_loaded", true);
+        trace.put("# ➡ reflection ➡ needs_memory", true);
+        trace.put("# ➡ reflection ➡ reason", "flat unicode right arrow path trace with fragment delimiter whitespace");
+        trace.put("# ➡ reflection ➡ evidence_purposes ➡ 0", "followup");
+        trace.put("evidence ➡ retrieved ➡ insights ➡ 0", "i-1");
+        trace.put("evidence ➡ retrieved ➡ insights ➡ 1", "i-2");
+        trace.put("evidence ➡ used ➡ insights ➡ 0", "i-2");
+        trace.put("retrieved ➡ examples ➡ 0", "e-1");
+        trace.put("used ➡ examples ➡ 0", "e-1");
+        trace.put("loaded ➡ skills ➡ 0", "s-1");
+        trace.put("loaded ➡ skills ➡ 1", "s-2");
+        trace.put("used ➡ skills ➡ 0", "s-2");
+        trace.put("retrieved ➡ tasks ➡ 0", "t-1");
+        trace.put("retrieved ➡ tasks ➡ 1", "t-2");
+        trace.put("used ➡ tasks ➡ 0", "t-2");
         storage.appendMemoryEvidenceTrace(trace);
 
         MemoryTraceInsightService.InsightReport report = service.analyzeRecentTraces(20);
