@@ -1850,6 +1850,8 @@ public class ConversationCli {
         int doubleUnderscoreDelimiterLength = 0;
         boolean arrowDelimiter = false;
         int arrowDelimiterLength = 0;
+        boolean fatArrowDelimiter = false;
+        int fatArrowDelimiterLength = 0;
         for (int i = 0; i < candidate.length(); i++) {
             char ch = candidate.charAt(i);
             if (ch == '.' || ch == '[' || ch == '/' || ch == ':' || ch == '\\' || ch == '|') {
@@ -1868,6 +1870,13 @@ public class ConversationCli {
                 delimiterIndex = i;
                 arrowDelimiter = true;
                 arrowDelimiterLength = arrowLength;
+                break;
+            }
+            int fatArrowLength = matchFatArrowDelimiter(candidate, i);
+            if (fatArrowLength > 0) {
+                delimiterIndex = i;
+                fatArrowDelimiter = true;
+                fatArrowDelimiterLength = fatArrowLength;
                 break;
             }
         }
@@ -1905,6 +1914,9 @@ public class ConversationCli {
         if (arrowDelimiter) {
             return candidate.substring(delimiterIndex + arrowDelimiterLength);
         }
+        if (fatArrowDelimiter) {
+            return candidate.substring(delimiterIndex + fatArrowDelimiterLength);
+        }
         return candidate.substring(delimiterIndex + 1);
     }
 
@@ -1919,6 +1931,10 @@ public class ConversationCli {
         int arrowDelimiterLength = matchArrowDelimiter(fragment, 0);
         if (arrowDelimiterLength > 0) {
             return fragment.substring(arrowDelimiterLength).stripLeading();
+        }
+        int fatArrowDelimiterLength = matchFatArrowDelimiter(fragment, 0);
+        if (fatArrowDelimiterLength > 0) {
+            return fragment.substring(fatArrowDelimiterLength).stripLeading();
         }
         char first = fragment.charAt(0);
         if (first == '/' || first == '\\' || first == '.' || first == ':' || first == '|') {
@@ -1958,6 +1974,15 @@ public class ConversationCli {
                     token.setLength(0);
                 }
                 i += arrowLength - 1;
+                continue;
+            }
+            int fatArrowLength = matchFatArrowDelimiter(suffix, i);
+            if (fatArrowLength > 0) {
+                if (!token.isEmpty()) {
+                    addDecodedPathToken(parts, token);
+                    token.setLength(0);
+                }
+                i += fatArrowLength - 1;
                 continue;
             }
             if (ch == '[') {
@@ -2003,6 +2028,24 @@ public class ConversationCli {
 
     private int matchArrowDelimiter(String value, int start) {
         if (value == null || start < 0 || start >= value.length() || value.charAt(start) != '-') {
+            return 0;
+        }
+        int index = start + 1;
+        while (index < value.length() && Character.isWhitespace(value.charAt(index))) {
+            index++;
+        }
+        if (index >= value.length() || value.charAt(index) != '>') {
+            return 0;
+        }
+        index++;
+        while (index < value.length() && Character.isWhitespace(value.charAt(index))) {
+            index++;
+        }
+        return index - start;
+    }
+
+    private int matchFatArrowDelimiter(String value, int start) {
+        if (value == null || start < 0 || start >= value.length() || value.charAt(start) != '=') {
             return 0;
         }
         int index = start + 1;
