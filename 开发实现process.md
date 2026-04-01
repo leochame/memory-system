@@ -2830,3 +2830,31 @@
 - 实际结果：
   - `/memory-debug` 与 `/memory-insights` 可稳定回读 `reflection⟶needs_memory`、`evidence⟶retrieved⟶insights⟶0`、`retrieved⟶examples⟶0`、`loaded⟶skills⟶1` 以及 `# ⟶ reflection ⟶ ...` 等 Unicode-long-arrow-path 字段，不再因 `⟶` 路径风格导致证据统计缺失
   - Step 2/6 的跨来源 trace 兼容能力从“Unicode 映射箭头路径”扩展到“Unicode 长箭头路径”，进一步降低跨系统日志/规则数据导入后的排障成本
+
+#### 迭代记录 - 2026-04-01 10:50
+
+- 增强目标：围绕 Step 1/6（6.1 Memory Reflection 调用链）按开发文档 `v4.69` 复核当前项目，确认“结构化决策 -> 主链路反思 -> 按决策加载记忆 -> Prompt 显式消费 -> 失败回退”闭环在最新版本下持续成立
+- 涉及文件：修改 `开发实现process.md`
+- 实现方案：
+  1. 对照 `开发文档.md` 第 `6.1` 条逐项核查 `LlmDtos/ReflectionResult/MemoryReflectionService/ConversationCli/SystemPromptBuilder`：结构化 schema、反思阶段插入、按决策加载记忆、提示词显式消费与失败回退
+  2. 重点复核 `v4.69` 下 Step 1/6 关键约束：`needs_memory=true` 且 `evidence_types/evidence_purposes` 缺失或非法时按 `memory_purpose` 派生默认值；`recent-history/recentHistory`、`follow-up/followUp` 等别名在主链路与提示词层统一归一化
+  3. 执行 Step 1/6 定向回归：`./scripts/run-tests.sh -q -Dtest=ReflectionResultTest,MemoryReflectionServiceTest,SystemPromptBuilderTest,ConversationCliTest test`
+- 状态：已完成
+- 实际结果：
+  - 当前实现与开发文档 `v4.69` 的 Step 1/6 要求保持一致，本轮未发现需新增代码的缺口
+  - 定向回归通过，Memory Reflection 调用链在主链路、提示词层与失败回退路径保持稳定
+
+#### 迭代记录 - 2026-04-01 11:20
+
+- 增强目标：继续执行 Step 2/6（6.2 记忆证据追踪），补齐历史 trace 在“Unicode 双线长箭头路径扁平字段（`⟹`）”格式下的兼容解析，避免 `/memory-debug` 与 `/memory-insights` 在跨系统规则链路/日志导出数据上出现覆盖率误判
+- 涉及文件：修改 `src/main/java/com/memsys/cli/ConversationCli.java`、修改 `src/main/java/com/memsys/memory/MemoryTraceInsightService.java`、修改 `src/test/java/com/memsys/cli/ConversationCliTest.java`、修改 `src/test/java/com/memsys/memory/MemoryTraceInsightServiceTest.java`、修改 `开发文档.md`、修改 `开发实现process.md`
+- 实现方案：
+  1. 在 `ConversationCli.flattenedKeySuffix(...)`、`trimLeadingFragmentDelimiter(...)` 与 `splitFlattenedPath(...)` 增加 `⟹` 分隔符识别，支持 `# ⟹ reflection ⟹ ...` 等 fragment 前缀形式
+  2. 在 `MemoryTraceInsightService` 同步应用同级 Unicode-double-line-long-arrow-path 解析规则，确保 `/memory-insights` 与 `/memory-debug` 的历史 trace 兼容口径一致
+  3. 新增 `getLastEvidenceTraceShouldParseFlattenedUnicodeDoubleLineLongArrowPathTraceFieldsWithFragmentDelimiterWhitespace`，覆盖 `/memory-debug` 在 `# ⟹ reflection ⟹ needs_memory`、`evidence ⟹ retrieved ⟹ insights ⟹ 0`、`loaded ⟹ skills ⟹ 0` 等场景下的回读
+  4. 新增 `analyzeRecentTracesShouldParseFlattenedUnicodeDoubleLineLongArrowPathTraceFieldsWithFragmentDelimiterWhitespace`，覆盖 `/memory-insights` 在同场景下的 retrieved/used 统计一致性
+  5. 同步开发文档升级至 `v4.70`，并在 `6.2` 完成标准新增第 60 条，明确“Unicode 双线长箭头路径扁平字段兼容（含 fragment + 分隔符空白）”约束
+- 状态：已完成
+- 实际结果：
+  - `/memory-debug` 与 `/memory-insights` 可稳定回读 `reflection⟹needs_memory`、`evidence⟹retrieved⟹insights⟹0`、`retrieved⟹examples⟹0`、`loaded⟹skills⟹1` 以及 `# ⟹ reflection ⟹ ...` 等 Unicode-double-line-long-arrow-path 字段，不再因 `⟹` 路径风格导致证据统计缺失
+  - Step 2/6 的跨来源 trace 兼容能力从“Unicode 长箭头路径”扩展到“Unicode 双线长箭头路径”，进一步降低跨系统规则链路/日志数据导入后的排障成本
