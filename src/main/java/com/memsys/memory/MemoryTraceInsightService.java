@@ -648,6 +648,8 @@ public class MemoryTraceInsightService {
         int unicodeLongRightArrowFromBarDelimiterLength = 0;
         boolean unicodeWideHeadedRightArrowDelimiter = false;
         int unicodeWideHeadedRightArrowDelimiterLength = 0;
+        boolean unicodeDashedRightArrowDelimiter = false;
+        int unicodeDashedRightArrowDelimiterLength = 0;
         boolean doubleAngleDelimiter = false;
         int doubleAngleDelimiterLength = 0;
         for (int i = 0; i < candidate.length(); i++) {
@@ -740,6 +742,13 @@ public class MemoryTraceInsightService {
                 unicodeWideHeadedRightArrowDelimiterLength = unicodeWideHeadedRightArrowLength;
                 break;
             }
+            int unicodeDashedRightArrowLength = matchUnicodeDashedRightArrowDelimiter(candidate, i);
+            if (unicodeDashedRightArrowLength > 0) {
+                delimiterIndex = i;
+                unicodeDashedRightArrowDelimiter = true;
+                unicodeDashedRightArrowDelimiterLength = unicodeDashedRightArrowLength;
+                break;
+            }
             int doubleAngleLength = matchDoubleAngleDelimiter(candidate, i);
             if (doubleAngleLength > 0) {
                 delimiterIndex = i;
@@ -812,6 +821,9 @@ public class MemoryTraceInsightService {
         if (unicodeWideHeadedRightArrowDelimiter) {
             return candidate.substring(delimiterIndex + unicodeWideHeadedRightArrowDelimiterLength);
         }
+        if (unicodeDashedRightArrowDelimiter) {
+            return candidate.substring(delimiterIndex + unicodeDashedRightArrowDelimiterLength);
+        }
         if (doubleAngleDelimiter) {
             return candidate.substring(delimiterIndex + doubleAngleDelimiterLength);
         }
@@ -869,6 +881,10 @@ public class MemoryTraceInsightService {
         int unicodeWideHeadedRightArrowDelimiterLength = matchUnicodeWideHeadedRightArrowDelimiter(fragment, 0);
         if (unicodeWideHeadedRightArrowDelimiterLength > 0) {
             return fragment.substring(unicodeWideHeadedRightArrowDelimiterLength).stripLeading();
+        }
+        int unicodeDashedRightArrowDelimiterLength = matchUnicodeDashedRightArrowDelimiter(fragment, 0);
+        if (unicodeDashedRightArrowDelimiterLength > 0) {
+            return fragment.substring(unicodeDashedRightArrowDelimiterLength).stripLeading();
         }
         int doubleAngleDelimiterLength = matchDoubleAngleDelimiter(fragment, 0);
         if (doubleAngleDelimiterLength > 0) {
@@ -1017,6 +1033,15 @@ public class MemoryTraceInsightService {
                     token.setLength(0);
                 }
                 i += unicodeWideHeadedRightArrowLength - 1;
+                continue;
+            }
+            int unicodeDashedRightArrowLength = matchUnicodeDashedRightArrowDelimiter(suffix, i);
+            if (unicodeDashedRightArrowLength > 0) {
+                if (!token.isEmpty()) {
+                    addDecodedPathToken(parts, token);
+                    token.setLength(0);
+                }
+                i += unicodeDashedRightArrowLength - 1;
                 continue;
             }
             int doubleAngleLength = matchDoubleAngleDelimiter(suffix, i);
@@ -1201,6 +1226,20 @@ public class MemoryTraceInsightService {
 
     private int matchUnicodeWideHeadedRightArrowDelimiter(String value, int start) {
         if (value == null || start < 0 || start >= value.length() || value.charAt(start) != '➔') {
+            return 0;
+        }
+        int index = start + 1;
+        if (index < value.length() && (value.charAt(index) == '\uFE0F' || value.charAt(index) == '\uFE0E')) {
+            index++;
+        }
+        while (index < value.length() && Character.isWhitespace(value.charAt(index))) {
+            index++;
+        }
+        return index - start;
+    }
+
+    private int matchUnicodeDashedRightArrowDelimiter(String value, int start) {
+        if (value == null || start < 0 || start >= value.length() || value.charAt(start) != '⇢') {
             return 0;
         }
         int index = start + 1;

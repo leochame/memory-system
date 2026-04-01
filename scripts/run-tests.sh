@@ -11,6 +11,11 @@ resolve_java_home() {
 
   if command -v /usr/libexec/java_home >/dev/null 2>&1; then
     local candidate
+    candidate="$(/usr/libexec/java_home -v 21 2>/dev/null || true)"
+    if [[ -n "$candidate" && -x "$candidate/bin/java" ]]; then
+      export JAVA_HOME="$candidate"
+      return 0
+    fi
     candidate="$(/usr/libexec/java_home 2>/dev/null || true)"
     if [[ -n "$candidate" && -x "$candidate/bin/java" ]]; then
       export JAVA_HOME="$candidate"
