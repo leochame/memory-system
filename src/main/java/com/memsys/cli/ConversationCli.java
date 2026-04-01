@@ -1848,6 +1848,8 @@ public class ConversationCli {
         int delimiterIndex = -1;
         boolean doubleUnderscoreDelimiter = false;
         int doubleUnderscoreDelimiterLength = 0;
+        boolean arrowDelimiter = false;
+        int arrowDelimiterLength = 0;
         for (int i = 0; i < candidate.length(); i++) {
             char ch = candidate.charAt(i);
             if (ch == '.' || ch == '[' || ch == '/' || ch == ':' || ch == '\\' || ch == '|') {
@@ -1859,6 +1861,13 @@ public class ConversationCli {
                 delimiterIndex = i;
                 doubleUnderscoreDelimiter = true;
                 doubleUnderscoreDelimiterLength = delimiterLength;
+                break;
+            }
+            int arrowLength = matchArrowDelimiter(candidate, i);
+            if (arrowLength > 0) {
+                delimiterIndex = i;
+                arrowDelimiter = true;
+                arrowDelimiterLength = arrowLength;
                 break;
             }
         }
@@ -1893,6 +1902,9 @@ public class ConversationCli {
         if (doubleUnderscoreDelimiter) {
             return candidate.substring(delimiterIndex + doubleUnderscoreDelimiterLength);
         }
+        if (arrowDelimiter) {
+            return candidate.substring(delimiterIndex + arrowDelimiterLength);
+        }
         return candidate.substring(delimiterIndex + 1);
     }
 
@@ -1903,6 +1915,10 @@ public class ConversationCli {
         int doubleUnderscoreDelimiterLength = matchDoubleUnderscoreDelimiter(fragment, 0);
         if (doubleUnderscoreDelimiterLength > 0) {
             return fragment.substring(doubleUnderscoreDelimiterLength).stripLeading();
+        }
+        int arrowDelimiterLength = matchArrowDelimiter(fragment, 0);
+        if (arrowDelimiterLength > 0) {
+            return fragment.substring(arrowDelimiterLength).stripLeading();
         }
         char first = fragment.charAt(0);
         if (first == '/' || first == '\\' || first == '.' || first == ':' || first == '|') {
@@ -1933,6 +1949,15 @@ public class ConversationCli {
                     token.setLength(0);
                 }
                 i += delimiterLength - 1;
+                continue;
+            }
+            int arrowLength = matchArrowDelimiter(suffix, i);
+            if (arrowLength > 0) {
+                if (!token.isEmpty()) {
+                    addDecodedPathToken(parts, token);
+                    token.setLength(0);
+                }
+                i += arrowLength - 1;
                 continue;
             }
             if (ch == '[') {
@@ -1967,6 +1992,24 @@ public class ConversationCli {
             index++;
         }
         if (index >= value.length() || value.charAt(index) != '_') {
+            return 0;
+        }
+        index++;
+        while (index < value.length() && Character.isWhitespace(value.charAt(index))) {
+            index++;
+        }
+        return index - start;
+    }
+
+    private int matchArrowDelimiter(String value, int start) {
+        if (value == null || start < 0 || start >= value.length() || value.charAt(start) != '-') {
+            return 0;
+        }
+        int index = start + 1;
+        while (index < value.length() && Character.isWhitespace(value.charAt(index))) {
+            index++;
+        }
+        if (index >= value.length() || value.charAt(index) != '>') {
             return 0;
         }
         index++;
