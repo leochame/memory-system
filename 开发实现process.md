@@ -2482,3 +2482,48 @@
 - 实际结果：
   - `/memory-debug` 与 `/memory-insights` 可稳定回读 `reflection=>needs_memory`、`evidence=>retrieved=>insights=>0`、`retrieved=>examples=>0`、`loaded=>skills=>1` 以及 `# => reflection => ...` 等 fat-arrow-path 字段，不再因 `=>` 路径风格导致证据统计缺失
   - Step 2/6 的跨来源 trace 兼容能力从“arrow-path 路径”扩展到“fat-arrow-path 路径”，进一步降低跨系统导入后的排障成本
+
+#### 迭代记录 - 2026-04-01 10:30
+
+- 增强目标：继续执行 Step 6/6（调研与文档更新），围绕记忆系统将“更多内容”从扩展概念收敛为可执行机制（主题库 + 模板库 + 发布日历），提升周度发布稳定性与反馈闭环效率
+- 涉及文件：修改 `开发文档.md`、修改 `开发实现process.md`
+- 实现方案：
+  1. 将开发文档版本升级至 `v4.53`，保持更新日期为 `2026-04-01`
+  2. 在 `5.10` 新增 `5.10.34 Step 6/6 内容扩展蓝图（收敛执行版）`，明确调研结论、三类执行资产与 4 周落地节奏
+  3. 在开发文档新增 `6.35 需求三十三`，固化主题入池、模板准入、发布节奏、反馈回流与周度执行小结
+  4. 以“少规则但强约束”方式补齐验收门槛，确保 Step 6/6 从“方向扩展”切换为“可验收执行”
+- 状态：已完成
+- 实际结果：
+  - Step 6/6 的文档策略从“持续扩展更多内容层”升级为“收敛执行 + 固定节奏 + 明确验收”，更适合持续运营与答辩展示
+  - 新增 `topic_id/template_type/owner/publish_status/expected_feedback/retest_due` 等执行字段后，可直接追踪“选题 -> 模板 -> 发布 -> 回流 -> 复测”链路
+  - 本次变更为文档调研更新，无代码逻辑改动，无需运行测试
+
+#### 迭代记录 - 2026-04-01 08:44
+
+- 增强目标：围绕 Step 1/6（6.1 Memory Reflection 调用链）按开发文档 `v4.53` 复核当前项目，确认“结构化决策 -> 主链路反思 -> 按决策加载记忆 -> Prompt 显式消费 -> 失败回退”闭环持续成立
+- 涉及文件：修改 `开发实现process.md`
+- 实现方案：
+  1. 对照 `开发文档.md` 第 `6.1` 条逐项核查 `LlmDtos/ReflectionResult/MemoryReflectionService/ConversationCli/SystemPromptBuilder` 的结构化字段、主链路插入点、按决策加载记忆、提示词显式消费与失败回退逻辑
+  2. 重点复核 `v4.53` 下 Step 1/6 关键约束：`needs_memory=true` 且 `evidence_types/evidence_purposes` 缺失或非法时按 `memory_purpose` 派生默认值；`recent-history/recentHistory`、`follow-up/followUp` 等别名在主链路与提示词层统一归一化
+  3. 执行 Step 1/6 定向回归：`./scripts/run-tests.sh -q -Dtest=ReflectionResultTest,MemoryReflectionServiceTest,SystemPromptBuilderTest,ConversationCliTest test`
+- 状态：已完成
+- 实际结果：
+  - 当前实现与开发文档 `v4.53` 的 Step 1/6 要求保持一致，本轮未发现需新增代码的缺口
+  - 定向回归通过，Memory Reflection 调用链在主链路、提示词层与失败回退路径保持稳定
+
+#### 迭代记录 - 2026-04-01 08:48
+
+- 增强目标：继续执行 Step 2/6（6.2 记忆证据追踪），补齐历史 trace 在“双尖括号路径扁平字段（`>>`）”格式下的兼容解析，避免 `/memory-debug` 与 `/memory-insights` 在跨系统规则/日志导出数据上出现覆盖率误判
+- 涉及文件：修改 `src/main/java/com/memsys/cli/ConversationCli.java`、修改 `src/main/java/com/memsys/memory/MemoryTraceInsightService.java`、修改 `src/test/java/com/memsys/cli/ConversationCliTest.java`、修改 `src/test/java/com/memsys/memory/MemoryTraceInsightServiceTest.java`、修改 `开发文档.md`、修改 `开发实现process.md`
+- 实现方案：
+  1. 在 `ConversationCli.flattenedKeySuffix(...)` 与 `splitFlattenedPath(...)` 增加 `>>` 分隔符识别，并支持分隔符两侧空白（如 `reflection >> needs_memory`）
+  2. 在 `ConversationCli.trimLeadingFragmentDelimiter(...)` 增加 `# >> ...` 片段前缀兼容，避免 fragment 风格下路径根键匹配失败
+  3. 在 `MemoryTraceInsightService` 同步应用同级 double-angle-path 解析规则，确保 `/memory-insights` 与 `/memory-debug` 的历史 trace 兼容口径一致
+  4. 新增 `getLastEvidenceTraceShouldParseFlattenedDoubleAnglePathTraceFieldsWithFragmentDelimiterWhitespace`，覆盖 `/memory-debug` 在 `# >> reflection >> needs_memory`、`evidence >> retrieved >> insights >> 0`、`loaded >> skills >> 0` 等场景下的回读
+  5. 新增 `analyzeRecentTracesShouldParseFlattenedDoubleAnglePathTraceFieldsWithFragmentDelimiterWhitespace`，覆盖 `/memory-insights` 在同场景下的 retrieved/used 统计一致性
+  6. 同步开发文档升级至 `v4.54`，并在 `6.2` 完成标准新增第 52 条，明确“双尖括号路径扁平字段兼容（含 fragment + 分隔符空白）”约束
+- 状态：已完成
+- 实际结果：
+  - `/memory-debug` 与 `/memory-insights` 可稳定回读 `reflection>>needs_memory`、`evidence>>retrieved>>insights>>0`、`retrieved>>examples>>0`、`loaded>>skills>>1` 以及 `# >> reflection >> ...` 等 double-angle-path 字段，不再因 `>>` 路径风格导致证据统计缺失
+  - Step 2/6 的跨来源 trace 兼容能力从“fat-arrow-path 路径”扩展到“double-angle-path 路径”，进一步降低跨系统导入后的排障成本
+  - 定向测试通过：`export JAVA_HOME=$(/usr/libexec/java_home) && mvn -q -Dtest=ConversationCliTest,MemoryTraceInsightServiceTest test`
