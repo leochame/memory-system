@@ -1769,6 +1769,21 @@ public class ConversationCli {
         return sb.toString();
     }
 
+    private boolean isPathDelimiter(char ch) {
+        return ch == '.'
+                || ch == '['
+                || ch == '/'
+                || ch == ':'
+                || ch == '\\'
+                || ch == '|'
+                || ch == ';'
+                || ch == ','
+                || ch == '：'
+                || ch == '｜'
+                || ch == '；'
+                || ch == '，';
+    }
+
     @SuppressWarnings("unchecked")
     private Map<String, Object> readFlattenedSubtree(Map<String, Object> source, String key) {
         if (source == null || source.isEmpty() || key == null || key.isBlank()) {
@@ -1856,7 +1871,7 @@ public class ConversationCli {
         int doubleAngleDelimiterLength = 0;
         for (int i = 0; i < candidate.length(); i++) {
             char ch = candidate.charAt(i);
-            if (ch == '.' || ch == '[' || ch == '/' || ch == ':' || ch == '\\' || ch == '|' || ch == ';' || ch == ',') {
+            if (isPathDelimiter(ch)) {
                 delimiterIndex = i;
                 break;
             }
@@ -1952,11 +1967,26 @@ public class ConversationCli {
         if (doubleAngleDelimiterLength > 0) {
             return fragment.substring(doubleAngleDelimiterLength).stripLeading();
         }
-        char first = fragment.charAt(0);
-        if (first == '/' || first == '\\' || first == '.' || first == ':' || first == '|' || first == ';' || first == ',') {
-            return fragment.substring(1).stripLeading();
+        int index = 0;
+        while (index < fragment.length()) {
+            char first = fragment.charAt(index);
+            if (Character.isWhitespace(first)) {
+                index++;
+                continue;
+            }
+            if (isPathDelimiter(first) && first != '[') {
+                index++;
+                while (index < fragment.length() && Character.isWhitespace(fragment.charAt(index))) {
+                    index++;
+                }
+                continue;
+            }
+            break;
         }
-        return fragment;
+        if (index >= fragment.length()) {
+            return "";
+        }
+        return fragment.substring(index);
     }
 
     private List<String> splitFlattenedPath(String suffix) {
@@ -1967,7 +1997,7 @@ public class ConversationCli {
         StringBuilder token = new StringBuilder();
         for (int i = 0; i < suffix.length(); i++) {
             char ch = suffix.charAt(i);
-            if (ch == '.' || ch == '/' || ch == ':' || ch == '\\' || ch == '|' || ch == ';' || ch == ',') {
+            if (isPathDelimiter(ch) && ch != '[') {
                 if (!token.isEmpty()) {
                     addDecodedPathToken(parts, token);
                     token.setLength(0);
