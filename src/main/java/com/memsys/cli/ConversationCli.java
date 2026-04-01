@@ -1873,6 +1873,8 @@ public class ConversationCli {
         int unicodeFatArrowDelimiterLength = 0;
         boolean unicodeMapstoDelimiter = false;
         int unicodeMapstoDelimiterLength = 0;
+        boolean unicodeLongArrowDelimiter = false;
+        int unicodeLongArrowDelimiterLength = 0;
         boolean doubleAngleDelimiter = false;
         int doubleAngleDelimiterLength = 0;
         for (int i = 0; i < candidate.length(); i++) {
@@ -1921,6 +1923,13 @@ public class ConversationCli {
                 delimiterIndex = i;
                 unicodeMapstoDelimiter = true;
                 unicodeMapstoDelimiterLength = unicodeMapstoLength;
+                break;
+            }
+            int unicodeLongArrowLength = matchUnicodeLongArrowDelimiter(candidate, i);
+            if (unicodeLongArrowLength > 0) {
+                delimiterIndex = i;
+                unicodeLongArrowDelimiter = true;
+                unicodeLongArrowDelimiterLength = unicodeLongArrowLength;
                 break;
             }
             int doubleAngleLength = matchDoubleAngleDelimiter(candidate, i);
@@ -1977,6 +1986,9 @@ public class ConversationCli {
         if (unicodeMapstoDelimiter) {
             return candidate.substring(delimiterIndex + unicodeMapstoDelimiterLength);
         }
+        if (unicodeLongArrowDelimiter) {
+            return candidate.substring(delimiterIndex + unicodeLongArrowDelimiterLength);
+        }
         if (doubleAngleDelimiter) {
             return candidate.substring(delimiterIndex + doubleAngleDelimiterLength);
         }
@@ -2010,6 +2022,10 @@ public class ConversationCli {
         int unicodeMapstoDelimiterLength = matchUnicodeMapstoDelimiter(fragment, 0);
         if (unicodeMapstoDelimiterLength > 0) {
             return fragment.substring(unicodeMapstoDelimiterLength).stripLeading();
+        }
+        int unicodeLongArrowDelimiterLength = matchUnicodeLongArrowDelimiter(fragment, 0);
+        if (unicodeLongArrowDelimiterLength > 0) {
+            return fragment.substring(unicodeLongArrowDelimiterLength).stripLeading();
         }
         int doubleAngleDelimiterLength = matchDoubleAngleDelimiter(fragment, 0);
         if (doubleAngleDelimiterLength > 0) {
@@ -2104,6 +2120,15 @@ public class ConversationCli {
                     token.setLength(0);
                 }
                 i += unicodeMapstoLength - 1;
+                continue;
+            }
+            int unicodeLongArrowLength = matchUnicodeLongArrowDelimiter(suffix, i);
+            if (unicodeLongArrowLength > 0) {
+                if (!token.isEmpty()) {
+                    addDecodedPathToken(parts, token);
+                    token.setLength(0);
+                }
+                i += unicodeLongArrowLength - 1;
                 continue;
             }
             int doubleAngleLength = matchDoubleAngleDelimiter(suffix, i);
@@ -2216,6 +2241,17 @@ public class ConversationCli {
 
     private int matchUnicodeMapstoDelimiter(String value, int start) {
         if (value == null || start < 0 || start >= value.length() || value.charAt(start) != '↦') {
+            return 0;
+        }
+        int index = start + 1;
+        while (index < value.length() && Character.isWhitespace(value.charAt(index))) {
+            index++;
+        }
+        return index - start;
+    }
+
+    private int matchUnicodeLongArrowDelimiter(String value, int start) {
+        if (value == null || start < 0 || start >= value.length() || value.charAt(start) != '⟶') {
             return 0;
         }
         int index = start + 1;
