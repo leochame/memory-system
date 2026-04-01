@@ -650,6 +650,8 @@ public class MemoryTraceInsightService {
         int unicodeWideHeadedRightArrowDelimiterLength = 0;
         boolean unicodeDashedRightArrowDelimiter = false;
         int unicodeDashedRightArrowDelimiterLength = 0;
+        boolean unicodeRoundTippedRightArrowDelimiter = false;
+        int unicodeRoundTippedRightArrowDelimiterLength = 0;
         boolean doubleAngleDelimiter = false;
         int doubleAngleDelimiterLength = 0;
         for (int i = 0; i < candidate.length(); i++) {
@@ -749,6 +751,13 @@ public class MemoryTraceInsightService {
                 unicodeDashedRightArrowDelimiterLength = unicodeDashedRightArrowLength;
                 break;
             }
+            int unicodeRoundTippedRightArrowLength = matchUnicodeRoundTippedRightArrowDelimiter(candidate, i);
+            if (unicodeRoundTippedRightArrowLength > 0) {
+                delimiterIndex = i;
+                unicodeRoundTippedRightArrowDelimiter = true;
+                unicodeRoundTippedRightArrowDelimiterLength = unicodeRoundTippedRightArrowLength;
+                break;
+            }
             int doubleAngleLength = matchDoubleAngleDelimiter(candidate, i);
             if (doubleAngleLength > 0) {
                 delimiterIndex = i;
@@ -824,6 +833,9 @@ public class MemoryTraceInsightService {
         if (unicodeDashedRightArrowDelimiter) {
             return candidate.substring(delimiterIndex + unicodeDashedRightArrowDelimiterLength);
         }
+        if (unicodeRoundTippedRightArrowDelimiter) {
+            return candidate.substring(delimiterIndex + unicodeRoundTippedRightArrowDelimiterLength);
+        }
         if (doubleAngleDelimiter) {
             return candidate.substring(delimiterIndex + doubleAngleDelimiterLength);
         }
@@ -885,6 +897,10 @@ public class MemoryTraceInsightService {
         int unicodeDashedRightArrowDelimiterLength = matchUnicodeDashedRightArrowDelimiter(fragment, 0);
         if (unicodeDashedRightArrowDelimiterLength > 0) {
             return fragment.substring(unicodeDashedRightArrowDelimiterLength).stripLeading();
+        }
+        int unicodeRoundTippedRightArrowDelimiterLength = matchUnicodeRoundTippedRightArrowDelimiter(fragment, 0);
+        if (unicodeRoundTippedRightArrowDelimiterLength > 0) {
+            return fragment.substring(unicodeRoundTippedRightArrowDelimiterLength).stripLeading();
         }
         int doubleAngleDelimiterLength = matchDoubleAngleDelimiter(fragment, 0);
         if (doubleAngleDelimiterLength > 0) {
@@ -1042,6 +1058,15 @@ public class MemoryTraceInsightService {
                     token.setLength(0);
                 }
                 i += unicodeDashedRightArrowLength - 1;
+                continue;
+            }
+            int unicodeRoundTippedRightArrowLength = matchUnicodeRoundTippedRightArrowDelimiter(suffix, i);
+            if (unicodeRoundTippedRightArrowLength > 0) {
+                if (!token.isEmpty()) {
+                    addDecodedPathToken(parts, token);
+                    token.setLength(0);
+                }
+                i += unicodeRoundTippedRightArrowLength - 1;
                 continue;
             }
             int doubleAngleLength = matchDoubleAngleDelimiter(suffix, i);
@@ -1240,6 +1265,20 @@ public class MemoryTraceInsightService {
 
     private int matchUnicodeDashedRightArrowDelimiter(String value, int start) {
         if (value == null || start < 0 || start >= value.length() || value.charAt(start) != '⇢') {
+            return 0;
+        }
+        int index = start + 1;
+        if (index < value.length() && (value.charAt(index) == '\uFE0F' || value.charAt(index) == '\uFE0E')) {
+            index++;
+        }
+        while (index < value.length() && Character.isWhitespace(value.charAt(index))) {
+            index++;
+        }
+        return index - start;
+    }
+
+    private int matchUnicodeRoundTippedRightArrowDelimiter(String value, int start) {
+        if (value == null || start < 0 || start >= value.length() || value.charAt(start) != '➝') {
             return 0;
         }
         int index = start + 1;
