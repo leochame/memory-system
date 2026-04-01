@@ -646,6 +646,8 @@ public class MemoryTraceInsightService {
         int unicodeDoubleLineLongArrowDelimiterLength = 0;
         boolean unicodeLongRightArrowFromBarDelimiter = false;
         int unicodeLongRightArrowFromBarDelimiterLength = 0;
+        boolean unicodeWideHeadedRightArrowDelimiter = false;
+        int unicodeWideHeadedRightArrowDelimiterLength = 0;
         boolean doubleAngleDelimiter = false;
         int doubleAngleDelimiterLength = 0;
         for (int i = 0; i < candidate.length(); i++) {
@@ -731,6 +733,13 @@ public class MemoryTraceInsightService {
                 unicodeLongRightArrowFromBarDelimiterLength = unicodeLongRightArrowFromBarLength;
                 break;
             }
+            int unicodeWideHeadedRightArrowLength = matchUnicodeWideHeadedRightArrowDelimiter(candidate, i);
+            if (unicodeWideHeadedRightArrowLength > 0) {
+                delimiterIndex = i;
+                unicodeWideHeadedRightArrowDelimiter = true;
+                unicodeWideHeadedRightArrowDelimiterLength = unicodeWideHeadedRightArrowLength;
+                break;
+            }
             int doubleAngleLength = matchDoubleAngleDelimiter(candidate, i);
             if (doubleAngleLength > 0) {
                 delimiterIndex = i;
@@ -800,6 +809,9 @@ public class MemoryTraceInsightService {
         if (unicodeLongRightArrowFromBarDelimiter) {
             return candidate.substring(delimiterIndex + unicodeLongRightArrowFromBarDelimiterLength);
         }
+        if (unicodeWideHeadedRightArrowDelimiter) {
+            return candidate.substring(delimiterIndex + unicodeWideHeadedRightArrowDelimiterLength);
+        }
         if (doubleAngleDelimiter) {
             return candidate.substring(delimiterIndex + doubleAngleDelimiterLength);
         }
@@ -853,6 +865,10 @@ public class MemoryTraceInsightService {
         int unicodeLongRightArrowFromBarDelimiterLength = matchUnicodeLongRightArrowFromBarDelimiter(fragment, 0);
         if (unicodeLongRightArrowFromBarDelimiterLength > 0) {
             return fragment.substring(unicodeLongRightArrowFromBarDelimiterLength).stripLeading();
+        }
+        int unicodeWideHeadedRightArrowDelimiterLength = matchUnicodeWideHeadedRightArrowDelimiter(fragment, 0);
+        if (unicodeWideHeadedRightArrowDelimiterLength > 0) {
+            return fragment.substring(unicodeWideHeadedRightArrowDelimiterLength).stripLeading();
         }
         int doubleAngleDelimiterLength = matchDoubleAngleDelimiter(fragment, 0);
         if (doubleAngleDelimiterLength > 0) {
@@ -992,6 +1008,15 @@ public class MemoryTraceInsightService {
                     token.setLength(0);
                 }
                 i += unicodeLongRightArrowFromBarLength - 1;
+                continue;
+            }
+            int unicodeWideHeadedRightArrowLength = matchUnicodeWideHeadedRightArrowDelimiter(suffix, i);
+            if (unicodeWideHeadedRightArrowLength > 0) {
+                if (!token.isEmpty()) {
+                    addDecodedPathToken(parts, token);
+                    token.setLength(0);
+                }
+                i += unicodeWideHeadedRightArrowLength - 1;
                 continue;
             }
             int doubleAngleLength = matchDoubleAngleDelimiter(suffix, i);
@@ -1168,6 +1193,20 @@ public class MemoryTraceInsightService {
             return 0;
         }
         int index = start + 1;
+        while (index < value.length() && Character.isWhitespace(value.charAt(index))) {
+            index++;
+        }
+        return index - start;
+    }
+
+    private int matchUnicodeWideHeadedRightArrowDelimiter(String value, int start) {
+        if (value == null || start < 0 || start >= value.length() || value.charAt(start) != '➔') {
+            return 0;
+        }
+        int index = start + 1;
+        if (index < value.length() && (value.charAt(index) == '\uFE0F' || value.charAt(index) == '\uFE0E')) {
+            index++;
+        }
         while (index < value.length() && Character.isWhitespace(value.charAt(index))) {
             index++;
         }

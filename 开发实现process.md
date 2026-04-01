@@ -2960,3 +2960,47 @@
   - `/memory-debug` 与 `/memory-insights` 可稳定回读 `reflection⟼needs_memory`、`evidence⟼retrieved⟼insights⟼0`、`retrieved⟼examples⟼0`、`loaded⟼skills⟼1` 以及 `# ⟼ reflection ⟼ ...` 等 Unicode-long-right-arrow-from-bar-path 字段，不再因 `⟼` 路径风格导致证据统计缺失
   - Step 2/6 的跨来源 trace 兼容能力从“Unicode 粗黑箭头路径”扩展到“Unicode 长右箭头（带竖线）路径”，进一步降低跨系统规则映射/日志导入后的排障成本
   - 定向回归通过：`./scripts/run-tests.sh -q -Dtest=ConversationCliTest,MemoryTraceInsightServiceTest test`
+
+#### 迭代记录 - 2026-04-01 14:30
+
+- 增强目标：继续执行 Step 6/6（调研与文档更新），围绕记忆系统在“42 天内容战役”基础上补齐“56 天内容中台”机制，把更多内容产出升级为“问题雷达 + 证据配方 + 季度专题地图”三位一体执行
+- 涉及文件：修改 `开发文档.md`、修改 `开发实现process.md`
+- 实现方案：
+  1. 将开发文档版本升级至 `v4.76`，保持更新日期为 `2026-04-01`
+  2. 在 `5.10` 新增 `5.10.45 Step 6/6 调研扩展版（56 天内容中台：问题雷达 + 证据配方 + 季度专题地图）`
+  3. 在开发文档新增 `6.45 需求四十三`，固化问题雷达字段、证据配方准入、三稿联动发布、季度专题地图与低转化处置约束
+  4. 将验收标准统一到“雷达线索产能 + 配方覆盖率 + 三稿发布组数 + 低转化处置完成率”四条主线，降低内容扩题后失焦与重复改写风险
+- 状态：已完成
+- 实际结果：
+  - Step 6/6 从“战役化运营”进一步升级为“中台化扩展”，可稳定回答“哪些新问题值得做、同一证据如何快速改写、季度主线如何持续沉淀”
+  - 新增字段（`radar_id/trigger_signal/source_command/heat_score/novelty_score/recipe_id/claim_type/required_evidence/rewrite_profiles/qa_gate_status/quarter_theme_id/backlog_conversion_rate`）后，可在同一索引中追踪“问题发现 -> 配方组装 -> 多版本发布 -> 回流验证”闭环
+  - 本次变更为文档调研更新，无代码逻辑改动，无需运行测试
+
+#### 迭代记录 - 2026-04-01 15:05
+
+- 增强目标：继续执行 Step 2/6（6.2 记忆证据追踪），补齐历史 trace 在“Unicode 宽头右箭头路径扁平字段（`➔/➔️`）”格式下的兼容解析，避免 `/memory-debug` 与 `/memory-insights` 在跨系统协作文档/聊天记录导出数据上出现覆盖率误判
+- 涉及文件：修改 `src/main/java/com/memsys/cli/ConversationCli.java`、修改 `src/main/java/com/memsys/memory/MemoryTraceInsightService.java`、修改 `src/test/java/com/memsys/cli/ConversationCliTest.java`、修改 `src/test/java/com/memsys/memory/MemoryTraceInsightServiceTest.java`、修改 `开发文档.md`、修改 `开发实现process.md`
+- 实现方案：
+  1. 在 `ConversationCli.flattenedKeySuffix(...)`、`trimLeadingFragmentDelimiter(...)` 与 `splitFlattenedPath(...)` 增加 `➔` 分隔符识别，并兼容可选变体选择符（`➔️/➔︎`）与 fragment 前缀空白形式
+  2. 在 `MemoryTraceInsightService` 同步应用同级 Unicode-wide-headed-right-arrow-path 解析规则，确保 `/memory-insights` 与 `/memory-debug` 的历史 trace 兼容口径一致
+  3. 新增 `getLastEvidenceTraceShouldParseFlattenedUnicodeWideHeadedRightArrowPathTraceFieldsWithFragmentDelimiterWhitespace`，覆盖 `/memory-debug` 在 `# ➔️ reflection ➔️ needs_memory`、`evidence ➔️ retrieved ➔️ insights ➔️ 0`、`loaded ➔️ skills ➔️ 0` 等场景下的回读
+  4. 新增 `analyzeRecentTracesShouldParseFlattenedUnicodeWideHeadedRightArrowPathTraceFieldsWithFragmentDelimiterWhitespace`，覆盖 `/memory-insights` 在同场景下的 retrieved/used 统计一致性
+  5. 同步开发文档升级至 `v4.77`，并在 `6.2` 完成标准新增第 64 条，明确“Unicode 宽头右箭头路径扁平字段兼容（含 fragment + 分隔符空白 + emoji 变体）”约束
+- 状态：已完成
+- 实际结果：
+  - `/memory-debug` 与 `/memory-insights` 可稳定回读 `reflection➔needs_memory`、`evidence➔retrieved➔insights➔0`、`retrieved➔examples➔0`、`loaded➔skills➔1` 以及 `# ➔ reflection ➔ ...` / `# ➔️ reflection ➔️ ...` 等 Unicode-wide-headed-right-arrow-path 字段，不再因 `➔/➔️` 路径风格导致证据统计缺失
+  - Step 2/6 的跨来源 trace 兼容能力从“Unicode 长右箭头（带竖线）路径”扩展到“Unicode 宽头右箭头路径”，进一步降低跨系统协作文档/聊天记录导入后的排障成本
+  - 定向回归通过：`./scripts/run-tests.sh -q -Dtest=ConversationCliTest,MemoryTraceInsightServiceTest test`
+
+#### 迭代记录 - 2026-04-01 12:35
+
+- 增强目标：执行 Step 4/6（修复存在的问题），修复本地开发在 `JAVA_HOME` 缺失时直接编译命令易失败且提示不清晰的问题
+- 涉及文件：新增 `scripts/run-compile.sh`、修改 `README.md`
+- 实现方案：
+  1. 新增 `scripts/run-compile.sh`，复用与测试脚本一致的 JDK 21 自动探测策略（`/usr/libexec/java_home`、`/opt/homebrew/opt/openjdk@21`、`/opt/homebrew/Cellar/openjdk@21/*`）
+  2. 在未探测到可用 JDK 时提前失败并输出明确提示：`Install JDK 21 and export JAVA_HOME before running compile.`
+  3. README 的“编译运行”补充“仅编译”入口，统一引导到自动兜底脚本，减少直接 `mvn` 报错排障成本
+- 状态：已完成
+- 实际结果：
+  - 本地可通过 `./scripts/run-compile.sh -q` 直接完成编译，不再依赖手动提前配置 `JAVA_HOME`
+  - 在无可用 JDK 场景下可获得可操作错误提示，避免停留在 Maven 通用报错

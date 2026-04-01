@@ -264,6 +264,10 @@ export OPENAI_MODEL="gpt-4"
 ### 2) 编译运行
 
 ```bash
+# 仅编译（自动兜底 JAVA_HOME）
+./scripts/run-compile.sh
+
+# 构建打包（自动兜底 JAVA_HOME）
 ./scripts/run-tests.sh clean package
 java -jar target/memory-box-1.0.0.jar
 
