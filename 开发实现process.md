@@ -3147,3 +3147,44 @@
 - 实际结果：
   - `/memory-debug` 与 `/memory-insights` 可稳定回读 `reflection➞needs_memory`、`evidence➞retrieved➞insights➞0`、`retrieved➞examples➞0`、`loaded➞skills➞1` 以及 `# ➞ reflection ➞ ...` / `# ➞️ reflection ➞️ ...` 等 Unicode-triangle-headed-right-arrow-path 字段，不再因 `➞/➞️` 路径风格导致证据统计缺失
   - Step 2/6 的跨来源 trace 兼容能力从“全角斜杠路径”扩展到“Unicode 三角头右箭头路径”，进一步降低跨系统协作文档/聊天记录导入后的排障成本
+
+#### 迭代记录 - 2026-04-01 23:59
+
+- 增强目标：继续执行 Step 6/6（调研与文档更新），围绕记忆系统在“98 天内容指挥盘”基础上补齐“112 天内容演播室”机制，把更多内容产出升级为“主题片单池 + 证据镜头脚本库 + 多稿自动组装流水线”三位一体执行
+- 涉及文件：修改 `开发文档.md`、修改 `开发实现process.md`
+- 实现方案：
+  1. 将开发文档版本升级至 `v4.85`，保持更新日期为 `2026-04-01`
+  2. 在 `5.10` 新增 `5.10.49 Step 6/6 调研实操版（112 天内容演播室：主题片单 + 证据镜头脚本 + 多稿自动组装）`
+  3. 在开发文档新增 `6.49 需求四十七`，固化片单字段、镜头脚本准入、多稿组装规则与低复用处置约束
+  4. 将验收标准统一到“片单活跃度 + 镜头复用率 + 多稿组装通过率 + 低复用处置完成率”四条主线，降低内容规模化后的人工改写成本与发布波动风险
+- 状态：已完成
+- 实际结果：
+  - Step 6/6 从“指挥盘执行”进一步升级为“演播室执行”，可稳定回答“本周该讲哪些主题、同一证据如何拆成多个叙事镜头、如何快速产出开发/答辩/论文三稿”
+  - 新增字段（`slate_id/narrative_goal/shot_id/claim_anchor/replay_command/key_observation/failure_cut/assembly_id/shot_bundle/publish_profile/reuse_ratio/qa_gate`）后，可在同一索引中追踪“片单入池 -> 镜头编排 -> 多稿发布 -> 回流验证”闭环
+  - 本次变更为文档调研更新，无代码逻辑改动，无需运行测试
+
+#### 迭代记录 - 2026-04-01 13:42
+
+- 增强目标：围绕 Step 1/6（6.1 Memory Reflection 调用链）按开发文档 `v4.85` 复核当前项目，确认“结构化决策 -> 主链路反思 -> 按决策加载记忆 -> Prompt 显式消费 -> 失败回退”闭环在最新版本下持续成立
+- 涉及文件：修改 `开发实现process.md`
+- 实现方案：
+  1. 对照 `开发文档.md` 第 `6.1` 条逐项核查 `LlmDtos/Schema/ReflectionResult/MemoryReflectionService/ConversationCli/SystemPromptBuilder`，覆盖结构化字段、反思阶段插入、按决策加载记忆、提示词显式消费与失败回退
+  2. 重点复核 `v4.85` 下 Step 1/6 关键约束：`needs_memory=true` 且 `evidence_types/evidence_purposes` 缺失或非法时按 `memory_purpose` 派生默认值；`recent-history/recentHistory`、`follow-up/followUp`、`action-followup/action_followup/actionFollowup` 等别名在主链路与提示词层统一归一化
+  3. 执行 Step 1/6 定向回归：`./scripts/run-tests.sh -q -Dtest=ReflectionResultTest,MemoryReflectionServiceTest,SystemPromptBuilderTest,ConversationCliTest test`
+- 状态：已完成
+- 实际结果：
+  - 当前实现与开发文档 `v4.85` 的 Step 1/6 要求保持一致，本轮未发现需新增代码的缺口
+  - 定向回归通过，Memory Reflection 调用链在主链路、提示词层与失败回退路径保持稳定
+
+#### 迭代记录 - 2026-04-01 13:46
+
+- 增强目标：继续执行 Step 2/6（6.2 记忆证据追踪），补齐历史 trace 在“Unicode 重三角头右箭头路径扁平字段（`➟/➟️/➟︎`）”格式下的兼容解析，避免 `/memory-debug` 与 `/memory-insights` 在跨系统协作文档/聊天记录导出数据上出现覆盖率误判
+- 涉及文件：修改 `src/main/java/com/memsys/memory/MemoryTraceInsightService.java`、修改 `src/test/java/com/memsys/memory/MemoryTraceInsightServiceTest.java`、修改 `开发文档.md`、修改 `开发实现process.md`
+- 实现方案：
+  1. 在 `MemoryTraceInsightService.flattenedKeySuffix(...)`、`trimLeadingFragmentDelimiter(...)` 与 `splitFlattenedPath(...)` 增加 `➟` 分隔符识别，并兼容可选变体选择符（`➟️/➟︎`）与 fragment 前缀空白形式
+  2. 新增 `analyzeRecentTracesShouldParseFlattenedUnicodeHeavyTriangleHeadedRightArrowPathTraceFieldsWithFragmentDelimiterWhitespace`，覆盖 `/memory-insights` 在 `# ➟️ reflection ➟️ needs_memory`、`evidence ➟️ retrieved ➟️ insights ➟️ 0`、`loaded ➟️ skills ➟️ 0` 等场景下的历史回读与统计一致性
+  3. 执行定向回归：`export JAVA_HOME=$(/usr/libexec/java_home) && mvn -q -Dtest=MemoryTraceInsightServiceTest test`
+- 状态：已完成
+- 实际结果：
+  - `/memory-insights` 现可稳定解析 `reflection➟needs_memory`、`evidence➟retrieved➟insights➟0`、`retrieved➟examples➟0`、`loaded➟skills➟1` 以及 `# ➟ reflection ➟ ...` / `# ➟️ reflection ➟️ ...` / `# ➟︎ reflection ➟︎ ...` 等路径字段，不再因 `➟` 风格导致统计缺失
+  - 对应定向测试已通过，Step 2/6 的跨来源 trace 兼容能力从“Unicode 三角头右箭头路径”扩展到“Unicode 重三角头右箭头路径”

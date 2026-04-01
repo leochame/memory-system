@@ -1896,6 +1896,8 @@ public class ConversationCli {
         int unicodeRoundTippedRightArrowDelimiterLength = 0;
         boolean unicodeTriangleHeadedRightArrowDelimiter = false;
         int unicodeTriangleHeadedRightArrowDelimiterLength = 0;
+        boolean unicodeHeavyTriangleHeadedRightArrowDelimiter = false;
+        int unicodeHeavyTriangleHeadedRightArrowDelimiterLength = 0;
         boolean doubleAngleDelimiter = false;
         int doubleAngleDelimiterLength = 0;
         for (int i = 0; i < candidate.length(); i++) {
@@ -2009,6 +2011,13 @@ public class ConversationCli {
                 unicodeTriangleHeadedRightArrowDelimiterLength = unicodeTriangleHeadedRightArrowLength;
                 break;
             }
+            int unicodeHeavyTriangleHeadedRightArrowLength = matchUnicodeHeavyTriangleHeadedRightArrowDelimiter(candidate, i);
+            if (unicodeHeavyTriangleHeadedRightArrowLength > 0) {
+                delimiterIndex = i;
+                unicodeHeavyTriangleHeadedRightArrowDelimiter = true;
+                unicodeHeavyTriangleHeadedRightArrowDelimiterLength = unicodeHeavyTriangleHeadedRightArrowLength;
+                break;
+            }
             int doubleAngleLength = matchDoubleAngleDelimiter(candidate, i);
             if (doubleAngleLength > 0) {
                 delimiterIndex = i;
@@ -2090,6 +2099,9 @@ public class ConversationCli {
         if (unicodeTriangleHeadedRightArrowDelimiter) {
             return candidate.substring(delimiterIndex + unicodeTriangleHeadedRightArrowDelimiterLength);
         }
+        if (unicodeHeavyTriangleHeadedRightArrowDelimiter) {
+            return candidate.substring(delimiterIndex + unicodeHeavyTriangleHeadedRightArrowDelimiterLength);
+        }
         if (doubleAngleDelimiter) {
             return candidate.substring(delimiterIndex + doubleAngleDelimiterLength);
         }
@@ -2159,6 +2171,10 @@ public class ConversationCli {
         int unicodeTriangleHeadedRightArrowDelimiterLength = matchUnicodeTriangleHeadedRightArrowDelimiter(fragment, 0);
         if (unicodeTriangleHeadedRightArrowDelimiterLength > 0) {
             return fragment.substring(unicodeTriangleHeadedRightArrowDelimiterLength).stripLeading();
+        }
+        int unicodeHeavyTriangleHeadedRightArrowDelimiterLength = matchUnicodeHeavyTriangleHeadedRightArrowDelimiter(fragment, 0);
+        if (unicodeHeavyTriangleHeadedRightArrowDelimiterLength > 0) {
+            return fragment.substring(unicodeHeavyTriangleHeadedRightArrowDelimiterLength).stripLeading();
         }
         int doubleAngleDelimiterLength = matchDoubleAngleDelimiter(fragment, 0);
         if (doubleAngleDelimiterLength > 0) {
@@ -2334,6 +2350,15 @@ public class ConversationCli {
                     token.setLength(0);
                 }
                 i += unicodeTriangleHeadedRightArrowLength - 1;
+                continue;
+            }
+            int unicodeHeavyTriangleHeadedRightArrowLength = matchUnicodeHeavyTriangleHeadedRightArrowDelimiter(suffix, i);
+            if (unicodeHeavyTriangleHeadedRightArrowLength > 0) {
+                if (!token.isEmpty()) {
+                    addDecodedPathToken(parts, token);
+                    token.setLength(0);
+                }
+                i += unicodeHeavyTriangleHeadedRightArrowLength - 1;
                 continue;
             }
             int doubleAngleLength = matchDoubleAngleDelimiter(suffix, i);
@@ -2560,6 +2585,20 @@ public class ConversationCli {
 
     private int matchUnicodeTriangleHeadedRightArrowDelimiter(String value, int start) {
         if (value == null || start < 0 || start >= value.length() || value.charAt(start) != '➞') {
+            return 0;
+        }
+        int index = start + 1;
+        if (index < value.length() && (value.charAt(index) == '\uFE0F' || value.charAt(index) == '\uFE0E')) {
+            index++;
+        }
+        while (index < value.length() && Character.isWhitespace(value.charAt(index))) {
+            index++;
+        }
+        return index - start;
+    }
+
+    private int matchUnicodeHeavyTriangleHeadedRightArrowDelimiter(String value, int start) {
+        if (value == null || start < 0 || start >= value.length() || value.charAt(start) != '➟') {
             return 0;
         }
         int index = start + 1;
