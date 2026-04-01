@@ -3232,3 +3232,45 @@
   - `/memory-debug` 与 `/memory-insights` 可稳定回读 `reflection➠needs_memory`、`evidence➠retrieved➠insights➠0`、`retrieved➠examples➠0`、`loaded➠skills➠1` 以及 `# ➠ reflection ➠ ...` / `# ➠️ reflection ➠️ ...` / `# ➠︎ reflection ➠︎ ...` 等 Unicode-dashed-triangle-headed-right-arrow-path 字段，不再因 `➠/➠️/➠︎` 路径风格导致证据统计缺失
   - Step 2/6 的跨来源 trace 兼容能力从“Unicode 重三角头右箭头路径”扩展到“Unicode 虚线三角头右箭头路径”，进一步降低跨系统协作文档/聊天记录导入后的排障成本
   - 定向回归通过：`./scripts/run-tests.sh -q -Dtest=ConversationCliTest,MemoryTraceInsightServiceTest test`
+
+#### 迭代记录 - 2026-04-01 15:25
+
+- 增强目标：继续执行 Step 6/6（调研与文档更新），围绕记忆系统在“126 天内容工作台”基础上补齐“140 天内容增长台”机制，把更多内容产出升级为“问题触发池 + 证据配方库 + 一证多用分发”三位一体执行
+- 涉及文件：修改 `开发文档.md`、修改 `开发实现process.md`
+- 实现方案：
+  1. 将开发文档版本升级至 `v4.89`，保持更新日期为 `2026-04-01`
+  2. 在 `5.10` 新增 `5.10.51 Step 6/6 调研扩展版（140 天内容增长台：问题触发池 + 证据配方库 + 一证多用分发）`
+  3. 在开发文档新增 `6.51 需求四十九`，固化问题触发池字段、证据配方准入规则、多稿工单联动与回流SLA约束
+  4. 将验收标准统一到“线索活跃度 + 配方覆盖率 + 多稿联动率 + 回流按时率”四条主线，降低内容扩展阶段选题不稳、改写漂移与回流失约风险
+- 状态：已完成
+- 实际结果：
+  - Step 6/6 从“母题工作台”进一步升级为“增长台执行”，可稳定回答“本周该优先做哪些问题选题、同一证据如何复写成多场景稿、发布后是否按时回流验证”
+  - 新增字段（`issue_seed_id/trigger_source/recipe_id/claim_template/counterexample_slot/rewrite_batch_id/channel_pack/feedback_due/feedback_status/growth_score`）后，可在同一索引中追踪“问题触发 -> 配方组装 -> 多稿发布 -> 回流兑现”闭环
+  - 本次变更为文档调研更新，无代码逻辑改动，无需运行测试
+
+#### 迭代记录 - 2026-04-01 14:12
+
+- 增强目标：围绕 Step 1/6（6.1 Memory Reflection 调用链）按开发文档 `v4.89` 复核当前项目，确认“结构化决策 -> 主链路反思 -> 按决策加载记忆 -> Prompt 显式消费 -> 失败回退”闭环在最新版本下持续成立
+- 涉及文件：修改 `开发实现process.md`
+- 实现方案：
+  1. 对照 `开发文档.md` 第 `6.1` 条逐项核查 `LlmDtos/Schema/ReflectionResult/MemoryReflectionService/ConversationCli/SystemPromptBuilder`，覆盖结构化字段、反思阶段插入、按决策加载记忆、提示词显式消费与失败回退
+  2. 重点复核 `v4.89` 下 Step 1/6 关键约束：`needs_memory=true` 且 `evidence_types/evidence_purposes` 缺失或非法时按 `memory_purpose` 派生默认值（如 `ACTION_FOLLOWUP -> TASK + followup`）；别名写法（`recent-history/recentHistory`、`follow-up/followUp`、`action-followup/action_followup/actionFollowup`）在主链路与提示词层统一归一化
+  3. 执行 Step 1/6 定向回归：`./scripts/run-tests.sh -q -Dtest=ReflectionResultTest,MemoryReflectionServiceTest,SystemPromptBuilderTest,ConversationCliTest test`
+- 状态：已完成
+- 实际结果：
+  - 当前实现与开发文档 `v4.89` 的 Step 1/6 要求保持一致，本轮未发现需新增代码的缺口
+  - 定向回归通过，Memory Reflection 调用链在主链路、提示词层与失败回退路径保持稳定
+
+#### 迭代记录 - 2026-04-01 16:10
+
+- 增强目标：继续执行 Step 2/6（6.2 记忆证据追踪），补齐历史 trace 在“Unicode 右尾箭头路径扁平字段（`↣`）”格式下的兼容解析，避免 `/memory-debug` 与 `/memory-insights` 在跨系统规则注释/协作文档导出数据上出现覆盖率误判
+- 涉及文件：修改 `src/main/java/com/memsys/cli/ConversationCli.java`、修改 `src/main/java/com/memsys/memory/MemoryTraceInsightService.java`、修改 `src/test/java/com/memsys/cli/ConversationCliTest.java`、修改 `src/test/java/com/memsys/memory/MemoryTraceInsightServiceTest.java`、修改 `开发文档.md`、修改 `开发实现process.md`
+- 实现方案：
+  1. 在 `ConversationCli.isPathDelimiter(...)` 与 `MemoryTraceInsightService.isPathDelimiter(...)` 增加 `↣` 分隔符识别，复用现有扁平路径重建流程，保持 `/memory-debug` 与 `/memory-insights` 解析口径一致
+  2. 新增 `getLastEvidenceTraceShouldParseFlattenedUnicodeRightTailArrowPathTraceFieldsWithFragmentDelimiterWhitespace`，覆盖 `/memory-debug` 在 `# ↣ reflection ↣ needs_memory`、`evidence ↣ retrieved ↣ insights ↣ 0`、`loaded ↣ skills ↣ 0` 等场景下的回读
+  3. 新增 `analyzeRecentTracesShouldParseFlattenedUnicodeRightTailArrowPathTraceFieldsWithFragmentDelimiterWhitespace`，覆盖 `/memory-insights` 在同场景下的 retrieved/used 统计一致性
+  4. 同步开发文档升级至 `v4.90`，并在 `6.2` 完成标准新增第 71 条，明确“Unicode 右尾箭头路径扁平字段兼容（含 fragment + 分隔符空白）”约束
+- 状态：已完成
+- 实际结果：
+  - `/memory-debug` 与 `/memory-insights` 可稳定回读 `reflection↣needs_memory`、`evidence↣retrieved↣insights↣0`、`retrieved↣examples↣0`、`loaded↣skills↣1` 以及 `# ↣ reflection ↣ ...` 等 Unicode-right-tail-arrow-path 字段，不再因 `↣` 路径风格导致证据统计缺失
+  - Step 2/6 的跨来源 trace 兼容能力从“Unicode 虚线三角头右箭头路径”扩展到“Unicode 右尾箭头路径”，进一步降低跨系统规则注释/协作文档导入后的排障成本

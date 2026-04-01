@@ -1783,7 +1783,8 @@ public class ConversationCli {
                 || ch == '：'
                 || ch == '｜'
                 || ch == '；'
-                || ch == '，';
+                || ch == '，'
+                || ch == '↣';
     }
 
     @SuppressWarnings("unchecked")

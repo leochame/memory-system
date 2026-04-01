@@ -546,7 +546,8 @@ public class MemoryTraceInsightService {
                 || ch == '：'
                 || ch == '｜'
                 || ch == '；'
-                || ch == '，';
+                || ch == '，'
+                || ch == '↣';
     }
 
     @SuppressWarnings("unchecked")
