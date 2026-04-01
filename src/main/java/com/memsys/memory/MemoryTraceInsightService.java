@@ -661,6 +661,8 @@ public class MemoryTraceInsightService {
         int unicodeTriangleHeadedRightArrowDelimiterLength = 0;
         boolean unicodeHeavyTriangleHeadedRightArrowDelimiter = false;
         int unicodeHeavyTriangleHeadedRightArrowDelimiterLength = 0;
+        boolean unicodeDashedTriangleHeadedRightArrowDelimiter = false;
+        int unicodeDashedTriangleHeadedRightArrowDelimiterLength = 0;
         boolean doubleAngleDelimiter = false;
         int doubleAngleDelimiterLength = 0;
         for (int i = 0; i < candidate.length(); i++) {
@@ -781,6 +783,13 @@ public class MemoryTraceInsightService {
                 unicodeHeavyTriangleHeadedRightArrowDelimiterLength = unicodeHeavyTriangleHeadedRightArrowLength;
                 break;
             }
+            int unicodeDashedTriangleHeadedRightArrowLength = matchUnicodeDashedTriangleHeadedRightArrowDelimiter(candidate, i);
+            if (unicodeDashedTriangleHeadedRightArrowLength > 0) {
+                delimiterIndex = i;
+                unicodeDashedTriangleHeadedRightArrowDelimiter = true;
+                unicodeDashedTriangleHeadedRightArrowDelimiterLength = unicodeDashedTriangleHeadedRightArrowLength;
+                break;
+            }
             int doubleAngleLength = matchDoubleAngleDelimiter(candidate, i);
             if (doubleAngleLength > 0) {
                 delimiterIndex = i;
@@ -865,6 +874,9 @@ public class MemoryTraceInsightService {
         if (unicodeHeavyTriangleHeadedRightArrowDelimiter) {
             return candidate.substring(delimiterIndex + unicodeHeavyTriangleHeadedRightArrowDelimiterLength);
         }
+        if (unicodeDashedTriangleHeadedRightArrowDelimiter) {
+            return candidate.substring(delimiterIndex + unicodeDashedTriangleHeadedRightArrowDelimiterLength);
+        }
         if (doubleAngleDelimiter) {
             return candidate.substring(delimiterIndex + doubleAngleDelimiterLength);
         }
@@ -938,6 +950,10 @@ public class MemoryTraceInsightService {
         int unicodeHeavyTriangleHeadedRightArrowDelimiterLength = matchUnicodeHeavyTriangleHeadedRightArrowDelimiter(fragment, 0);
         if (unicodeHeavyTriangleHeadedRightArrowDelimiterLength > 0) {
             return fragment.substring(unicodeHeavyTriangleHeadedRightArrowDelimiterLength).stripLeading();
+        }
+        int unicodeDashedTriangleHeadedRightArrowDelimiterLength = matchUnicodeDashedTriangleHeadedRightArrowDelimiter(fragment, 0);
+        if (unicodeDashedTriangleHeadedRightArrowDelimiterLength > 0) {
+            return fragment.substring(unicodeDashedTriangleHeadedRightArrowDelimiterLength).stripLeading();
         }
         int doubleAngleDelimiterLength = matchDoubleAngleDelimiter(fragment, 0);
         if (doubleAngleDelimiterLength > 0) {
@@ -1122,6 +1138,15 @@ public class MemoryTraceInsightService {
                     token.setLength(0);
                 }
                 i += unicodeHeavyTriangleHeadedRightArrowLength - 1;
+                continue;
+            }
+            int unicodeDashedTriangleHeadedRightArrowLength = matchUnicodeDashedTriangleHeadedRightArrowDelimiter(suffix, i);
+            if (unicodeDashedTriangleHeadedRightArrowLength > 0) {
+                if (!token.isEmpty()) {
+                    addDecodedPathToken(parts, token);
+                    token.setLength(0);
+                }
+                i += unicodeDashedTriangleHeadedRightArrowLength - 1;
                 continue;
             }
             int doubleAngleLength = matchDoubleAngleDelimiter(suffix, i);
@@ -1362,6 +1387,20 @@ public class MemoryTraceInsightService {
 
     private int matchUnicodeHeavyTriangleHeadedRightArrowDelimiter(String value, int start) {
         if (value == null || start < 0 || start >= value.length() || value.charAt(start) != '➟') {
+            return 0;
+        }
+        int index = start + 1;
+        if (index < value.length() && (value.charAt(index) == '\uFE0F' || value.charAt(index) == '\uFE0E')) {
+            index++;
+        }
+        while (index < value.length() && Character.isWhitespace(value.charAt(index))) {
+            index++;
+        }
+        return index - start;
+    }
+
+    private int matchUnicodeDashedTriangleHeadedRightArrowDelimiter(String value, int start) {
+        if (value == null || start < 0 || start >= value.length() || value.charAt(start) != '➠') {
             return 0;
         }
         int index = start + 1;
