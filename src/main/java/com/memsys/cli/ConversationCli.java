@@ -1825,10 +1825,7 @@ public class ConversationCli {
             if (fragment.isBlank()) {
                 return null;
             }
-            candidate = fragment;
-            if (fragment.startsWith("/") || fragment.startsWith("\\")) {
-                candidate = fragment.substring(1).stripLeading();
-            }
+            candidate = trimLeadingFragmentDelimiter(fragment);
         } else if (candidate.startsWith("/") || candidate.startsWith("\\")) {
             candidate = candidate.substring(1);
         }
@@ -1853,7 +1850,7 @@ public class ConversationCli {
         int doubleUnderscoreDelimiterLength = 0;
         for (int i = 0; i < candidate.length(); i++) {
             char ch = candidate.charAt(i);
-            if (ch == '.' || ch == '[' || ch == '/' || ch == ':' || ch == '\\') {
+            if (ch == '.' || ch == '[' || ch == '/' || ch == ':' || ch == '\\' || ch == '|') {
                 delimiterIndex = i;
                 break;
             }
@@ -1899,6 +1896,21 @@ public class ConversationCli {
         return candidate.substring(delimiterIndex + 1);
     }
 
+    private String trimLeadingFragmentDelimiter(String fragment) {
+        if (fragment == null || fragment.isBlank()) {
+            return "";
+        }
+        int doubleUnderscoreDelimiterLength = matchDoubleUnderscoreDelimiter(fragment, 0);
+        if (doubleUnderscoreDelimiterLength > 0) {
+            return fragment.substring(doubleUnderscoreDelimiterLength).stripLeading();
+        }
+        char first = fragment.charAt(0);
+        if (first == '/' || first == '\\' || first == '.' || first == ':' || first == '|') {
+            return fragment.substring(1).stripLeading();
+        }
+        return fragment;
+    }
+
     private List<String> splitFlattenedPath(String suffix) {
         if (suffix == null || suffix.isBlank()) {
             return List.of();
@@ -1907,7 +1919,7 @@ public class ConversationCli {
         StringBuilder token = new StringBuilder();
         for (int i = 0; i < suffix.length(); i++) {
             char ch = suffix.charAt(i);
-            if (ch == '.' || ch == '/' || ch == ':' || ch == '\\') {
+            if (ch == '.' || ch == '/' || ch == ':' || ch == '\\' || ch == '|') {
                 if (!token.isEmpty()) {
                     addDecodedPathToken(parts, token);
                     token.setLength(0);
