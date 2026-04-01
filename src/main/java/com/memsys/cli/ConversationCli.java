@@ -1775,6 +1775,8 @@ public class ConversationCli {
                 || ch == '/'
                 || ch == ':'
                 || ch == '\\'
+                || ch == '／'
+                || ch == '＼'
                 || ch == '|'
                 || ch == ';'
                 || ch == ','
@@ -1841,7 +1843,10 @@ public class ConversationCli {
                 return null;
             }
             candidate = trimLeadingFragmentDelimiter(fragment);
-        } else if (candidate.startsWith("/") || candidate.startsWith("\\")) {
+        } else if (candidate.startsWith("/")
+                || candidate.startsWith("\\")
+                || candidate.startsWith("／")
+                || candidate.startsWith("＼")) {
             candidate = candidate.substring(1);
         }
         if (candidate.startsWith("$")) {
