@@ -19,7 +19,6 @@ import java.util.Map;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.when;
-import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.asyncDispatch;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.request;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
@@ -115,11 +114,8 @@ class ImChatControllerTest {
                 .andExpect(request().asyncStarted())
                 .andReturn();
 
-        MvcResult done = mockMvc.perform(asyncDispatch(async))
-                .andExpect(status().isOk())
-                .andReturn();
-
-        String content = done.getResponse().getContentAsString();
+        async.getAsyncResult(2000);
+        String content = async.getResponse().getContentAsString(StandardCharsets.UTF_8);
         assertThat(content).contains("event:process");
         assertThat(content).contains("event:final");
         assertThat(content).contains("event:done");

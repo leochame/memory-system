@@ -2874,7 +2874,7 @@
   - 新增字段（`content_tier/snapshot_id/case_id/topic_pack_id/before_after/replay_result/audience_versions/publish_state`）后，可在同一索引中追踪“快照 -> 案例 -> 专题 -> 回流验证”链路
   - 本次变更为文档调研更新，无代码逻辑改动，无需运行测试
 
-#### 迭代记录 - 2026-04-01 12:10
+#### 迭代记录 - 2026-04-01 13:25
 
 - 增强目标：继续执行 Step 2/6（6.2 记忆证据追踪），补齐历史 trace 在“Unicode 黑箭头路径扁平字段（`➡/➡️`）”格式下的兼容解析，避免 `/memory-debug` 与 `/memory-insights` 在跨系统协作文档/聊天记录导出数据上出现覆盖率误判
 - 涉及文件：修改 `src/main/java/com/memsys/cli/ConversationCli.java`、修改 `src/main/java/com/memsys/memory/MemoryTraceInsightService.java`、修改 `src/test/java/com/memsys/cli/ConversationCliTest.java`、修改 `src/test/java/com/memsys/memory/MemoryTraceInsightServiceTest.java`、修改 `开发文档.md`、修改 `开发实现process.md`
@@ -2916,3 +2916,47 @@
 - 实际结果：
   - `/memory-debug` 与 `/memory-insights` 可稳定回读 `reflection➜needs_memory`、`evidence➜retrieved➜insights➜0`、`retrieved➜examples➜0`、`loaded➜skills➜1` 以及 `# ➜ reflection ➜ ...` / `# ➜️ reflection ➜️ ...` 等 Unicode-heavy-right-arrow-path 字段，不再因 `➜/➜️` 路径风格导致证据统计缺失
   - Step 2/6 的跨来源 trace 兼容能力从“Unicode 黑箭头路径”扩展到“Unicode 粗黑箭头路径”，进一步降低跨系统协作文档/聊天记录导入后的排障成本
+
+#### 迭代记录 - 2026-04-01 13:05
+
+- 增强目标：继续执行 Step 6/6（调研与文档更新），围绕记忆系统在“28 天内容货架”基础上补齐“42 天内容战役”机制，把更多内容产出升级为“主题树排产 + 资产SLA + 周复测”三位一体执行
+- 涉及文件：修改 `开发文档.md`、修改 `开发实现process.md`
+- 实现方案：
+  1. 将开发文档版本升级至 `v4.74`，保持更新日期为 `2026-04-01`
+  2. 在 `5.10` 新增 `5.10.44 Step 6/6 调研实战版（42 天内容战役：主题树 + 资产 SLA + 复测周报）`
+  3. 在开发文档新增 `6.44 需求四十二`，固化主题树排产规则、资产时效约束（SLA）、复测周报产出与漂移处置机制
+  4. 将验收标准统一到“主题覆盖率 + 资产按时更新率 + 周复测通过率 + 漂移处置完成率”四条主线，降低内容扩张后的失控与过期风险
+- 状态：已完成
+- 实际结果：
+  - Step 6/6 从“内容货架分层”进一步升级为“战役化运营”，可稳定回答“优先做哪些主题、资产多久更新一次、每周如何复测验证”
+  - 新增字段（`theme_id/priority/asset_owner/sla_days/next_due/stale_risk/weekly_report_id/drift_cases`）后，可在同一索引中追踪“主题排产 -> 资产产出 -> 复测回放 -> 回流修复”闭环
+  - 本次变更为文档调研更新，无代码逻辑改动，无需运行测试
+
+#### 迭代记录 - 2026-04-01 13:15
+
+- 增强目标：围绕 Step 1/6（6.1 Memory Reflection 调用链）按开发文档 `v4.74` 复核当前项目，确认“结构化决策 -> 主链路反思 -> 按决策加载记忆 -> Prompt 显式消费 -> 失败回退”闭环在最新版本下持续成立
+- 涉及文件：修改 `开发实现process.md`
+- 实现方案：
+  1. 对照 `开发文档.md` 第 `6.1` 条逐项核查 `LlmDtos/ReflectionResult/MemoryReflectionService/ConversationCli/SystemPromptBuilder`：结构化 schema、反思阶段插入、按决策加载记忆、提示词显式消费与失败回退
+  2. 重点复核 `v4.74` 下 Step 1/6 关键约束：`needs_memory=true` 且 `evidence_types/evidence_purposes` 缺失或非法时按 `memory_purpose` 派生默认值；`recent-history/recentHistory`、`follow-up/followUp`、`action-followup/action_followup/actionFollowup` 等别名在主链路与提示词层统一归一化
+  3. 执行 Step 1/6 定向回归：`./scripts/run-tests.sh -q -Dtest=ReflectionResultTest,MemoryReflectionServiceTest,SystemPromptBuilderTest,ConversationCliTest test`
+- 状态：已完成
+- 实际结果：
+  - 当前实现与开发文档 `v4.74` 的 Step 1/6 要求保持一致，本轮未发现需新增代码的缺口
+  - 定向回归通过，Memory Reflection 调用链在主链路、提示词层与失败回退路径保持稳定
+
+#### 迭代记录 - 2026-04-01 12:10
+
+- 增强目标：继续执行 Step 2/6（6.2 记忆证据追踪），补齐历史 trace 在“Unicode 长右箭头（带竖线）路径扁平字段（`⟼`）”格式下的兼容解析，避免 `/memory-debug` 与 `/memory-insights` 在跨系统规则映射/日志导出数据上出现覆盖率误判
+- 涉及文件：修改 `src/main/java/com/memsys/cli/ConversationCli.java`、修改 `src/main/java/com/memsys/memory/MemoryTraceInsightService.java`、修改 `src/test/java/com/memsys/cli/ConversationCliTest.java`、修改 `src/test/java/com/memsys/memory/MemoryTraceInsightServiceTest.java`、修改 `开发文档.md`、修改 `开发实现process.md`
+- 实现方案：
+  1. 在 `ConversationCli.flattenedKeySuffix(...)`、`trimLeadingFragmentDelimiter(...)` 与 `splitFlattenedPath(...)` 增加 `⟼` 分隔符识别，支持 `# ⟼ reflection ⟼ ...` 等 fragment 前缀形式
+  2. 在 `MemoryTraceInsightService` 同步应用同级 Unicode-long-right-arrow-from-bar-path 解析规则，确保 `/memory-insights` 与 `/memory-debug` 的历史 trace 兼容口径一致
+  3. 新增 `getLastEvidenceTraceShouldParseFlattenedUnicodeLongRightArrowFromBarPathTraceFieldsWithFragmentDelimiterWhitespace`，覆盖 `/memory-debug` 在 `# ⟼ reflection ⟼ needs_memory`、`evidence ⟼ retrieved ⟼ insights ⟼ 0`、`loaded ⟼ skills ⟼ 0` 等场景下的回读
+  4. 新增 `analyzeRecentTracesShouldParseFlattenedUnicodeLongRightArrowFromBarPathTraceFieldsWithFragmentDelimiterWhitespace`，覆盖 `/memory-insights` 在同场景下的 retrieved/used 统计一致性
+  5. 同步开发文档升级至 `v4.75`，并在 `6.2` 完成标准新增第 63 条，明确“Unicode 长右箭头（带竖线）路径扁平字段兼容（含 fragment + 分隔符空白）”约束
+- 状态：已完成
+- 实际结果：
+  - `/memory-debug` 与 `/memory-insights` 可稳定回读 `reflection⟼needs_memory`、`evidence⟼retrieved⟼insights⟼0`、`retrieved⟼examples⟼0`、`loaded⟼skills⟼1` 以及 `# ⟼ reflection ⟼ ...` 等 Unicode-long-right-arrow-from-bar-path 字段，不再因 `⟼` 路径风格导致证据统计缺失
+  - Step 2/6 的跨来源 trace 兼容能力从“Unicode 粗黑箭头路径”扩展到“Unicode 长右箭头（带竖线）路径”，进一步降低跨系统规则映射/日志导入后的排障成本
+  - 定向回归通过：`./scripts/run-tests.sh -q -Dtest=ConversationCliTest,MemoryTraceInsightServiceTest test`
