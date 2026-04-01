@@ -634,6 +634,8 @@ public class MemoryTraceInsightService {
         int unicodeArrowDelimiterLength = 0;
         boolean unicodeRightArrowDelimiter = false;
         int unicodeRightArrowDelimiterLength = 0;
+        boolean unicodeHeavyRightArrowDelimiter = false;
+        int unicodeHeavyRightArrowDelimiterLength = 0;
         boolean unicodeFatArrowDelimiter = false;
         int unicodeFatArrowDelimiterLength = 0;
         boolean unicodeMapstoDelimiter = false;
@@ -683,6 +685,13 @@ public class MemoryTraceInsightService {
                 delimiterIndex = i;
                 unicodeRightArrowDelimiter = true;
                 unicodeRightArrowDelimiterLength = unicodeRightArrowLength;
+                break;
+            }
+            int unicodeHeavyRightArrowLength = matchUnicodeHeavyRightArrowDelimiter(candidate, i);
+            if (unicodeHeavyRightArrowLength > 0) {
+                delimiterIndex = i;
+                unicodeHeavyRightArrowDelimiter = true;
+                unicodeHeavyRightArrowDelimiterLength = unicodeHeavyRightArrowLength;
                 break;
             }
             int unicodeFatArrowLength = matchUnicodeFatArrowDelimiter(candidate, i);
@@ -764,6 +773,9 @@ public class MemoryTraceInsightService {
         if (unicodeRightArrowDelimiter) {
             return candidate.substring(delimiterIndex + unicodeRightArrowDelimiterLength);
         }
+        if (unicodeHeavyRightArrowDelimiter) {
+            return candidate.substring(delimiterIndex + unicodeHeavyRightArrowDelimiterLength);
+        }
         if (unicodeFatArrowDelimiter) {
             return candidate.substring(delimiterIndex + unicodeFatArrowDelimiterLength);
         }
@@ -805,6 +817,10 @@ public class MemoryTraceInsightService {
         int unicodeRightArrowDelimiterLength = matchUnicodeRightArrowDelimiter(fragment, 0);
         if (unicodeRightArrowDelimiterLength > 0) {
             return fragment.substring(unicodeRightArrowDelimiterLength).stripLeading();
+        }
+        int unicodeHeavyRightArrowDelimiterLength = matchUnicodeHeavyRightArrowDelimiter(fragment, 0);
+        if (unicodeHeavyRightArrowDelimiterLength > 0) {
+            return fragment.substring(unicodeHeavyRightArrowDelimiterLength).stripLeading();
         }
         int unicodeFatArrowDelimiterLength = matchUnicodeFatArrowDelimiter(fragment, 0);
         if (unicodeFatArrowDelimiterLength > 0) {
@@ -906,6 +922,15 @@ public class MemoryTraceInsightService {
                     token.setLength(0);
                 }
                 i += unicodeRightArrowLength - 1;
+                continue;
+            }
+            int unicodeHeavyRightArrowLength = matchUnicodeHeavyRightArrowDelimiter(suffix, i);
+            if (unicodeHeavyRightArrowLength > 0) {
+                if (!token.isEmpty()) {
+                    addDecodedPathToken(parts, token);
+                    token.setLength(0);
+                }
+                i += unicodeHeavyRightArrowLength - 1;
                 continue;
             }
             int unicodeFatArrowLength = matchUnicodeFatArrowDelimiter(suffix, i);
@@ -1046,7 +1071,21 @@ public class MemoryTraceInsightService {
             return 0;
         }
         int index = start + 1;
-        if (index < value.length() && value.charAt(index) == '\uFE0F') {
+        if (index < value.length() && (value.charAt(index) == '\uFE0F' || value.charAt(index) == '\uFE0E')) {
+            index++;
+        }
+        while (index < value.length() && Character.isWhitespace(value.charAt(index))) {
+            index++;
+        }
+        return index - start;
+    }
+
+    private int matchUnicodeHeavyRightArrowDelimiter(String value, int start) {
+        if (value == null || start < 0 || start >= value.length() || value.charAt(start) != '➜') {
+            return 0;
+        }
+        int index = start + 1;
+        if (index < value.length() && (value.charAt(index) == '\uFE0F' || value.charAt(index) == '\uFE0E')) {
             index++;
         }
         while (index < value.length() && Character.isWhitespace(value.charAt(index))) {
