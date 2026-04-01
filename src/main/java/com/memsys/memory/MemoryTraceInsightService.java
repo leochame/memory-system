@@ -619,7 +619,7 @@ public class MemoryTraceInsightService {
         int doubleAngleDelimiterLength = 0;
         for (int i = 0; i < candidate.length(); i++) {
             char ch = candidate.charAt(i);
-            if (ch == '.' || ch == '[' || ch == '/' || ch == ':' || ch == '\\' || ch == '|' || ch == ';') {
+            if (ch == '.' || ch == '[' || ch == '/' || ch == ':' || ch == '\\' || ch == '|' || ch == ';' || ch == ',') {
                 delimiterIndex = i;
                 break;
             }
@@ -716,7 +716,7 @@ public class MemoryTraceInsightService {
             return fragment.substring(doubleAngleDelimiterLength).stripLeading();
         }
         char first = fragment.charAt(0);
-        if (first == '/' || first == '\\' || first == '.' || first == ':' || first == '|' || first == ';') {
+        if (first == '/' || first == '\\' || first == '.' || first == ':' || first == '|' || first == ';' || first == ',') {
             return fragment.substring(1).stripLeading();
         }
         return fragment;
@@ -730,7 +730,7 @@ public class MemoryTraceInsightService {
         StringBuilder token = new StringBuilder();
         for (int i = 0; i < suffix.length(); i++) {
             char ch = suffix.charAt(i);
-            if (ch == '.' || ch == '/' || ch == ':' || ch == '\\' || ch == '|' || ch == ';') {
+            if (ch == '.' || ch == '/' || ch == ':' || ch == '\\' || ch == '|' || ch == ';' || ch == ',') {
                 if (!token.isEmpty()) {
                     addDecodedPathToken(parts, token);
                     token.setLength(0);

@@ -2570,3 +2570,34 @@
 - 实际结果：
   - `/memory-debug` 与 `/memory-insights` 可稳定回读 `reflection;needs_memory`、`evidence;retrieved;insights;0`、`retrieved;examples;0`、`loaded;skills;1` 以及 `# ; reflection ; ...` 等 semicolon-path 字段，不再因 `;` 路径风格导致证据统计缺失
   - Step 2/6 的跨来源 trace 兼容能力从“double-angle-path 路径”扩展到“semicolon-path 路径”，进一步降低跨系统导入后的排障成本
+
+#### 迭代记录 - 2026-04-01 12:20
+
+- 增强目标：继续执行 Step 6/6（调研与文档更新），围绕记忆系统将“更多内容”从“连续发布”升级为“场景资产包 + 回放脚本库 + 双周复测公报”闭环机制，提升内容长期有效性与复测稳定性
+- 涉及文件：修改 `开发文档.md`、修改 `开发实现process.md`
+- 实现方案：
+  1. 将开发文档版本升级至 `v4.57`，保持更新日期为 `2026-04-01`
+  2. 在 `5.10` 新增 `5.10.36 Step 6/6 内容扩展蓝图（闭环实战版：场景资产包 + 回放脚本库 + 双周复测公报）`
+  3. 在开发文档新增 `6.37 需求三十五`，固化场景资产包、脚本绑定、双周复测、漂移处置、结论续更与执行小结约束
+  4. 将验收标准统一到“脚本绑定覆盖率 + 双周复测覆盖率 + 漂移处置时效 + 结论更新闭环”四条主线，降低发布后结论失效风险
+- 状态：已完成
+- 实际结果：
+  - Step 6/6 从“系列化发布与复用链路”进一步升级为“发布后复测与结论续更”机制，可稳定回答“哪些内容已回放验证、哪些结论发生漂移、哪些条目完成处置更新”
+  - 新增字段（`scene_pack_id/scenario_goal/replay_script_id/trigger_command/pass_criteria/result_status/drift_flag/retest_batch_id`）后，可在同一索引中追踪“发布 -> 回放 -> 复测 -> 回流 -> 结论更新”链路
+  - 本次变更为文档调研更新，无代码逻辑改动，无需运行测试
+
+#### 迭代记录 - 2026-04-01 17:35
+
+- 增强目标：继续执行 Step 2/6（6.2 记忆证据追踪），补齐历史 trace 在“逗号路径扁平字段（`,`）”格式下的兼容解析，避免 `/memory-debug` 与 `/memory-insights` 在跨系统自定义分隔符导出数据上出现覆盖率误判
+- 涉及文件：修改 `src/main/java/com/memsys/cli/ConversationCli.java`、修改 `src/main/java/com/memsys/memory/MemoryTraceInsightService.java`、修改 `src/test/java/com/memsys/cli/ConversationCliTest.java`、修改 `src/test/java/com/memsys/memory/MemoryTraceInsightServiceTest.java`、修改 `开发文档.md`、修改 `开发实现process.md`
+- 实现方案：
+  1. 在 `ConversationCli.flattenedKeySuffix(...)` 与 `splitFlattenedPath(...)` 增加 `,` 分隔符识别，并在 `trimLeadingFragmentDelimiter(...)` 支持 `# , ...` 片段前缀兼容
+  2. 在 `MemoryTraceInsightService` 同步应用同级 comma-path 解析规则，确保 `/memory-insights` 与 `/memory-debug` 的历史 trace 兼容口径一致
+  3. 新增 `getLastEvidenceTraceShouldParseFlattenedCommaPathTraceFieldsWithFragmentDelimiterWhitespace`，覆盖 `/memory-debug` 在 `# , reflection , needs_memory`、`evidence , retrieved , insights , 0`、`loaded , skills , 0` 等场景下的回读
+  4. 新增 `analyzeRecentTracesShouldParseFlattenedCommaPathTraceFieldsWithFragmentDelimiterWhitespace`，覆盖 `/memory-insights` 在同场景下的 retrieved/used 统计一致性
+  5. 同步开发文档升级至 `v4.58`，并在 `6.2` 完成标准新增第 54 条，明确“逗号路径扁平字段兼容（含 fragment + 分隔符空白）”约束
+- 状态：已完成
+- 实际结果：
+  - `/memory-debug` 与 `/memory-insights` 可稳定回读 `reflection,needs_memory`、`evidence,retrieved,insights,0`、`retrieved,examples,0`、`loaded,skills,1` 以及 `# , reflection , ...` 等 comma-path 字段，不再因 `,` 路径风格导致证据统计缺失
+  - Step 2/6 的跨来源 trace 兼容能力从“semicolon-path 路径”扩展到“comma-path 路径”，进一步降低跨系统导入后的排障成本
+  - 定向测试通过：`./scripts/run-tests.sh -q -Dtest=ConversationCliTest,MemoryTraceInsightServiceTest test`
