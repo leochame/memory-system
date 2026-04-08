@@ -1,5 +1,6 @@
 package com.memsys.eval;
 
+import com.memsys.eval.model.EvalBatchReport;
 import com.memsys.cli.ConversationCli;
 import com.memsys.eval.model.EvalResult;
 import com.memsys.llm.LlmDtos;
@@ -53,6 +54,32 @@ public class EvalService {
      */
     public List<String> getDefaultEvalQuestions() {
         return DEFAULT_EVAL_QUESTIONS;
+    }
+
+    /**
+     * 运行内置 benchmark，返回批量评测报告。
+     */
+    public EvalBatchReport runDefaultBenchmark() {
+        return runBatchEval(DEFAULT_EVAL_QUESTIONS);
+    }
+
+    /**
+     * 对一组问题批量执行 A/B 评测。
+     */
+    public EvalBatchReport runBatchEval(List<String> questions) {
+        List<String> normalizedQuestions = questions == null
+                ? List.of()
+                : questions.stream()
+                .map(this::normalizeQuestion)
+                .filter(question -> !question.isBlank())
+                .distinct()
+                .toList();
+
+        List<EvalResult> results = new ArrayList<>();
+        for (String question : normalizedQuestions) {
+            results.add(runSingleEval(question));
+        }
+        return buildBatchReport(results, normalizedQuestions.size());
     }
 
     /**
@@ -117,6 +144,59 @@ public class EvalService {
     }
 
     // ========== 内部方法 ==========
+
+    private EvalBatchReport buildBatchReport(List<EvalResult> results, int totalQuestions) {
+        int completedQuestions = results == null ? 0 : results.size();
+        if (completedQuestions == 0) {
+            return new EvalBatchReport(
+                    LocalDateTime.now(),
+                    totalQuestions,
+                    0,
+                    0,
+                    0,
+                    0,
+                    "",
+                    0,
+                    "",
+                    0,
+                    List.of()
+            );
+        }
+
+        double averageWithout = results.stream()
+                .mapToDouble(EvalResult::getTotalScoreWithoutMemory)
+                .average()
+                .orElse(0);
+        double averageWith = results.stream()
+                .mapToDouble(EvalResult::getTotalScoreWithMemory)
+                .average()
+                .orElse(0);
+        double averageImprovement = results.stream()
+                .mapToDouble(EvalResult::getImprovementPercent)
+                .average()
+                .orElse(0);
+
+        EvalResult best = results.stream()
+                .max(Comparator.comparingDouble(EvalResult::getImprovementPercent))
+                .orElse(null);
+        EvalResult worst = results.stream()
+                .min(Comparator.comparingDouble(EvalResult::getImprovementPercent))
+                .orElse(null);
+
+        return new EvalBatchReport(
+                LocalDateTime.now(),
+                totalQuestions,
+                completedQuestions,
+                averageWithout,
+                averageWith,
+                averageImprovement,
+                best != null ? best.getQuestion() : "",
+                best != null ? best.getImprovementPercent() : 0,
+                worst != null ? worst.getQuestion() : "",
+                worst != null ? worst.getImprovementPercent() : 0,
+                List.copyOf(results)
+        );
+    }
 
     private String generateWithoutMemory(String question) {
         return conversationCli.processUserMessageTemporaryForEval(question);

@@ -1,5 +1,7 @@
 package com.memsys.cli;
 
+import com.memsys.eval.EvalService;
+import com.memsys.eval.model.EvalBatchReport;
 import com.memsys.memory.model.Memory;
 import com.memsys.memory.model.MemoryEvidenceTrace;
 import com.memsys.identity.UserIdentityService;
@@ -111,6 +113,7 @@ public class CliRunner implements CommandLineRunner {
     private final WeeklyReviewService weeklyReviewService;
     private final MemoryTraceInsightService memoryTraceInsightService;
     private final UserIdentityService userIdentityService;
+    private final EvalService evalService;
 
     @Value("${memory.max-slots:100}")
     private int maxSlots;
@@ -153,7 +156,8 @@ public class CliRunner implements CommandLineRunner {
             ProactiveReminderService proactiveReminderService,
             WeeklyReviewService weeklyReviewService,
             MemoryTraceInsightService memoryTraceInsightService,
-            UserIdentityService userIdentityService
+            UserIdentityService userIdentityService,
+            EvalService evalService
     ) {
         this.conversationCli = conversationCli;
         this.memoryManager = memoryManager;
@@ -169,6 +173,7 @@ public class CliRunner implements CommandLineRunner {
         this.weeklyReviewService = weeklyReviewService;
         this.memoryTraceInsightService = memoryTraceInsightService;
         this.userIdentityService = userIdentityService;
+        this.evalService = evalService;
     }
 
     @Override
@@ -379,7 +384,43 @@ public class CliRunner implements CommandLineRunner {
                 }
                 showMemoryInsights(limit);
             }
+            case "/benchmark" -> {
+                if (parts.length == 1 || "run".equalsIgnoreCase(parts[1])) {
+                    runBenchmark();
+                } else if ("history".equalsIgnoreCase(parts[1])) {
+                    int limit = 5;
+                    if (parts.length == 3) {
+                        try {
+                            limit = Integer.parseInt(parts[2]);
+                            if (limit <= 0) {
+                                printSystem("用法: /benchmark | /benchmark run | /benchmark history [N>0]");
+                                break;
+                            }
+                        } catch (NumberFormatException e) {
+                            printSystem("用法: /benchmark | /benchmark run | /benchmark history [N>0]");
+                            break;
+                        }
+                    }
+                    showBenchmarkHistory(limit);
+                } else {
+                    printSystem("用法: /benchmark | /benchmark run | /benchmark history [N>0]");
+                }
+            }
             case "/memory-governance" -> showMemoryGovernance();
+            case "/memory-approve" -> {
+                if (parts.length < 2) {
+                    printSystem("用法: /memory-approve <队列序号>");
+                } else {
+                    approvePendingMemory(parts[1]);
+                }
+            }
+            case "/memory-reject" -> {
+                if (parts.length < 2) {
+                    printSystem("用法: /memory-reject <队列序号>");
+                } else {
+                    rejectPendingMemory(parts[1]);
+                }
+            }
             case "/proactive-reminders" -> showProactiveReminders();
             case "/identity" -> showIdentityMappings();
             case "/scope" -> handleScopeCommand(command);
@@ -1313,15 +1354,17 @@ public class CliRunner implements CommandLineRunner {
                     sb.append(String.format("  ... 还有 %d 条\n", pendingMemories.size() - shown));
                     break;
                 }
+                int queueIndex = shown + 1;
                 String slot = String.valueOf(record.getOrDefault("slot_name", "?"));
                 String status = String.valueOf(record.getOrDefault("status", "?"));
                 String newContent = truncateForDisplay(
                         String.valueOf(record.getOrDefault("new_content", "")), 60);
                 String detectedAt = String.valueOf(record.getOrDefault("detected_at", "?"));
-                sb.append(String.format("  [%s] %s → \"%s\" (at %s)\n",
-                        status, slot, newContent, detectedAt));
+                sb.append(String.format("  #%d [%s] %s → \"%s\" (at %s)\n",
+                        queueIndex, status, slot, newContent, detectedAt));
                 shown++;
             }
+            sb.append("  操作: /memory-approve <序号> | /memory-reject <序号>\n");
             sb.append("\n");
         }
 
@@ -1346,6 +1389,112 @@ public class CliRunner implements CommandLineRunner {
         }
 
         printSystem(sb.toString());
+    }
+
+    private void runBenchmark() {
+        EvalBatchReport report = evalService.runDefaultBenchmark();
+        StringBuilder sb = new StringBuilder();
+        sb.append("Benchmark 完成\n");
+        sb.append(String.format("问题数: %d / %d\n", report.completedQuestions(), report.totalQuestions()));
+        sb.append(String.format("平均分: 无记忆 %.2f -> 有记忆 %.2f\n",
+                report.averageScoreWithoutMemory(), report.averageScoreWithMemory()));
+        sb.append(String.format("平均提升: %.2f%%\n", report.averageImprovementPercent()));
+        if (!report.bestQuestion().isBlank()) {
+            sb.append(String.format("最佳样例: %s (%.2f%%)\n",
+                    truncateForDisplay(report.bestQuestion(), 60),
+                    report.bestImprovementPercent()));
+        }
+        if (!report.worstQuestion().isBlank()) {
+            sb.append(String.format("最弱样例: %s (%.2f%%)\n",
+                    truncateForDisplay(report.worstQuestion(), 60),
+                    report.worstImprovementPercent()));
+        }
+        sb.append("\n");
+        for (int i = 0; i < report.results().size(); i++) {
+            var result = report.results().get(i);
+            sb.append(String.format("%d. %s\n", i + 1, truncateForDisplay(result.getQuestion(), 80)));
+            sb.append(String.format("   无记忆 %.2f -> 有记忆 %.2f | 提升 %.2f%%\n",
+                    result.getTotalScoreWithoutMemory(),
+                    result.getTotalScoreWithMemory(),
+                    result.getImprovementPercent()));
+        }
+        printSystem(sb.toString());
+    }
+
+    private void showBenchmarkHistory(int limit) {
+        List<Map<String, Object>> results = evalService.getRecentResults(limit);
+        if (results.isEmpty()) {
+            printSystem("暂无评测记录。");
+            return;
+        }
+
+        StringBuilder sb = new StringBuilder();
+        sb.append("最近评测记录（").append(results.size()).append("）\n");
+        for (int i = 0; i < results.size(); i++) {
+            Map<String, Object> record = results.get(i);
+            String timestamp = String.valueOf(record.getOrDefault("timestamp", "?"));
+            String question = String.valueOf(record.getOrDefault("question", ""));
+            Object without = record.get("total_score_without_memory");
+            Object with = record.get("total_score_with_memory");
+            Object improvement = record.get("improvement_percent");
+            sb.append(String.format("%d. [%s] %s\n", i + 1, timestamp, truncateForDisplay(question, 72)));
+            sb.append(String.format("   无记忆 %s -> 有记忆 %s | 提升 %s%%\n",
+                    formatDecimal(without),
+                    formatDecimal(with),
+                    formatDecimal(improvement)));
+        }
+        printSystem(sb.toString());
+    }
+
+    private void approvePendingMemory(String rawIndex) {
+        Integer index = parseOneBasedIndex(rawIndex);
+        if (index == null) {
+            printSystem("用法: /memory-approve <队列序号>");
+            return;
+        }
+
+        List<Map<String, Object>> pendingMemories = storage.readPendingExplicitMemories();
+        if (index > pendingMemories.size()) {
+            printSystem(String.format("待处理队列中不存在第 %d 条记录。", index));
+            return;
+        }
+
+        Map<String, Object> record = pendingMemories.get(index - 1);
+        if (!memoryWriteService.approvePendingExplicitMemory(record)) {
+            printSystem("审批失败：该记录缺少有效的 slot_name 或 new_content。");
+            return;
+        }
+
+        if (!storage.removePendingExplicitMemory(index - 1)) {
+            printSystem("审批已写入记忆，但待处理队列删除失败，请检查 pending_explicit_memories.jsonl。");
+            return;
+        }
+
+        String slotName = String.valueOf(record.getOrDefault("slot_name", "?"));
+        printSystem(String.format("已批准待处理记忆 #%d：%s", index, slotName));
+    }
+
+    private void rejectPendingMemory(String rawIndex) {
+        Integer index = parseOneBasedIndex(rawIndex);
+        if (index == null) {
+            printSystem("用法: /memory-reject <队列序号>");
+            return;
+        }
+
+        List<Map<String, Object>> pendingMemories = storage.readPendingExplicitMemories();
+        if (index > pendingMemories.size()) {
+            printSystem(String.format("待处理队列中不存在第 %d 条记录。", index));
+            return;
+        }
+
+        Map<String, Object> record = pendingMemories.get(index - 1);
+        if (!storage.removePendingExplicitMemory(index - 1)) {
+            printSystem("拒绝失败：无法更新 pending_explicit_memories.jsonl。");
+            return;
+        }
+
+        String slotName = String.valueOf(record.getOrDefault("slot_name", "?"));
+        printSystem(String.format("已拒绝待处理记忆 #%d：%s", index, slotName));
     }
 
     private void showProactiveReminders() {
@@ -2432,7 +2581,10 @@ public class CliRunner implements CommandLineRunner {
         commands.put("/memory-report", "记忆系统综合状态报告");
         commands.put("/memory-scenes", "按话题/场景分组展示记忆摘要");
         commands.put("/memory-insights", "基于 trace 生成证据质量洞察与优化建议");
+        commands.put("/benchmark", "运行内置 benchmark 或查看评测历史");
         commands.put("/memory-governance", "记忆治理状态（冲突、待审核、归档）");
+        commands.put("/memory-approve", "批准待处理记忆并写入正式画像");
+        commands.put("/memory-reject", "拒绝待处理记忆并移出队列");
         commands.put("/proactive-reminders", "查看主动提醒历史");
         commands.put("/identity", "查看统一身份映射");
         commands.put("/scope", "切换记忆作用域（个人/团队）");
@@ -2450,5 +2602,31 @@ public class CliRunner implements CommandLineRunner {
             String okColor,
             String warnColor
     ) {
+    }
+
+    static Integer parseOneBasedIndex(String raw) {
+        if (raw == null || raw.isBlank()) {
+            return null;
+        }
+        try {
+            int parsed = Integer.parseInt(raw.trim());
+            return parsed > 0 ? parsed : null;
+        } catch (NumberFormatException e) {
+            return null;
+        }
+    }
+
+    private String formatDecimal(Object value) {
+        if (value instanceof Number number) {
+            return String.format(Locale.ROOT, "%.2f", number.doubleValue());
+        }
+        if (value == null) {
+            return "?";
+        }
+        try {
+            return String.format(Locale.ROOT, "%.2f", Double.parseDouble(String.valueOf(value)));
+        } catch (NumberFormatException e) {
+            return String.valueOf(value);
+        }
     }
 }

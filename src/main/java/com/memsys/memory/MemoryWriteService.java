@@ -142,6 +142,74 @@ public class MemoryWriteService {
         log.debug("Saved memory: {} [{}] status={} -> {}", slotName, type, memory.getStatus(), content);
     }
 
+    public boolean approvePendingExplicitMemory(Map<String, Object> record) {
+        if (record == null || record.isEmpty()) {
+            return false;
+        }
+
+        String slotName = normalizeString(record.get("slot_name"));
+        String content = normalizeString(record.get("new_content"));
+        if (slotName == null || content == null) {
+            return false;
+        }
+
+        String confidence = normalizeString(record.get("confidence"));
+        Memory.MemoryType memoryType = parseMemoryType(record.get("memory_type"));
+        Memory.SourceType sourceType = parseSourceType(record.get("source"));
+
+        saveMemoryWithGovernance(
+                slotName,
+                content,
+                memoryType,
+                sourceType,
+                confidence,
+                Memory.MemoryStatus.ACTIVE,
+                false
+        );
+
+        Memory approved = storage.readUserInsights().get(slotName);
+        if (approved == null) {
+            return false;
+        }
+        approved.setStatus(Memory.MemoryStatus.ACTIVE);
+        approved.setVerifiedAt(LocalDateTime.now());
+        approved.setVerifiedSource("manual_cli_approval");
+        storage.writeUserInsight(slotName, approved);
+        return true;
+    }
+
+    private Memory.MemoryType parseMemoryType(Object raw) {
+        String value = normalizeString(raw);
+        if (value == null) {
+            return Memory.MemoryType.USER_INSIGHT;
+        }
+        try {
+            return Memory.MemoryType.valueOf(value.trim().toUpperCase());
+        } catch (IllegalArgumentException ignored) {
+            return Memory.MemoryType.USER_INSIGHT;
+        }
+    }
+
+    private Memory.SourceType parseSourceType(Object raw) {
+        String value = normalizeString(raw);
+        if (value == null) {
+            return Memory.SourceType.EXPLICIT;
+        }
+        try {
+            return Memory.SourceType.valueOf(value.trim().toUpperCase());
+        } catch (IllegalArgumentException ignored) {
+            return Memory.SourceType.EXPLICIT;
+        }
+    }
+
+    private String normalizeString(Object raw) {
+        if (raw == null) {
+            return null;
+        }
+        String value = String.valueOf(raw).trim();
+        return value.isEmpty() ? null : value;
+    }
+
     private String truncate(String text, int maxLen) {
         if (text == null) return "";
         return text.length() > maxLen ? text.substring(0, maxLen) + "..." : text;

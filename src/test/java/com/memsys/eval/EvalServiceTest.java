@@ -20,6 +20,39 @@ import static org.mockito.Mockito.when;
 class EvalServiceTest {
 
     @Test
+    void runBatchEvalShouldFilterBlankQuestionsAndAggregateScores() {
+        ConversationCli conversationCli = mock(ConversationCli.class);
+        LlmExtractionService extractionService = mock(LlmExtractionService.class);
+        MemoryStorage storage = mock(MemoryStorage.class);
+
+        when(storage.readUserInsightsNarrative()).thenReturn("画像");
+        when(conversationCli.processUserMessageTemporaryForEval("问题A")).thenReturn("无记忆A");
+        when(conversationCli.processUserMessageWithMemoryForEval("问题A")).thenReturn("有记忆A");
+        when(conversationCli.processUserMessageTemporaryForEval("问题B")).thenReturn("无记忆B");
+        when(conversationCli.processUserMessageWithMemoryForEval("问题B")).thenReturn("有记忆B");
+        when(extractionService.evaluateResponseQuality(eq("问题A"), eq("无记忆A"), eq(null)))
+                .thenReturn(new LlmDtos.EvalScoreResult(4, 4, 4, 4, "a1"));
+        when(extractionService.evaluateResponseQuality(eq("问题A"), eq("有记忆A"), eq("画像")))
+                .thenReturn(new LlmDtos.EvalScoreResult(8, 8, 8, 8, "a2"));
+        when(extractionService.evaluateResponseQuality(eq("问题B"), eq("无记忆B"), eq(null)))
+                .thenReturn(new LlmDtos.EvalScoreResult(6, 6, 6, 6, "b1"));
+        when(extractionService.evaluateResponseQuality(eq("问题B"), eq("有记忆B"), eq("画像")))
+                .thenReturn(new LlmDtos.EvalScoreResult(9, 9, 9, 9, "b2"));
+
+        EvalService service = new EvalService(conversationCli, extractionService, storage);
+        var report = service.runBatchEval(java.util.List.of("问题A", " ", "问题B", "问题A"));
+
+        assertThat(report.totalQuestions()).isEqualTo(2);
+        assertThat(report.completedQuestions()).isEqualTo(2);
+        assertThat(report.averageScoreWithoutMemory()).isEqualTo(5.0);
+        assertThat(report.averageScoreWithMemory()).isEqualTo(8.5);
+        assertThat(report.averageImprovementPercent()).isEqualTo(75.0);
+        assertThat(report.bestQuestion()).isEqualTo("问题A");
+        assertThat(report.worstQuestion()).isEqualTo("问题B");
+        verify(storage, org.mockito.Mockito.times(2)).appendEvalResult(org.mockito.ArgumentMatchers.anyMap());
+    }
+
+    @Test
     void runSingleEvalShouldShortCircuitWhenQuestionIsBlank() {
         ConversationCli conversationCli = mock(ConversationCli.class);
         LlmExtractionService extractionService = mock(LlmExtractionService.class);

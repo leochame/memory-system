@@ -169,6 +169,21 @@ class MemoryStorageTest {
     }
 
     @Test
+    void removePendingExplicitMemoryShouldRewriteRemainingValidRecords() {
+        MemoryStorage storage = new MemoryStorage(tempDir.toString());
+        storage.appendPendingExplicitMemory(Map.of("slot_name", "a", "new_content", "one"));
+        storage.appendPendingExplicitMemory(Map.of("slot_name", "b", "new_content", "two"));
+        storage.appendPendingExplicitMemory(Map.of("slot_name", "c", "new_content", "three"));
+
+        assertThat(storage.removePendingExplicitMemory(1)).isTrue();
+        assertThat(storage.readPendingExplicitMemories())
+                .extracting(it -> it.get("slot_name"))
+                .containsExactly("a", "c");
+        assertThat(storage.removePendingExplicitMemory(5)).isFalse();
+        assertThat(storage.removePendingExplicitMemory(-1)).isFalse();
+    }
+
+    @Test
     void getOlderUserMessagesShouldUseUserTurnsWhenHistoryIsNotPaired() {
         MemoryStorage storage = new MemoryStorage(tempDir.toString());
         LocalDateTime base = LocalDateTime.of(2026, 3, 25, 14, 0);

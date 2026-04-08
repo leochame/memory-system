@@ -439,6 +439,8 @@ curl -N -X POST http://localhost:8080/im/chat/stream \
 | `/memory-report` | 记忆系统综合状态报告 |
 | `/memory-scenes` | 按话题/场景分组展示记忆摘要 |
 | `/memory-insights [limit]` | 基于 evidence trace 输出证据质量洞察、用途诊断、窗口趋势变化与优化建议 |
+| `/benchmark` | 运行内置记忆 benchmark（有记忆 vs 无记忆） |
+| `/benchmark history [N]` | 查看最近 N 条评测记录 |
 | `/memory-governance` | 查看记忆治理状态（冲突、待审核、归档） |
 | `/proactive-reminders` | 查看主动提醒历史 |
 | `/identity` | 查看统一身份映射 |

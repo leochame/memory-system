@@ -121,4 +121,14 @@ class CliRunnerTest {
         );
         assertEquals("Case-1", preview);
     }
+
+    @Test
+    void parseOneBasedIndexShouldAcceptOnlyPositiveIntegers() {
+        assertEquals(1, CliRunner.parseOneBasedIndex("1"));
+        assertEquals(7, CliRunner.parseOneBasedIndex(" 7 "));
+        assertEquals(null, CliRunner.parseOneBasedIndex("0"));
+        assertEquals(null, CliRunner.parseOneBasedIndex("-1"));
+        assertEquals(null, CliRunner.parseOneBasedIndex("abc"));
+        assertEquals(null, CliRunner.parseOneBasedIndex(" "));
+    }
 }

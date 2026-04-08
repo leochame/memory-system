@@ -249,6 +249,19 @@ public class MemoryStorage {
         return results;
     }
 
+    public boolean removePendingExplicitMemory(int index) {
+        if (index < 0) {
+            return false;
+        }
+        List<Map<String, Object>> records = readPendingExplicitMemories();
+        if (index >= records.size()) {
+            return false;
+        }
+        records.remove(index);
+        writePendingExplicitMemories(records);
+        return true;
+    }
+
     // ========== scheduled_tasks.json 操作 ==========
 
     public List<ScheduledTask> readScheduledTasks() {
@@ -836,6 +849,25 @@ public class MemoryStorage {
             moveWithAtomicFallback(tempFile, filePath);
         } catch (IOException e) {
             log.error("Failed to write file: {}", filename, e);
+        }
+    }
+
+    private void writePendingExplicitMemories(List<Map<String, Object>> records) {
+        Path filePath = resolvePath("pending_explicit_memories.jsonl");
+        try {
+            ensureParentDirectory(filePath);
+            Path tempFile = newTempFile("pending_explicit_memories.jsonl");
+            ensureParentDirectory(tempFile);
+
+            List<String> lines = new ArrayList<>();
+            for (Map<String, Object> record : records) {
+                lines.add(objectMapper.writeValueAsString(record));
+            }
+            String payload = lines.isEmpty() ? "" : String.join("\n", lines) + "\n";
+            Files.writeString(tempFile, payload);
+            moveWithAtomicFallback(tempFile, filePath);
+        } catch (IOException e) {
+            log.error("Failed to rewrite pending explicit memories", e);
         }
     }
 
