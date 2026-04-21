@@ -31,6 +31,13 @@ public class MemoryStorage {
     private static final String USER_INSIGHTS_STATE_END = "-->";
     private static final String DEFAULT_USER_INSIGHTS_NARRATIVE = "当前还没有形成稳定的长期用户画像。";
     private static final String ENCODED_TEXT_PREFIX = "b64:";
+    private static final List<String> DEFAULT_BENCHMARK_QUESTIONS = List.of(
+            "你觉得我最近关注的事情有哪些？",
+            "帮我推荐一些适合我的学习资料",
+            "我上次和你讨论了什么？",
+            "给我一些时间管理的建议",
+            "你了解我的工作习惯吗？"
+    );
     private static final Set<String> GLOBAL_FILES = Set.of(
             "identity_mappings.json"
     );
@@ -70,8 +77,12 @@ public class MemoryStorage {
             createFileIfNotExists("scheduled_tasks.json", "[]");
             createFileIfNotExists("pending_task_notifications.jsonl", "");
             createFileIfNotExists("session_summaries.jsonl", "");
+            createFileIfNotExists("topic_summaries.jsonl", "");
+            createFileIfNotExists("milestone_summaries.jsonl", "");
             createFileIfNotExists("memory_evidence_traces.jsonl", "");
             createFileIfNotExists("eval_results.jsonl", "");
+            createFileIfNotExists("benchmark_questions.txt", renderBenchmarkQuestions(DEFAULT_BENCHMARK_QUESTIONS));
+            createFileIfNotExists("benchmark_reports.jsonl", "");
             createFileIfNotExists("weekly_reviews.jsonl", "");
             createFileIfNotExists("identity_mappings.json", "{}");
 
@@ -506,14 +517,21 @@ public class MemoryStorage {
      * Phase 8 核心落盘方法。
      */
     public void appendSessionSummary(Map<String, Object> summaryRecord) {
-        try {
-            Path filePath = resolvePath("session_summaries.jsonl");
-            String line = objectMapper.writeValueAsString(summaryRecord) + "\n";
-            Files.writeString(filePath, line, StandardOpenOption.CREATE, StandardOpenOption.APPEND);
-            log.info("Session summary appended to session_summaries.jsonl");
-        } catch (IOException e) {
-            log.error("Failed to append session summary", e);
-        }
+        appendJsonLine("session_summaries.jsonl", summaryRecord, "session summary");
+    }
+
+    /**
+     * 追加一条话题摘要记录到 topic_summaries.jsonl。
+     */
+    public void appendTopicSummary(Map<String, Object> summaryRecord) {
+        appendJsonLine("topic_summaries.jsonl", summaryRecord, "topic summary");
+    }
+
+    /**
+     * 追加一条里程碑摘要记录到 milestone_summaries.jsonl。
+     */
+    public void appendMilestoneSummary(Map<String, Object> summaryRecord) {
+        appendJsonLine("milestone_summaries.jsonl", summaryRecord, "milestone summary");
     }
 
     /**
@@ -523,29 +541,21 @@ public class MemoryStorage {
      * @return 按时间顺序排列的摘要列表
      */
     public List<Map<String, Object>> readSessionSummaries(int limit) {
-        try {
-            Path filePath = resolvePath("session_summaries.jsonl");
-            if (!Files.exists(filePath)) {
-                return new ArrayList<>();
-            }
-            List<String> lines = Files.readAllLines(filePath);
-            List<Map<String, Object>> summaries = new ArrayList<>();
-            for (String line : lines) {
-                if (line == null || line.isBlank()) continue;
-                try {
-                    summaries.add(objectMapper.readValue(line, new TypeReference<Map<String, Object>>() {}));
-                } catch (IOException parseErr) {
-                    log.warn("Skipped malformed session summary line: {}", line);
-                }
-            }
-            if (limit > 0 && summaries.size() > limit) {
-                return summaries.subList(summaries.size() - limit, summaries.size());
-            }
-            return summaries;
-        } catch (IOException e) {
-            log.error("Failed to read session summaries", e);
-            return new ArrayList<>();
-        }
+        return readJsonLines("session_summaries.jsonl", limit, "session summary");
+    }
+
+    /**
+     * 读取话题摘要记录。
+     */
+    public List<Map<String, Object>> readTopicSummaries(int limit) {
+        return readJsonLines("topic_summaries.jsonl", limit, "topic summary");
+    }
+
+    /**
+     * 读取里程碑摘要记录。
+     */
+    public List<Map<String, Object>> readMilestoneSummaries(int limit) {
+        return readJsonLines("milestone_summaries.jsonl", limit, "milestone summary");
     }
 
     // ========== memory_evidence_traces.jsonl 操作 ==========
@@ -554,45 +564,14 @@ public class MemoryStorage {
      * 追加单条 Memory Evidence Trace（JSONL）。
      */
     public void appendMemoryEvidenceTrace(Map<String, Object> traceRecord) {
-        try {
-            Path filePath = resolvePath("memory_evidence_traces.jsonl");
-            String line = objectMapper.writeValueAsString(traceRecord) + "\n";
-            Files.writeString(filePath, line, StandardOpenOption.CREATE, StandardOpenOption.APPEND);
-        } catch (IOException e) {
-            log.error("Failed to append memory evidence trace", e);
-        }
+        appendJsonLine("memory_evidence_traces.jsonl", traceRecord, "memory evidence trace");
     }
 
     /**
      * 读取 Memory Evidence Trace 历史（按时间顺序，limit>0 时返回最后 N 条）。
      */
     public List<Map<String, Object>> readMemoryEvidenceTraces(int limit) {
-        try {
-            Path filePath = resolvePath("memory_evidence_traces.jsonl");
-            if (!Files.exists(filePath)) {
-                return new ArrayList<>();
-            }
-            List<String> lines = Files.readAllLines(filePath);
-            List<Map<String, Object>> traces = new ArrayList<>();
-            for (String line : lines) {
-                if (line == null || line.isBlank()) {
-                    continue;
-                }
-                try {
-                    traces.add(objectMapper.readValue(line, new TypeReference<Map<String, Object>>() {
-                    }));
-                } catch (IOException parseErr) {
-                    log.warn("Skipped malformed memory evidence trace line: {}", line);
-                }
-            }
-            if (limit > 0 && traces.size() > limit) {
-                return traces.subList(traces.size() - limit, traces.size());
-            }
-            return traces;
-        } catch (IOException e) {
-            log.error("Failed to read memory evidence traces", e);
-            return new ArrayList<>();
-        }
+        return readJsonLines("memory_evidence_traces.jsonl", limit, "memory evidence trace");
     }
 
     // ========== eval_results.jsonl 操作 ==========
@@ -601,45 +580,42 @@ public class MemoryStorage {
      * 追加单条评测结果。
      */
     public void appendEvalResult(Map<String, Object> evalRecord) {
-        try {
-            Path filePath = resolvePath("eval_results.jsonl");
-            String line = objectMapper.writeValueAsString(evalRecord) + "\n";
-            Files.writeString(filePath, line, StandardOpenOption.CREATE, StandardOpenOption.APPEND);
-        } catch (IOException e) {
-            log.error("Failed to append eval result", e);
-        }
+        appendJsonLine("eval_results.jsonl", evalRecord, "eval result");
     }
 
     /**
      * 读取评测结果（按时间顺序，limit>0 时返回最后 N 条）。
      */
     public List<Map<String, Object>> readEvalResults(int limit) {
+        return readJsonLines("eval_results.jsonl", limit, "eval result");
+    }
+
+    // ========== benchmark_questions.txt / benchmark_reports.jsonl 操作 ==========
+
+    public List<String> readBenchmarkQuestions() {
         try {
-            Path filePath = resolvePath("eval_results.jsonl");
+            Path filePath = resolvePath("benchmark_questions.txt");
             if (!Files.exists(filePath)) {
-                return new ArrayList<>();
+                return new ArrayList<>(DEFAULT_BENCHMARK_QUESTIONS);
             }
-            List<String> lines = Files.readAllLines(filePath);
-            List<Map<String, Object>> results = new ArrayList<>();
-            for (String line : lines) {
-                if (line == null || line.isBlank()) {
-                    continue;
-                }
-                try {
-                    results.add(objectMapper.readValue(line, new TypeReference<Map<String, Object>>() {
-                    }));
-                } catch (IOException parseErr) {
-                    log.warn("Skipped malformed eval result line: {}", line);
-                }
-            }
-            if (limit > 0 && results.size() > limit) {
-                return results.subList(results.size() - limit, results.size());
-            }
-            return results;
+            return Files.readAllLines(filePath, StandardCharsets.UTF_8).stream()
+                    .map(String::trim)
+                    .filter(line -> !line.isBlank())
+                    .filter(line -> !line.startsWith("#"))
+                    .distinct()
+                    .toList();
         } catch (IOException e) {
-            log.error("Failed to read eval results", e);
-            return new ArrayList<>();
+            log.error("Failed to read benchmark questions", e);
+            return new ArrayList<>(DEFAULT_BENCHMARK_QUESTIONS);
         }
+    }
+
+    public void appendBenchmarkReport(Map<String, Object> reportRecord) {
+        appendJsonLine("benchmark_reports.jsonl", reportRecord, "benchmark report");
+    }
+
+    public List<Map<String, Object>> readBenchmarkReports(int limit) {
+        return readJsonLines("benchmark_reports.jsonl", limit, "benchmark report");
     }
 
     // ========== proactive_reminders.jsonl 操作 ==========
@@ -649,14 +625,7 @@ public class MemoryStorage {
      * Phase 9 #5 — 基于记忆生成主动提醒。
      */
     public void appendProactiveReminder(Map<String, Object> reminderRecord) {
-        try {
-            Path filePath = resolvePath("proactive_reminders.jsonl");
-            String line = objectMapper.writeValueAsString(reminderRecord) + "\n";
-            Files.writeString(filePath, line, StandardOpenOption.CREATE, StandardOpenOption.APPEND);
-            log.info("Proactive reminder appended to proactive_reminders.jsonl");
-        } catch (IOException e) {
-            log.error("Failed to append proactive reminder", e);
-        }
+        appendJsonLine("proactive_reminders.jsonl", reminderRecord, "proactive reminder");
     }
 
     /**
@@ -666,67 +635,17 @@ public class MemoryStorage {
      * @return 提醒记录列表（按时间顺序）
      */
     public List<Map<String, Object>> readProactiveReminders(int limit) {
-        try {
-            Path filePath = resolvePath("proactive_reminders.jsonl");
-            if (!Files.exists(filePath)) {
-                return new ArrayList<>();
-            }
-            List<String> lines = Files.readAllLines(filePath);
-            List<Map<String, Object>> reminders = new ArrayList<>();
-            for (String line : lines) {
-                if (line == null || line.isBlank()) continue;
-                try {
-                    reminders.add(objectMapper.readValue(line, new TypeReference<Map<String, Object>>() {}));
-                } catch (IOException parseErr) {
-                    log.warn("Skipped malformed proactive reminder line: {}", line);
-                }
-            }
-            if (limit > 0 && reminders.size() > limit) {
-                return reminders.subList(reminders.size() - limit, reminders.size());
-            }
-            return reminders;
-        } catch (IOException e) {
-            log.error("Failed to read proactive reminders", e);
-            return new ArrayList<>();
-        }
+        return readJsonLines("proactive_reminders.jsonl", limit, "proactive reminder");
     }
 
     // ========== weekly_reviews.jsonl 操作 ==========
 
     public void appendWeeklyReview(Map<String, Object> reviewRecord) {
-        try {
-            Path filePath = resolvePath("weekly_reviews.jsonl");
-            String line = objectMapper.writeValueAsString(reviewRecord) + "\n";
-            Files.writeString(filePath, line, StandardOpenOption.CREATE, StandardOpenOption.APPEND);
-        } catch (IOException e) {
-            log.error("Failed to append weekly review", e);
-        }
+        appendJsonLine("weekly_reviews.jsonl", reviewRecord, "weekly review");
     }
 
     public List<Map<String, Object>> readWeeklyReviews(int limit) {
-        try {
-            Path filePath = resolvePath("weekly_reviews.jsonl");
-            if (!Files.exists(filePath)) {
-                return new ArrayList<>();
-            }
-            List<String> lines = Files.readAllLines(filePath);
-            List<Map<String, Object>> reviews = new ArrayList<>();
-            for (String line : lines) {
-                if (line == null || line.isBlank()) continue;
-                try {
-                    reviews.add(objectMapper.readValue(line, new TypeReference<Map<String, Object>>() {}));
-                } catch (IOException parseErr) {
-                    log.warn("Skipped malformed weekly review line: {}", line);
-                }
-            }
-            if (limit > 0 && reviews.size() > limit) {
-                return reviews.subList(reviews.size() - limit, reviews.size());
-            }
-            return reviews;
-        } catch (IOException e) {
-            log.error("Failed to read weekly reviews", e);
-            return new ArrayList<>();
-        }
+        return readJsonLines("weekly_reviews.jsonl", limit, "weekly review");
     }
 
     // ========== memory_queues.json 操作 ==========
@@ -869,6 +788,63 @@ public class MemoryStorage {
         } catch (IOException e) {
             log.error("Failed to rewrite pending explicit memories", e);
         }
+    }
+
+    private void appendJsonLine(String filename, Map<String, Object> record, String label) {
+        try {
+            Path filePath = resolvePath(filename);
+            String line = objectMapper.writeValueAsString(record) + "\n";
+            Files.writeString(filePath, line, StandardOpenOption.CREATE, StandardOpenOption.APPEND);
+            log.info("{} appended to {}", capitalize(label), filename);
+        } catch (IOException e) {
+            log.error("Failed to append {}", label, e);
+        }
+    }
+
+    private List<Map<String, Object>> readJsonLines(String filename, int limit, String label) {
+        try {
+            Path filePath = resolvePath(filename);
+            if (!Files.exists(filePath)) {
+                return new ArrayList<>();
+            }
+            List<String> lines = Files.readAllLines(filePath);
+            List<Map<String, Object>> records = new ArrayList<>();
+            for (String line : lines) {
+                if (line == null || line.isBlank()) {
+                    continue;
+                }
+                try {
+                    records.add(objectMapper.readValue(line, new TypeReference<Map<String, Object>>() {
+                    }));
+                } catch (IOException parseErr) {
+                    log.warn("Skipped malformed {} line: {}", label, line);
+                }
+            }
+            if (limit > 0 && records.size() > limit) {
+                return records.subList(records.size() - limit, records.size());
+            }
+            return records;
+        } catch (IOException e) {
+            log.error("Failed to read {}", label, e);
+            return new ArrayList<>();
+        }
+    }
+
+    private String capitalize(String text) {
+        if (text == null || text.isBlank()) {
+            return "Record";
+        }
+        return Character.toUpperCase(text.charAt(0)) + text.substring(1);
+    }
+
+    private String renderBenchmarkQuestions(List<String> questions) {
+        StringBuilder sb = new StringBuilder();
+        sb.append("# Memory Box benchmark 题集\n");
+        sb.append("# 一行一题；空行和 # 注释会被忽略。\n");
+        for (String question : questions) {
+            sb.append(question).append("\n");
+        }
+        return sb.toString();
     }
 
     private Path newTempFile(String filename) {

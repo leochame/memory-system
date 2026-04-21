@@ -9,7 +9,9 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
 import java.time.LocalDateTime;
+import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -34,6 +36,11 @@ import java.util.stream.Collectors;
 @Slf4j
 @Service
 public class ConversationSummaryService {
+    private static final List<String> MILESTONE_HINTS = List.of(
+            "完成", "已完成", "上线", "发布", "交付", "验收", "答辩",
+            "定案", "决定", "方案", "里程碑", "复盘", "基线", "benchmark",
+            "e2e", "评测", "修复", "重构", "收口"
+    );
 
     private final LlmExtractionService extractionService;
     private final MemoryStorage storage;
@@ -172,6 +179,9 @@ public class ConversationSummaryService {
             }
 
             // 构建落盘记录
+            TopicShiftDetectionResult shiftResult = this.lastTopicShiftResult;
+            boolean topicShiftTriggered = shiftResult != null && shiftResult.topic_shifted();
+
             Map<String, Object> record = new HashMap<>();
             record.put("generated_at", LocalDateTime.now().toString());
             record.put("summary", result.summary());
@@ -180,10 +190,10 @@ public class ConversationSummaryService {
             record.put("time_range", result.time_range() != null ? result.time_range() : "unknown");
             record.put("from_turn", lastSummarizedAtTurn + 1);
             record.put("to_turn", currentTurn);
+            record.put("summary_type", "session");
 
             // 如果是主题切换触发的，记录触发原因
-            TopicShiftDetectionResult shiftResult = this.lastTopicShiftResult;
-            if (shiftResult != null && shiftResult.topic_shifted()) {
+            if (topicShiftTriggered) {
                 record.put("trigger", "topic_shift");
                 record.put("previous_topic", shiftResult.previous_topic());
                 record.put("current_topic", shiftResult.current_topic());
@@ -192,6 +202,12 @@ public class ConversationSummaryService {
             }
 
             storage.appendSessionSummary(record);
+            if (topicShiftTriggered) {
+                storage.appendTopicSummary(buildTopicSummaryRecord(record, shiftResult));
+            }
+            if (isMilestoneSummary(result.summary(), result.key_topics(), topicShiftTriggered)) {
+                storage.appendMilestoneSummary(buildMilestoneSummaryRecord(record, result.key_topics()));
+            }
             lastSummarizedAtTurn = currentTurn;
 
             log.info("Session summary generated: turns {}-{}, trigger={}, topics={}",
@@ -216,10 +232,96 @@ public class ConversationSummaryService {
         return storage.readSessionSummaries(limit);
     }
 
+    public List<Map<String, Object>> getRecentTopicSummaries(int limit) {
+        return storage.readTopicSummaries(limit);
+    }
+
+    public List<Map<String, Object>> getRecentMilestoneSummaries(int limit) {
+        return storage.readMilestoneSummaries(limit);
+    }
+
     private String truncateMessage(String message) {
         if (message.length() > 300) {
             return message.substring(0, 300) + "...";
         }
         return message;
+    }
+
+    private Map<String, Object> buildTopicSummaryRecord(
+            Map<String, Object> sessionRecord,
+            TopicShiftDetectionResult shiftResult
+    ) {
+        Map<String, Object> topicRecord = new HashMap<>(sessionRecord);
+        topicRecord.put("summary_type", "topic");
+        topicRecord.put("topic_label", deriveTopicLabel(shiftResult));
+        topicRecord.put("topic_transition",
+                safeTrim(shiftResult.previous_topic()) + " -> " + safeTrim(shiftResult.current_topic()));
+        return topicRecord;
+    }
+
+    private Map<String, Object> buildMilestoneSummaryRecord(
+            Map<String, Object> sessionRecord,
+            List<String> keyTopics
+    ) {
+        Map<String, Object> milestoneRecord = new HashMap<>(sessionRecord);
+        milestoneRecord.put("summary_type", "milestone");
+        milestoneRecord.put("milestone_label", deriveMilestoneLabel(keyTopics, sessionRecord));
+        milestoneRecord.put("milestone_reason", String.valueOf(sessionRecord.getOrDefault("trigger", "turn_threshold")));
+        return milestoneRecord;
+    }
+
+    private boolean isMilestoneSummary(String summary, List<String> keyTopics, boolean topicShiftTriggered) {
+        String normalizedSummary = safeTrim(summary).toLowerCase();
+        if (containsMilestoneHint(normalizedSummary)) {
+            return true;
+        }
+        if (keyTopics != null) {
+            for (String topic : keyTopics) {
+                if (containsMilestoneHint(safeTrim(topic).toLowerCase())) {
+                    return true;
+                }
+            }
+        }
+        return topicShiftTriggered && keyTopics != null && keyTopics.size() >= 3;
+    }
+
+    private boolean containsMilestoneHint(String text) {
+        if (text.isBlank()) {
+            return false;
+        }
+        return MILESTONE_HINTS.stream().anyMatch(text::contains);
+    }
+
+    private String deriveTopicLabel(TopicShiftDetectionResult shiftResult) {
+        String current = safeTrim(shiftResult.current_topic());
+        if (!current.isBlank()) {
+            return current;
+        }
+        String previous = safeTrim(shiftResult.previous_topic());
+        return previous.isBlank() ? "未命名话题" : previous;
+    }
+
+    private String deriveMilestoneLabel(List<String> keyTopics, Map<String, Object> sessionRecord) {
+        LinkedHashSet<String> labels = new LinkedHashSet<>();
+        if (keyTopics != null) {
+            for (String topic : keyTopics) {
+                String normalized = safeTrim(topic);
+                if (!normalized.isBlank()) {
+                    labels.add(normalized);
+                }
+                if (labels.size() >= 2) {
+                    break;
+                }
+            }
+        }
+        if (!labels.isEmpty()) {
+            return String.join(" / ", new ArrayList<>(labels));
+        }
+        String trigger = String.valueOf(sessionRecord.getOrDefault("trigger", "turn_threshold"));
+        return "topic_shift".equals(trigger) ? "主题切换里程碑" : "阶段性会话里程碑";
+    }
+
+    private String safeTrim(String text) {
+        return text == null ? "" : text.trim();
     }
 }

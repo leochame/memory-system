@@ -57,16 +57,42 @@ public class EvalService {
     }
 
     /**
+     * 返回当前默认 benchmark 题集：优先读取外部文件，若文件内容为空则回退到内置题集。
+     */
+    public List<String> getConfiguredBenchmarkQuestions() {
+        List<String> externalQuestions = storage.readBenchmarkQuestions();
+        return externalQuestions.isEmpty() ? DEFAULT_EVAL_QUESTIONS : externalQuestions;
+    }
+
+    /**
      * 运行内置 benchmark，返回批量评测报告。
      */
     public EvalBatchReport runDefaultBenchmark() {
-        return runBatchEval(DEFAULT_EVAL_QUESTIONS);
+        List<String> questions = storage.readBenchmarkQuestions();
+        boolean usingExternalDataset = !questions.isEmpty();
+        List<String> effectiveQuestions = usingExternalDataset ? questions : DEFAULT_EVAL_QUESTIONS;
+        String datasetSource = usingExternalDataset ? ".memory/benchmark_questions.txt" : "built-in defaults";
+        return runBatchEvalInternal(effectiveQuestions, datasetSource);
     }
 
     /**
      * 对一组问题批量执行 A/B 评测。
      */
     public EvalBatchReport runBatchEval(List<String> questions) {
+        return runBatchEvalInternal(questions, "inline");
+    }
+
+    /**
+     * 读取历史批次评测报告。
+     */
+    public List<Map<String, Object>> getRecentBatchReports(int limit) {
+        return storage.readBenchmarkReports(limit);
+    }
+
+    /**
+     * 对一组问题批量执行 A/B 评测，并记录题集来源。
+     */
+    private EvalBatchReport runBatchEvalInternal(List<String> questions, String datasetSource) {
         List<String> normalizedQuestions = questions == null
                 ? List.of()
                 : questions.stream()
@@ -79,7 +105,9 @@ public class EvalService {
         for (String question : normalizedQuestions) {
             results.add(runSingleEval(question));
         }
-        return buildBatchReport(results, normalizedQuestions.size());
+        EvalBatchReport report = buildBatchReport(results, normalizedQuestions.size(), datasetSource);
+        persistBatchReport(report, normalizedQuestions);
+        return report;
     }
 
     /**
@@ -145,7 +173,7 @@ public class EvalService {
 
     // ========== 内部方法 ==========
 
-    private EvalBatchReport buildBatchReport(List<EvalResult> results, int totalQuestions) {
+    private EvalBatchReport buildBatchReport(List<EvalResult> results, int totalQuestions, String datasetSource) {
         int completedQuestions = results == null ? 0 : results.size();
         if (completedQuestions == 0) {
             return new EvalBatchReport(
@@ -159,7 +187,8 @@ public class EvalService {
                     0,
                     "",
                     0,
-                    List.of()
+                    List.of(),
+                    datasetSource
             );
         }
 
@@ -194,7 +223,8 @@ public class EvalService {
                 best != null ? best.getImprovementPercent() : 0,
                 worst != null ? worst.getQuestion() : "",
                 worst != null ? worst.getImprovementPercent() : 0,
-                List.copyOf(results)
+                List.copyOf(results),
+                datasetSource
         );
     }
 
@@ -224,6 +254,23 @@ public class EvalService {
         record.put("justification_with", scoreWith != null ? scoreWith.justification() : "");
 
         storage.appendEvalResult(record);
+    }
+
+    private void persistBatchReport(EvalBatchReport report, List<String> questions) {
+        Map<String, Object> record = new LinkedHashMap<>();
+        record.put("timestamp", report.timestamp().toString());
+        record.put("dataset_source", report.datasetSource());
+        record.put("total_questions", report.totalQuestions());
+        record.put("completed_questions", report.completedQuestions());
+        record.put("average_score_without_memory", report.averageScoreWithoutMemory());
+        record.put("average_score_with_memory", report.averageScoreWithMemory());
+        record.put("average_improvement_percent", report.averageImprovementPercent());
+        record.put("best_question", report.bestQuestion());
+        record.put("best_improvement_percent", report.bestImprovementPercent());
+        record.put("worst_question", report.worstQuestion());
+        record.put("worst_improvement_percent", report.worstImprovementPercent());
+        record.put("questions", questions == null ? List.of() : List.copyOf(questions));
+        storage.appendBenchmarkReport(record);
     }
 
     private Map<String, Integer> toScoreMap(LlmDtos.EvalScoreResult score) {

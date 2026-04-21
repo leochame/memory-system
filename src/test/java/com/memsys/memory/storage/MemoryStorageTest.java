@@ -253,4 +253,36 @@ class MemoryStorageTest {
                 .extracting(it -> it.get("user_message"))
                 .containsExactly("u1", "u2");
     }
+
+    @Test
+    void summaryFilesShouldBeInitializedAndRoundTrip() {
+        MemoryStorage storage = new MemoryStorage(tempDir.toString());
+
+        assertThat(tempDir.resolve("session_summaries.jsonl")).exists();
+        assertThat(tempDir.resolve("topic_summaries.jsonl")).exists();
+        assertThat(tempDir.resolve("milestone_summaries.jsonl")).exists();
+        assertThat(tempDir.resolve("benchmark_questions.txt")).exists();
+        assertThat(tempDir.resolve("benchmark_reports.jsonl")).exists();
+
+        storage.appendSessionSummary(Map.of("summary", "session-1", "from_turn", 1, "to_turn", 3));
+        storage.appendTopicSummary(Map.of("summary", "topic-1", "topic_label", "记忆治理"));
+        storage.appendMilestoneSummary(Map.of("summary", "milestone-1", "milestone_label", "Benchmark 基线"));
+        storage.appendBenchmarkReport(Map.of("dataset_source", ".memory/benchmark_questions.txt", "total_questions", 5));
+
+        assertThat(storage.readSessionSummaries(10))
+                .extracting(it -> it.get("summary"))
+                .containsExactly("session-1");
+        assertThat(storage.readTopicSummaries(10))
+                .extracting(it -> it.get("topic_label"))
+                .containsExactly("记忆治理");
+        assertThat(storage.readMilestoneSummaries(10))
+                .extracting(it -> it.get("milestone_label"))
+                .containsExactly("Benchmark 基线");
+        assertThat(storage.readBenchmarkQuestions())
+                .hasSizeGreaterThanOrEqualTo(5)
+                .contains("你觉得我最近关注的事情有哪些？");
+        assertThat(storage.readBenchmarkReports(10))
+                .extracting(it -> it.get("dataset_source"))
+                .containsExactly(".memory/benchmark_questions.txt");
+    }
 }

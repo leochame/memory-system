@@ -393,17 +393,34 @@ public class CliRunner implements CommandLineRunner {
                         try {
                             limit = Integer.parseInt(parts[2]);
                             if (limit <= 0) {
-                                printSystem("用法: /benchmark | /benchmark run | /benchmark history [N>0]");
+                                printSystem("用法: /benchmark | /benchmark run | /benchmark history [N>0] | /benchmark reports [N>0] | /benchmark dataset");
                                 break;
                             }
                         } catch (NumberFormatException e) {
-                            printSystem("用法: /benchmark | /benchmark run | /benchmark history [N>0]");
+                            printSystem("用法: /benchmark | /benchmark run | /benchmark history [N>0] | /benchmark reports [N>0] | /benchmark dataset");
                             break;
                         }
                     }
                     showBenchmarkHistory(limit);
+                } else if ("reports".equalsIgnoreCase(parts[1])) {
+                    int limit = 5;
+                    if (parts.length == 3) {
+                        try {
+                            limit = Integer.parseInt(parts[2]);
+                            if (limit <= 0) {
+                                printSystem("用法: /benchmark | /benchmark run | /benchmark history [N>0] | /benchmark reports [N>0] | /benchmark dataset");
+                                break;
+                            }
+                        } catch (NumberFormatException e) {
+                            printSystem("用法: /benchmark | /benchmark run | /benchmark history [N>0] | /benchmark reports [N>0] | /benchmark dataset");
+                            break;
+                        }
+                    }
+                    showBenchmarkReports(limit);
+                } else if ("dataset".equalsIgnoreCase(parts[1])) {
+                    showBenchmarkDataset();
                 } else {
-                    printSystem("用法: /benchmark | /benchmark run | /benchmark history [N>0]");
+                    printSystem("用法: /benchmark | /benchmark run | /benchmark history [N>0] | /benchmark reports [N>0] | /benchmark dataset");
                 }
             }
             case "/memory-governance" -> showMemoryGovernance();
@@ -1061,6 +1078,8 @@ public class CliRunner implements CommandLineRunner {
 
         // 1. 会话摘要时间线
         List<Map<String, Object>> summaries = conversationSummaryService.getRecentSummaries(5);
+        List<Map<String, Object>> topicSummaries = conversationSummaryService.getRecentTopicSummaries(3);
+        List<Map<String, Object>> milestoneSummaries = conversationSummaryService.getRecentMilestoneSummaries(3);
         sb.append("── 会话摘要 (Session Summaries) ──\n");
         if (summaries.isEmpty()) {
             sb.append("  (暂无摘要记录，对话达到 20 轮后自动生成)\n");
@@ -1083,6 +1102,33 @@ public class CliRunner implements CommandLineRunner {
                     sb.append("    话题: ").append(topics).append("\n");
                 }
                 sb.append("\n");
+            }
+        }
+
+        sb.append("── 话题摘要 (Topic Summaries) ──\n");
+        if (topicSummaries.isEmpty()) {
+            sb.append("  (暂无话题摘要记录)\n\n");
+        } else {
+            for (Map<String, Object> summary : topicSummaries) {
+                String label = String.valueOf(summary.getOrDefault("topic_label", "未命名话题"));
+                String transition = String.valueOf(summary.getOrDefault("topic_transition", ""));
+                sb.append(String.format("  • %s", label));
+                if (!transition.isBlank()) {
+                    sb.append(String.format(" (%s)", transition));
+                }
+                sb.append("\n");
+            }
+            sb.append("\n");
+        }
+
+        sb.append("── 里程碑摘要 (Milestone Summaries) ──\n");
+        if (milestoneSummaries.isEmpty()) {
+            sb.append("  (暂无里程碑摘要记录)\n");
+        } else {
+            for (Map<String, Object> summary : milestoneSummaries) {
+                String label = String.valueOf(summary.getOrDefault("milestone_label", "阶段性里程碑"));
+                String text = truncateForDisplay(String.valueOf(summary.getOrDefault("summary", "")), 90);
+                sb.append(String.format("  • %s: %s\n", label, text));
             }
         }
 
@@ -1147,6 +1193,8 @@ public class CliRunner implements CommandLineRunner {
         // 2) 最近摘要与会话压缩状态
         sb.append("▸ 会话摘要\n");
         List<Map<String, Object>> summaries = conversationSummaryService.getRecentSummaries(3);
+        List<Map<String, Object>> topicSummaries = conversationSummaryService.getRecentTopicSummaries(3);
+        List<Map<String, Object>> milestoneSummaries = conversationSummaryService.getRecentMilestoneSummaries(3);
         if (summaries.isEmpty()) {
             sb.append("  (暂无摘要；对话达到阈值或发生主题切换后自动生成)\n");
         } else {
@@ -1158,7 +1206,9 @@ public class CliRunner implements CommandLineRunner {
             String summaryText = String.valueOf(latest.getOrDefault("summary", ""));
             sb.append(String.format("  最新摘要: 轮次 %d-%d（触发: %s）\n", fromTurn, toTurn, triggerLabel));
             sb.append("  摘要内容: ").append(truncateForDisplay(summaryText, 120)).append("\n");
-            sb.append(String.format("  摘要总数: %d | Prompt 压缩: 已激活\n", summaries.size()));
+            sb.append(String.format("  摘要总数: 会话 %d | 话题 %d | 里程碑 %d\n",
+                    summaries.size(), topicSummaries.size(), milestoneSummaries.size()));
+            sb.append(String.format("  Prompt 压缩: %s\n", summaries.isEmpty() ? "未激活" : "已激活"));
         }
         sb.append("\n");
 
@@ -1285,7 +1335,10 @@ public class CliRunner implements CommandLineRunner {
         // 会话摘要
         sb.append("▸ 会话摘要 (Session Summaries)\n");
         List<Map<String, Object>> summaries = conversationSummaryService.getRecentSummaries(0);
-        sb.append(String.format("  历史摘要: %d 条\n", summaries.size()));
+        List<Map<String, Object>> topicSummaries = conversationSummaryService.getRecentTopicSummaries(0);
+        List<Map<String, Object>> milestoneSummaries = conversationSummaryService.getRecentMilestoneSummaries(0);
+        sb.append(String.format("  历史摘要: 会话 %d | 话题 %d | 里程碑 %d\n",
+                summaries.size(), topicSummaries.size(), milestoneSummaries.size()));
         sb.append(String.format("  Prompt 压缩: %s\n\n", summaries.isEmpty() ? "未激活" : "已激活（摘要替代原始消息）"));
 
         // Memory Reflection
@@ -1395,6 +1448,7 @@ public class CliRunner implements CommandLineRunner {
         EvalBatchReport report = evalService.runDefaultBenchmark();
         StringBuilder sb = new StringBuilder();
         sb.append("Benchmark 完成\n");
+        sb.append("题集来源: ").append(report.datasetSource()).append("\n");
         sb.append(String.format("问题数: %d / %d\n", report.completedQuestions(), report.totalQuestions()));
         sb.append(String.format("平均分: 无记忆 %.2f -> 有记忆 %.2f\n",
                 report.averageScoreWithoutMemory(), report.averageScoreWithMemory()));
@@ -1421,6 +1475,22 @@ public class CliRunner implements CommandLineRunner {
         printSystem(sb.toString());
     }
 
+    private void showBenchmarkDataset() {
+        List<String> questions = evalService.getConfiguredBenchmarkQuestions();
+        if (questions.isEmpty()) {
+            printSystem("当前没有可用 benchmark 题目。");
+            return;
+        }
+
+        StringBuilder sb = new StringBuilder();
+        sb.append("当前 benchmark 题集（").append(questions.size()).append("）\n");
+        sb.append("来源: .memory/benchmark_questions.txt（为空时自动回退内置题集）\n");
+        for (int i = 0; i < questions.size(); i++) {
+            sb.append(String.format("%d. %s\n", i + 1, questions.get(i)));
+        }
+        printSystem(sb.toString());
+    }
+
     private void showBenchmarkHistory(int limit) {
         List<Map<String, Object>> results = evalService.getRecentResults(limit);
         if (results.isEmpty()) {
@@ -1442,6 +1512,31 @@ public class CliRunner implements CommandLineRunner {
                     formatDecimal(without),
                     formatDecimal(with),
                     formatDecimal(improvement)));
+        }
+        printSystem(sb.toString());
+    }
+
+    private void showBenchmarkReports(int limit) {
+        List<Map<String, Object>> reports = evalService.getRecentBatchReports(limit);
+        if (reports.isEmpty()) {
+            printSystem("暂无 benchmark 批次报告。");
+            return;
+        }
+
+        StringBuilder sb = new StringBuilder();
+        sb.append("最近 benchmark 批次（").append(reports.size()).append("）\n");
+        for (int i = 0; i < reports.size(); i++) {
+            Map<String, Object> record = reports.get(i);
+            sb.append(String.format("%d. [%s] %s\n",
+                    i + 1,
+                    String.valueOf(record.getOrDefault("timestamp", "?")),
+                    String.valueOf(record.getOrDefault("dataset_source", "?"))));
+            sb.append(String.format("   问题 %s/%s | 无记忆 %s -> 有记忆 %s | 平均提升 %s%%\n",
+                    formatDecimal(record.get("completed_questions")),
+                    formatDecimal(record.get("total_questions")),
+                    formatDecimal(record.get("average_score_without_memory")),
+                    formatDecimal(record.get("average_score_with_memory")),
+                    formatDecimal(record.get("average_improvement_percent"))));
         }
         printSystem(sb.toString());
     }
@@ -1657,7 +1752,10 @@ public class CliRunner implements CommandLineRunner {
         sb.append("╚══════════════════════════════════════════╝\n\n");
 
         // 读取所有摘要
-        List<Map<String, Object>> summaries = conversationSummaryService.getRecentSummaries(0);
+        List<Map<String, Object>> topicSummaries = conversationSummaryService.getRecentTopicSummaries(0);
+        List<Map<String, Object>> summaries = topicSummaries.isEmpty()
+                ? conversationSummaryService.getRecentSummaries(0)
+                : topicSummaries;
         if (summaries.isEmpty()) {
             sb.append("  (暂无会话摘要，无法生成场景视图)\n");
             sb.append("  提示：对话达到 20 轮或主题切换时会自动生成摘要\n");
@@ -1730,6 +1828,7 @@ public class CliRunner implements CommandLineRunner {
         long turnThresholdCount = summaries.size() - topicShiftCount;
         sb.append("── 统计 ──\n");
         sb.append(String.format("  轮次阈值触发: %d 条 | 主题切换触发: %d 条\n", turnThresholdCount, topicShiftCount));
+        sb.append(String.format("  话题摘要源: %s\n", topicSummaries.isEmpty() ? "session_summaries.jsonl" : "topic_summaries.jsonl"));
         sb.append(String.format("  当前累计轮次: %d\n", conversationSummaryService.getCurrentTurnCount()));
 
         printSystem(sb.toString());
@@ -2581,7 +2680,7 @@ public class CliRunner implements CommandLineRunner {
         commands.put("/memory-report", "记忆系统综合状态报告");
         commands.put("/memory-scenes", "按话题/场景分组展示记忆摘要");
         commands.put("/memory-insights", "基于 trace 生成证据质量洞察与优化建议");
-        commands.put("/benchmark", "运行内置 benchmark 或查看评测历史");
+        commands.put("/benchmark", "运行 benchmark、查看题集、单题历史与批次报告");
         commands.put("/memory-governance", "记忆治理状态（冲突、待审核、归档）");
         commands.put("/memory-approve", "批准待处理记忆并写入正式画像");
         commands.put("/memory-reject", "拒绝待处理记忆并移出队列");

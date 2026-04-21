@@ -14,6 +14,7 @@ import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -49,7 +50,32 @@ class EvalServiceTest {
         assertThat(report.averageImprovementPercent()).isEqualTo(75.0);
         assertThat(report.bestQuestion()).isEqualTo("问题A");
         assertThat(report.worstQuestion()).isEqualTo("问题B");
-        verify(storage, org.mockito.Mockito.times(2)).appendEvalResult(org.mockito.ArgumentMatchers.anyMap());
+        assertThat(report.datasetSource()).isEqualTo("inline");
+        verify(storage, times(2)).appendEvalResult(org.mockito.ArgumentMatchers.anyMap());
+        verify(storage).appendBenchmarkReport(org.mockito.ArgumentMatchers.anyMap());
+    }
+
+    @Test
+    void runDefaultBenchmarkShouldPreferExternalQuestionFile() {
+        ConversationCli conversationCli = mock(ConversationCli.class);
+        LlmExtractionService extractionService = mock(LlmExtractionService.class);
+        MemoryStorage storage = mock(MemoryStorage.class);
+
+        when(storage.readBenchmarkQuestions()).thenReturn(java.util.List.of("外部题目"));
+        when(storage.readUserInsightsNarrative()).thenReturn("画像");
+        when(conversationCli.processUserMessageTemporaryForEval("外部题目")).thenReturn("无记忆");
+        when(conversationCli.processUserMessageWithMemoryForEval("外部题目")).thenReturn("有记忆");
+        when(extractionService.evaluateResponseQuality(eq("外部题目"), eq("无记忆"), eq(null)))
+                .thenReturn(new LlmDtos.EvalScoreResult(5, 5, 5, 5, "a"));
+        when(extractionService.evaluateResponseQuality(eq("外部题目"), eq("有记忆"), eq("画像")))
+                .thenReturn(new LlmDtos.EvalScoreResult(8, 8, 8, 8, "b"));
+
+        EvalService service = new EvalService(conversationCli, extractionService, storage);
+        var report = service.runDefaultBenchmark();
+
+        assertThat(report.totalQuestions()).isEqualTo(1);
+        assertThat(report.datasetSource()).isEqualTo(".memory/benchmark_questions.txt");
+        verify(storage).appendBenchmarkReport(org.mockito.ArgumentMatchers.anyMap());
     }
 
     @Test

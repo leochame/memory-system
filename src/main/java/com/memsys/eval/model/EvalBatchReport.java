@@ -17,6 +17,7 @@ public record EvalBatchReport(
         double bestImprovementPercent,
         String worstQuestion,
         double worstImprovementPercent,
-        List<EvalResult> results
+        List<EvalResult> results,
+        String datasetSource
 ) {
 }
